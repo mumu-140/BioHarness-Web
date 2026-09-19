@@ -60,10 +60,29 @@ export interface TaskGraphModel {
   revision: string;
 }
 
+export interface EvidencePreviewRef {
+  id: string;
+  role: string;
+  name: string;
+  source_path: string;
+  preview_ref: string;
+}
+
+export interface EvidencePreview {
+  id: string;
+  role: string;
+  name: string;
+  format: string;
+  size_bytes: number;
+  truncated: boolean;
+  content: string;
+}
+
 export interface NodeDetail {
   node: TaskNode;
   summary: Record<string, unknown>;
   events: Record<string, unknown>[];
   evidence_refs: string[];
+  evidence_previews?: EvidencePreviewRef[];
   links: string[];
 }
