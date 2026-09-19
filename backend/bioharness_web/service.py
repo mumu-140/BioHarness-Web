@@ -10,8 +10,9 @@ from .repository import BioHarnessReadRepository
 
 
 class ObservatoryService:
-    def __init__(self, repository: BioHarnessReadRepository):
+    def __init__(self, repository: BioHarnessReadRepository, evidence_previewer=None):
         self._repository = repository
+        self._evidence_previewer = evidence_previewer
 
     def list_tasks(self):
         return project_task_summaries(self._repository.list_task_records())
@@ -40,7 +41,24 @@ class ObservatoryService:
         record = self.get_task_record(task_id)
         if record is None:
             return None
-        return project_node_detail(record, node_id)
+        detail = project_node_detail(record, node_id)
+        if self._evidence_previewer is None:
+            return detail
+        return detail.model_copy(
+            update={
+                "evidence_previews": self._evidence_previewer.references(
+                    record, task_id
+                )
+            }
+        )
+
+    def get_evidence_preview(self, task_id: UUID, evidence_id: str):
+        record = self.get_task_record(task_id)
+        if record is None:
+            return None
+        if self._evidence_previewer is None:
+            raise KeyError(evidence_id)
+        return self._evidence_previewer.preview(record, evidence_id)
 
     def get_events(self, task_id: UUID):
         record = self.get_task_record(task_id)
