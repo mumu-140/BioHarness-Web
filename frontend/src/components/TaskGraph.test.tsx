@@ -83,8 +83,9 @@ describe("TaskGraph", () => {
               type: "EXECUTION",
               label: "Run 2",
               status: "ATTENTION",
-              annotation: "第 2 次尝试 · 共 2 次",
-              warning: "需要人工核验",
+              attempt_number: 2,
+              attempt_count: 2,
+              attention_reason: "reconciliation_required",
               detail_ref: "/detail",
             },
             {
