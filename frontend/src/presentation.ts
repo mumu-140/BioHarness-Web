@@ -106,6 +106,19 @@ const FIELD_LABELS: Record<string, string> = {
   exit_code: "退出码",
   terminal_outcome: "终态结果",
   active: "是否仍在运行",
+  mode: "执行模式",
+  executor_namespace: "执行器命名空间",
+  host: "主机",
+  executor: "执行器",
+  cpu_count: "CPU 数量",
+  memory_gb: "内存（GB）",
+  pid: "进程 PID",
+  process_start_token: "进程启动标识",
+  external_execution_id: "外部执行 ID",
+  metadata: "元数据",
+  path: "路径",
+  process_probe: "进程探测",
+  executor_evidence: "执行器证据",
 };
 
 const VALUE_LABELS: Record<string, string> = {
