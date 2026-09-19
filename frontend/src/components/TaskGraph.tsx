@@ -56,6 +56,29 @@ function nodeClassName(node: TaskNode, isCurrent: boolean): string {
   return classes.join(" ");
 }
 
+function attemptAnnotation(node: TaskNode): string | null {
+  if (
+    node.attempt_number === undefined ||
+    node.attempt_number === null ||
+    node.attempt_count === undefined ||
+    node.attempt_count === null ||
+    node.attempt_count <= 1
+  ) {
+    return null;
+  }
+  return `第 ${node.attempt_number} 次尝试 · 共 ${node.attempt_count} 次`;
+}
+
+function attentionWarning(node: TaskNode): string | null {
+  if (node.attention_reason === "reconciliation_required") {
+    return "需要人工核验";
+  }
+  if (node.attention_reason === "execution_outcome_unknown") {
+    return "执行结果未知 · 等待核验";
+  }
+  return null;
+}
+
 function GraphNodeLabel({
   node,
   isCurrent,
@@ -63,6 +86,8 @@ function GraphNodeLabel({
   node: TaskNode;
   isCurrent: boolean;
 }) {
+  const annotation = attemptAnnotation(node);
+  const warning = attentionWarning(node);
   return (
     <div className="flow-node-content">
       <div className="flow-node-heading">
@@ -73,11 +98,11 @@ function GraphNodeLabel({
       {node.label && node.label !== nodeTitle(node) && (
         <code className="flow-node-technical">{node.label}</code>
       )}
-      {node.annotation && (
-        <span className="flow-node-annotation">{node.annotation}</span>
+      {annotation && (
+        <span className="flow-node-annotation">{annotation}</span>
       )}
-      {node.warning && (
-        <span className="flow-node-warning">{node.warning}</span>
+      {warning && (
+        <span className="flow-node-warning">{warning}</span>
       )}
       <span className={"flow-node-status status-" + node.status.toLowerCase()}>
         {statusLabel(node.status)}
@@ -139,11 +164,15 @@ function FallbackGraph({
               {node.label && node.label !== nodeTitle(node) && (
                 <code>{node.label}</code>
               )}
-              {node.annotation && (
-                <span className="flow-node-annotation">{node.annotation}</span>
+              {attemptAnnotation(node) && (
+                <span className="flow-node-annotation">
+                  {attemptAnnotation(node)}
+                </span>
               )}
-              {node.warning && (
-                <span className="flow-node-warning">{node.warning}</span>
+              {attentionWarning(node) && (
+                <span className="flow-node-warning">
+                  {attentionWarning(node)}
+                </span>
               )}
               <em>{statusLabel(node.status)}</em>
             </button>
