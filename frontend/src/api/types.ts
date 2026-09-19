@@ -40,6 +40,8 @@ export interface TaskNode {
   type: TaskStage;
   label: string;
   status: NodeStatus;
+  annotation?: string | null;
+  warning?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
   detail_ref: string;
