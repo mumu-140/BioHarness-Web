@@ -193,3 +193,70 @@ through the same safe endpoint:
 
 All returned references with a persisted `run_attempt_id` matched a real
 Attempt in the node detail. The unknown evidence ID still returned 404.
+
+
+## Post-merge production deployment evidence
+
+Merged `main` revision:
+
+`7e15c51eedc56878ffcb15c2ae00a44bf785e2f0`
+
+The merged revision was re-tested on `fwq10ys` before deployment:
+
+- frontend: 4 files / 15 tests passed;
+- TypeScript + Vite production build passed;
+- 197 modules transformed;
+- backend: 33 passed / 1 environment-dependent database test skipped.
+
+The final dependency-preserving V1.6 image is:
+
+`sha256:b93fc477530269cbbdfe92886f397c51a863b3267edaca4d91a814fc50d42efc`
+
+The existing V1.5 runtime dependency layer was retained; only the tested V1.6
+backend source and frontend static bundle were overlaid. The overlay image build
+used `--network none`.
+
+### Evidence mount configuration
+
+The production environment file was backed up before adding V1.6 preview
+settings:
+
+`/home/yangs/software/BioHarness-Web/deployments/observatory-v1/observatory.env.pre-v16`
+
+The production service now maps only the acceptance evidence root:
+
+- host root: `/home/yangs/software/BioHarness-P0-Acceptance`;
+- container root: `/evidence/BioHarness-P0-Acceptance`;
+- mount mode: read-only.
+
+The container does not mount the whole home directory or the whole
+`/home/yangs/software` tree.
+
+### Production verification
+
+Production remains bound to:
+
+`127.0.0.1:18080`
+
+Post-replacement checks:
+
+- `/api/health` -> 200;
+- `/api/tasks` -> 200;
+- container root filesystem -> read-only;
+- evidence mount -> `RW=false`;
+- 18 live task-scoped evidence preview references discovered;
+- every preview reference carrying `run_attempt_id` matched a real Attempt;
+- live preview succeeded for:
+  - `alignment`;
+  - `audit_table`;
+  - `candidate_manifest`;
+  - `execution_log`;
+  - `execution_trace`;
+  - `tree`;
+  - `wrapper_stderr`;
+- an unregistered evidence ID returned HTTP 404;
+- the deployed frontend bundle contained the evidence-preview UI labels.
+
+Rollback container retained:
+
+`bioharness-web-observatory-prev-v15-7e15c51`
