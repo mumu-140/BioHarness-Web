@@ -225,6 +225,8 @@ def project_task_graph(record: TaskRecord):
         stage: TaskStage,
         label: str,
         status: NodeStatus,
+        annotation: str | None = None,
+        warning: str | None = None,
         started_at=None,
         finished_at=None,
     ) -> None:
@@ -234,6 +236,8 @@ def project_task_graph(record: TaskRecord):
                 type=stage,
                 label=label,
                 status=status,
+                annotation=annotation,
+                warning=warning,
                 started_at=started_at,
                 finished_at=finished_at,
                 detail_ref=f"/api/tasks/{task_id}/nodes/{node_id}",
@@ -319,11 +323,27 @@ def project_task_graph(record: TaskRecord):
                 _as_datetime(latest.get("last_reconciled_at"))
                 or submitted_at
             )
+        attempt_number = int(latest.get("attempt_number", len(record.attempts)))
+        attempt_annotation = None
+        if len(record.attempts) > 1:
+            attempt_annotation = (
+                f"第 {attempt_number} 次尝试 · 共 {len(record.attempts)} 次"
+            )
+
+        execution_warning = None
+        latest_state = str(latest.get("state", ""))
+        if latest_state == "NEEDS_OPERATOR_RECONCILIATION":
+            execution_warning = "需要人工核验"
+        elif latest_state == "UNKNOWN":
+            execution_warning = "执行结果未知 · 等待核验"
+
         add_node(
             node_id=execution_id,
             stage=TaskStage.EXECUTION,
             label=str(latest.get("provider_attempt_name") or "Execution"),
             status=_execution_status(record),
+            annotation=attempt_annotation,
+            warning=execution_warning,
             started_at=submitted_at,
             finished_at=finished_at,
         )
