@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Read-only task graph observatory for BioHarness"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.116,<1",
+  "fastapi>=0.116,<0.117",
   "pydantic>=2.11,<3",
   "sqlalchemy>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "anyio>=4.4,<4.15",
   "httpx>=0.28,<1",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
