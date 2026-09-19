@@ -5,6 +5,7 @@ import type {
   EvidencePreviewRef,
   NodeDetail,
 } from "../api/types";
+import EvidencePreviewViewer from "./EvidencePreviewViewer";
 import {
   eventLabel,
   evidenceRoleLabel,
@@ -208,7 +209,7 @@ function EvidenceFiles({
               {preview.truncated && <span>已截断</span>}
             </div>
           </header>
-          <pre>{preview.content}</pre>
+          <EvidencePreviewViewer preview={preview} />
         </div>
       )}
     </section>
