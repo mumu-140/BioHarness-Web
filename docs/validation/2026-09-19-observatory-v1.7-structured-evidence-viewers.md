@@ -97,7 +97,7 @@ After implementation:
 Frontend:
 
 - 5 test files passed;
-- 20 tests passed;
+- 21 tests passed;
 - TypeScript build passed;
 - Vite production build passed;
 - 198 modules transformed.
@@ -110,8 +110,9 @@ Backend regression suite:
 The structured viewer tests cover:
 
 - TSV table rendering;
+- quoted CSV fields with embedded commas;
 - nested JSON rendering;
-- multiline FASTA records and sequence lengths;
+- multiline FASTA records, inferred aa/nt unit, and sequence lengths;
 - Newick topology rendering;
 - raw text fallback;
 - truncated structured evidence fallback.
