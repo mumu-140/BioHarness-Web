@@ -160,3 +160,34 @@ V1 intentionally does not provide:
 - direct provider execution.
 
 BioHarness remains the authority plane. BioHarness-Web remains a disposable observer.
+
+## UI refinement — horizontal / Chinese / readable JSON
+
+Implementation revision: `e144605e201f47a76a06d5160e43bdaf50fbd5b3`
+
+User-facing V1 UI was refined after the initial acceptance:
+
+- the task route is rendered left-to-right rather than vertically;
+- long routes use React Flow fit-to-view, pan and zoom controls; the non-ReactFlow fallback scrolls horizontally;
+- page chrome, status labels, stage labels, filters, connection state and detail headings are Chinese;
+- technical identifiers such as `analysis_class`, provider attempt names and raw JSON remain available where precision matters;
+- node detail defaults to an `易读视图` that translates known fields and statuses into human-readable Chinese;
+- `原始 JSON` is a separate tab for exact field/evidence inspection instead of being mixed into the default view.
+
+TDD verification for this UI refinement:
+
+- focused RED verified the old English/vertical/detail behavior did not satisfy the new contract;
+- focused GREEN: 4 frontend test files, 10 tests passed;
+- full frontend suite: 4 files, 10 tests passed;
+- strict TypeScript + Vite production build: PASS, 197 modules transformed;
+- backend regression: 24 passed in 1.62s.
+
+Live deployment verification:
+
+- image: `sha256:66d9b01def4c3c68e8e096dc7dd848452fcdbc4020d3e096b0e451874d547e01`;
+- HTML language: `zh-CN`;
+- title: `BioHarness 任务观察台`;
+- deployed bundle contains the expected markers: `任务观察台`, `任务流程图`, `横向流程`, `易读视图`, `原始 JSON`, `节点详情`;
+- server binding remains `127.0.0.1:18080`;
+- container root filesystem remains read-only;
+- Mac SSH tunnel served the new Chinese title and healthy API.
