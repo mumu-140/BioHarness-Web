@@ -75,8 +75,131 @@ function FriendlyValue({
   );
 }
 
+function attemptNumber(attempt: Record<string, unknown>, index: number): number {
+  const value = Number(attempt.attempt_number);
+  return Number.isFinite(value) && value > 0 ? value : index + 1;
+}
+
+function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
+  if (detail.node.type !== "EXECUTION") return null;
+
+  const historyValue = detail.summary.attempt_history;
+  if (!Array.isArray(historyValue) || historyValue.length === 0) return null;
+
+  const attempts = historyValue
+    .map((value) => asRecord(value))
+    .filter((value): value is Record<string, unknown> => value !== null)
+    .sort((left, right) => (
+      attemptNumber(left, 0) - attemptNumber(right, 0)
+    ));
+
+  const currentAttempt = asRecord(detail.summary.current_attempt);
+  const currentId = currentAttempt?.id ? String(currentAttempt.id) : null;
+  const fallbackCurrentNumber = Math.max(
+    ...attempts.map((attempt, index) => attemptNumber(attempt, index)),
+  );
+  const rawCurrentNumber = currentAttempt
+    ? Number(currentAttempt.attempt_number)
+    : Number.NaN;
+  const currentNumber = Number.isFinite(rawCurrentNumber)
+    ? rawCurrentNumber
+    : fallbackCurrentNumber;
+
+  return (
+    <section className="detail-section">
+      <h4>执行历史</h4>
+      <div className="attempt-timeline" aria-label="执行历史">
+        {attempts.map((attempt, index) => {
+          const number = attemptNumber(attempt, index);
+          const id = attempt.id ? String(attempt.id) : null;
+          const isCurrent = currentId ? id === currentId : number === currentNumber;
+          const attemptEvents = detail.events
+            .filter((event) => (
+              id !== null &&
+              event.run_attempt_id !== undefined &&
+              String(event.run_attempt_id) === id
+            ))
+            .sort((left, right) => (
+              Number(left.sequence_no ?? 0) - Number(right.sequence_no ?? 0)
+            ));
+          const state = String(attempt.state ?? "UNKNOWN");
+
+          return (
+            <div className="attempt-timeline-block" key={id ?? String(number)}>
+              {index > 0 && (
+                <div className="attempt-transition" aria-label="再次尝试">
+                  <span aria-hidden="true">↓</span>
+                  <strong>再次尝试</strong>
+                </div>
+              )}
+              <article className={
+                "attempt-card state-" + state.toLowerCase() +
+                (isCurrent ? " is-current" : "")
+              }>
+                <header className="attempt-card-header">
+                  <div>
+                    <strong>尝试 {number}</strong>
+                    {attempt.provider_attempt_name !== undefined &&
+                      attempt.provider_attempt_name !== null && (
+                        <div className="attempt-provider">
+                          <span>外部执行名称</span>
+                          <code>{String(attempt.provider_attempt_name)}</code>
+                        </div>
+                      )}
+                  </div>
+                  <div className="attempt-card-badges">
+                    {isCurrent && <span className="attempt-current">当前尝试</span>}
+                    <span className={"attempt-state status-" + state.toLowerCase()}>
+                      {statusLabel(state)}
+                    </span>
+                  </div>
+                </header>
+
+                <dl className="attempt-card-times">
+                  <div>
+                    <dt>提交</dt>
+                    <dd>{formatDateTime(attempt.submitted_at)}</dd>
+                  </div>
+                  <div>
+                    <dt>最近核验</dt>
+                    <dd>{formatDateTime(attempt.last_reconciled_at)}</dd>
+                  </div>
+                </dl>
+
+                {attemptEvents.length > 0 && (
+                  <div className="attempt-event-strip">
+                    {attemptEvents.slice(-4).map((event, eventIndex) => (
+                      <span
+                        className="attempt-event-chip"
+                        key={String(event.id ?? event.sequence_no ?? eventIndex)}
+                        title={String(event.event_type ?? "Event")}
+                      >
+                        {eventLabel(event.event_type)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ReadableSummary({ detail }: { detail: NodeDetail }) {
-  const entries = Object.entries(detail.summary);
+  const hasExecutionHistory = (
+    detail.node.type === "EXECUTION" &&
+    Array.isArray(detail.summary.attempt_history) &&
+    detail.summary.attempt_history.length > 0
+  );
+  const entries = Object.entries(detail.summary).filter(
+    ([key]) => !(
+      hasExecutionHistory &&
+      (key === "attempt_history" || key === "current_attempt")
+    ),
+  );
 
   return (
     <>
@@ -95,6 +218,8 @@ function ReadableSummary({ detail }: { detail: NodeDetail }) {
           <dd>{formatDateTime(detail.node.finished_at)}</dd>
         </dl>
       </section>
+
+      <ExecutionHistoryTimeline detail={detail} />
 
       {entries.length > 0 && (
         <section className="detail-section">
