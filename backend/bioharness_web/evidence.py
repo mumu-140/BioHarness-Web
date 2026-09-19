@@ -28,8 +28,8 @@ _SUPPORTED_ROLES = frozenset(
 )
 
 
-def _evidence_id(role: str, source_path: str) -> str:
-    value = f"{role}\0{source_path}".encode("utf-8")
+def _evidence_id(role: str, source_path: str, run_attempt_id: str) -> str:
+    value = f"{run_attempt_id}\0{role}\0{source_path}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()[:32]
 
 
@@ -41,7 +41,7 @@ def _file_uri_path(value: str) -> str | None:
 
 
 def _iter_persisted_evidence(record: TaskRecord):
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
 
     for event in record.events:
         payload = event.get("payload")
@@ -58,7 +58,8 @@ def _iter_persisted_evidence(record: TaskRecord):
                 continue
             role = str(item.get("role") or "").strip()
             source_path = str(item.get("path") or "").strip()
-            key = (role, source_path)
+            run_attempt_id = str(event.get("run_attempt_id") or "")
+            key = (run_attempt_id, role, source_path)
             if (
                 role not in _SUPPORTED_ROLES
                 or not source_path
@@ -66,7 +67,7 @@ def _iter_persisted_evidence(record: TaskRecord):
             ):
                 continue
             seen.add(key)
-            yield role, source_path
+            yield run_attempt_id, role, source_path
 
     for artifact in record.artifacts:
         role = str(artifact.get("role") or "").strip()
@@ -74,11 +75,12 @@ def _iter_persisted_evidence(record: TaskRecord):
         source_path = _file_uri_path(uri) if uri else None
         if role not in _SUPPORTED_ROLES or not source_path:
             continue
-        key = (role, source_path)
+        run_attempt_id = str(artifact.get("run_attempt_id") or "")
+        key = (run_attempt_id, role, source_path)
         if key in seen:
             continue
         seen.add(key)
-        yield role, source_path
+        yield run_attempt_id, role, source_path
 
 
 class EvidencePreviewer:
@@ -120,14 +122,15 @@ class EvidencePreviewer:
         task_id: UUID,
     ) -> tuple[dict[str, Any], ...]:
         values: list[dict[str, Any]] = []
-        for role, source_path in _iter_persisted_evidence(record):
+        for run_attempt_id, role, source_path in _iter_persisted_evidence(record):
             if self._mapped_path(source_path) is None:
                 continue
-            value_id = _evidence_id(role, source_path)
+            value_id = _evidence_id(role, source_path, run_attempt_id)
             values.append(
                 {
                     "id": value_id,
                     "role": role,
+                    "run_attempt_id": run_attempt_id or None,
                     "name": PurePosixPath(source_path).name,
                     "source_path": source_path,
                     "preview_ref": (
@@ -189,16 +192,16 @@ class EvidencePreviewer:
         record: TaskRecord,
         evidence_id: str,
     ) -> dict[str, Any]:
-        match: tuple[str, str] | None = None
-        for role, source_path in _iter_persisted_evidence(record):
-            if _evidence_id(role, source_path) == evidence_id:
-                match = (role, source_path)
+        match: tuple[str, str, str] | None = None
+        for run_attempt_id, role, source_path in _iter_persisted_evidence(record):
+            if _evidence_id(role, source_path, run_attempt_id) == evidence_id:
+                match = (run_attempt_id, role, source_path)
                 break
 
         if match is None:
             raise KeyError(evidence_id)
 
-        role, source_path = match
+        _, role, source_path = match
         path = self._mapped_path(source_path)
         if path is None:
             raise FileNotFoundError(source_path)
