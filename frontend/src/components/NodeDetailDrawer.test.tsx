@@ -128,6 +128,7 @@ const detail = {
     {
       id: "ev-log",
       role: "execution_log",
+      run_attempt_id: "attempt-2",
       name: "nextflow.log",
       source_path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/nextflow.log",
       preview_ref: "/api/tasks/a/evidence/ev-log",
@@ -135,6 +136,7 @@ const detail = {
     {
       id: "ev-manifest",
       role: "candidate_manifest",
+      run_attempt_id: "attempt-2",
       name: "manifest.json",
       source_path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/manifest.json",
       preview_ref: "/api/tasks/a/evidence/ev-manifest",
