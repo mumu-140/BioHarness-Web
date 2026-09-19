@@ -134,11 +134,14 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
                   <div>
                     <strong>尝试 {number}</strong>
                     {attempt.provider_attempt_name && (
-                      <code>{String(attempt.provider_attempt_name)}</code>
+                      <div className="attempt-provider">
+                        <span>外部执行名称</span>
+                        <code>{String(attempt.provider_attempt_name)}</code>
+                      </div>
                     )}
                   </div>
                   <div className="attempt-card-badges">
-                    {isCurrent && <span className="attempt-current">当前</span>}
+                    {isCurrent && <span className="attempt-current">当前尝试</span>}
                     <span className={"attempt-state status-" + state.toLowerCase()}>
                       {statusLabel(state)}
                     </span>
@@ -179,9 +182,14 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
 }
 
 function ReadableSummary({ detail }: { detail: NodeDetail }) {
+  const hasExecutionHistory = (
+    detail.node.type === "EXECUTION" &&
+    Array.isArray(detail.summary.attempt_history) &&
+    detail.summary.attempt_history.length > 0
+  );
   const entries = Object.entries(detail.summary).filter(
     ([key]) => !(
-      detail.node.type === "EXECUTION" &&
+      hasExecutionHistory &&
       (key === "attempt_history" || key === "current_attempt")
     ),
   );
