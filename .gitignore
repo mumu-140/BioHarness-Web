@@ -1,0 +1,10 @@
+.worktrees/
+.superpowers/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+node_modules/
+frontend/dist/
+.env
+.DS_Store
