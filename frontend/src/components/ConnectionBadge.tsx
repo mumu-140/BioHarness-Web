@@ -7,10 +7,14 @@ export default function ConnectionBadge({
   connected = true,
   stale = false,
 }: ConnectionBadgeProps) {
-  const text = !connected || stale ? "Disconnected" : "Connected";
+  const degraded = !connected || stale;
+  const text = degraded
+    ? "Disconnected · showing last update"
+    : "Connected";
+
   return (
     <div
-      className={"connection-badge " + (!connected || stale ? "is-stale" : "")}
+      className={"connection-badge " + (degraded ? "is-stale" : "")}
       aria-live="polite"
     >
       <span className="connection-dot" aria-hidden="true" />
