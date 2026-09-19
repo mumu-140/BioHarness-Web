@@ -159,5 +159,6 @@ def test_retry_and_reconciliation_context_are_projected_on_execution_node():
     graph = project_task_graph(record)
     execution = next(node for node in graph.nodes if node.type == "EXECUTION")
 
-    assert execution.annotation == "第 2 次尝试 · 共 2 次"
-    assert execution.warning == "需要人工核验"
+    assert execution.attempt_number == 2
+    assert execution.attempt_count == 2
+    assert execution.attention_reason == "reconciliation_required"
