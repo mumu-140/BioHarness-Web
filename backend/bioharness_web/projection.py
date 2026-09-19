@@ -135,3 +135,374 @@ def project_task_summaries(records: tuple[TaskRecord, ...]) -> tuple[TaskSummary
             ),
         )
     )
+
+
+def _used_memory_refs(record: TaskRecord) -> tuple[str, ...]:
+    seen: set[str] = set()
+    refs: list[str] = []
+    for context in record.contexts:
+        for value in context.get("memory_refs", ()):
+            ref = str(value)
+            if ref not in seen:
+                seen.add(ref)
+                refs.append(ref)
+    return tuple(refs)
+
+
+def _execution_status(record: TaskRecord):
+    from .models import NodeStatus
+
+    latest = _latest_attempt(record)
+    if latest is None:
+        return NodeStatus.WAITING
+    state = str(latest.get("state", ""))
+    if state in {"SUBMITTING", "RUNNING", "COLLECTING"}:
+        return NodeStatus.ACTIVE
+    if state == "FINISHED":
+        return NodeStatus.COMPLETED
+    if state == "FAILED":
+        return NodeStatus.FAILED
+    if state in {"UNKNOWN", "NEEDS_OPERATOR_RECONCILIATION"}:
+        return NodeStatus.ATTENTION
+    return NodeStatus.UNKNOWN
+
+
+def _validation_status(record: TaskRecord):
+    from .models import NodeStatus
+
+    if record.validation_evaluations:
+        latest = record.validation_evaluations[-1]
+        outcome = str(latest.get("outcome", ""))
+        if outcome == "PASS":
+            return NodeStatus.COMPLETED
+        if outcome == "FAIL":
+            return NodeStatus.FAILED
+        if outcome in {"PASS_WITH_LIMITATIONS", "INCONCLUSIVE"}:
+            return NodeStatus.ATTENTION
+    if record.validation_reports:
+        outcomes = {str(item.get("outcome", "")) for item in record.validation_reports}
+        if "FAIL" in outcomes:
+            return NodeStatus.FAILED
+        if outcomes and outcomes <= {"PASS", "PASS_WITH_LIMITATIONS"}:
+            return NodeStatus.COMPLETED
+        return NodeStatus.ATTENTION
+    return NodeStatus.WAITING
+
+
+def _graph_revision(record: TaskRecord) -> str:
+    import hashlib
+    import json
+
+    payload = {
+        "task": record.task,
+        "run_specs": record.run_specs,
+        "attempts": record.attempts,
+        "events": record.events,
+        "artifacts": record.artifacts,
+        "validation_reports": record.validation_reports,
+        "validation_evaluations": record.validation_evaluations,
+        "contexts": record.contexts,
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def project_task_graph(record: TaskRecord):
+    from .models import NodeStatus, TaskEdge, TaskGraph, TaskNode
+
+    summary = project_task_summary(record)
+    task_id = str(summary.id)
+    nodes: list[TaskNode] = []
+
+    def add_node(
+        *,
+        node_id: str,
+        stage: TaskStage,
+        label: str,
+        status: NodeStatus,
+        started_at=None,
+        finished_at=None,
+    ) -> None:
+        nodes.append(
+            TaskNode(
+                id=node_id,
+                type=stage,
+                label=label,
+                status=status,
+                started_at=started_at,
+                finished_at=finished_at,
+                detail_ref=f"/api/tasks/{task_id}/nodes/{node_id}",
+            )
+        )
+
+    task_payload = _TaskPayload.model_validate(record.task)
+    add_node(
+        node_id="task",
+        stage=TaskStage.TASK,
+        label="Question",
+        status=(
+            NodeStatus.ATTENTION
+            if task_payload.unresolved_fields
+            else NodeStatus.COMPLETED
+        ),
+        started_at=task_payload.created_at,
+    )
+
+    if _used_memory_refs(record):
+        add_node(
+            node_id="memory",
+            stage=TaskStage.MEMORY,
+            label="Memory",
+            status=NodeStatus.COMPLETED,
+        )
+
+    if record.data_refs:
+        add_node(
+            node_id="data",
+            stage=TaskStage.DATA,
+            label="Resolve data",
+            status=NodeStatus.COMPLETED,
+        )
+
+    if record.assessments:
+        assessment_status = str(record.assessments[-1].get("status", ""))
+        add_node(
+            node_id="assessment",
+            stage=TaskStage.ASSESSMENT,
+            label="Scientific assessment",
+            status=(
+                NodeStatus.COMPLETED
+                if assessment_status in {"ANALYSIS_SUPPORTED", "SUPPORTED_WITH_LIMITATIONS"}
+                else NodeStatus.ATTENTION
+            ),
+        )
+
+    if record.run_specs or record.configurations:
+        latest_spec = record.run_specs[-1] if record.run_specs else {}
+        add_node(
+            node_id="planning",
+            stage=TaskStage.PLANNING,
+            label="Plan",
+            status=(
+                NodeStatus.COMPLETED
+                if latest_spec.get("executable", True)
+                else NodeStatus.ATTENTION
+            ),
+        )
+
+    if record.policy_decisions:
+        outcomes = {str(item.get("outcome", "")) for item in record.policy_decisions}
+        policy_status = NodeStatus.COMPLETED
+        if "DENY" in outcomes:
+            policy_status = NodeStatus.FAILED
+        elif "REQUIRE_APPROVAL" in outcomes:
+            policy_status = NodeStatus.ATTENTION
+        add_node(
+            node_id="policy",
+            stage=TaskStage.POLICY,
+            label="Authorization",
+            status=policy_status,
+        )
+
+    latest = _latest_attempt(record)
+    if latest is not None:
+        execution_id = f"execution:{latest['id']}"
+        submitted_at = _as_datetime(latest.get("submitted_at"))
+        finished_at = submitted_at if latest.get("state") in {"FINISHED", "FAILED"} else None
+        add_node(
+            node_id=execution_id,
+            stage=TaskStage.EXECUTION,
+            label=str(latest.get("provider_attempt_name") or "Execution"),
+            status=_execution_status(record),
+            started_at=submitted_at,
+            finished_at=finished_at,
+        )
+
+        if record.artifacts or latest.get("state") in {"COLLECTING", "FINISHED"}:
+            collection_status = NodeStatus.WAITING
+            if latest.get("state") == "COLLECTING":
+                collection_status = NodeStatus.ACTIVE
+            elif record.artifacts:
+                collection_status = NodeStatus.COMPLETED
+            elif latest.get("state") == "FAILED":
+                collection_status = NodeStatus.FAILED
+            add_node(
+                node_id=f"collection:{latest['id']}",
+                stage=TaskStage.COLLECTION,
+                label="Artifacts",
+                status=collection_status,
+            )
+
+    if record.validation_reports or record.validation_evaluations:
+        validation_key = (
+            str(record.validation_evaluations[-1].get("id"))
+            if record.validation_evaluations
+            else str(latest["id"] if latest else "task")
+        )
+        add_node(
+            node_id=f"validation:{validation_key}",
+            stage=TaskStage.VALIDATION,
+            label="Validation",
+            status=_validation_status(record),
+        )
+
+    edges = tuple(
+        TaskEdge(source=left.id, target=right.id)
+        for left, right in zip(nodes, nodes[1:])
+    )
+    return TaskGraph(
+        task=summary,
+        nodes=tuple(nodes),
+        edges=edges,
+        revision=_graph_revision(record),
+    )
+
+
+def _attempt_history(record: TaskRecord) -> list[dict]:
+    return [
+        {
+            "id": str(item.get("id")),
+            "attempt_number": int(item.get("attempt_number", 0)),
+            "provider_attempt_name": item.get("provider_attempt_name"),
+            "state": item.get("state"),
+            "submitted_at": item.get("submitted_at"),
+            "last_reconciled_at": item.get("last_reconciled_at"),
+        }
+        for item in sorted(
+            record.attempts,
+            key=lambda value: int(value.get("attempt_number", 0)),
+        )
+    ]
+
+
+def project_node_detail(record: TaskRecord, node_id: str):
+    from .models import NodeDetail, TaskStage
+
+    graph = project_task_graph(record)
+    node = next((item for item in graph.nodes if item.id == node_id), None)
+    if node is None:
+        raise KeyError(node_id)
+
+    task_id = str(graph.task.id)
+    links: list[str] = []
+    events: tuple[dict, ...] = ()
+    evidence_refs: list[str] = []
+
+    if node.type == TaskStage.TASK:
+        summary = {
+            "question": record.task.get("question"),
+            "requested_inference": record.task.get("requested_inference"),
+            "analysis_class": record.task.get("analysis_class"),
+            "output_intent": record.task.get("output_intent"),
+            "unresolved_fields": list(record.task.get("unresolved_fields", ())),
+        }
+    elif node.type == TaskStage.MEMORY:
+        used_refs = list(_used_memory_refs(record))
+        used_lookup = set(used_refs)
+        candidates = []
+        for candidate in record.memory_candidates:
+            candidate_id = str(candidate.get("id", ""))
+            used = (
+                candidate_id in used_lookup
+                or f"memory:{candidate_id}" in used_lookup
+            )
+            candidates.append(
+                {
+                    "id": candidate_id,
+                    "kind": candidate.get("kind"),
+                    "statement": candidate.get("statement"),
+                    "status": candidate.get("status"),
+                    "used": used,
+                }
+            )
+            evidence_refs.extend(
+                str(value)
+                for value in candidate.get("evidence_refs", ())
+                if used
+            )
+        summary = {
+            "used_refs": used_refs,
+            "available_candidates": candidates,
+        }
+        links.append(f"/api/tasks/{task_id}/memory")
+    elif node.type == TaskStage.DATA:
+        summary = {
+            "resolved_data": [
+                {
+                    "id": str(item.get("id")),
+                    "provider": item.get("provider"),
+                    "provider_revision": item.get("provider_revision"),
+                    "logical_uri": item.get("logical_uri"),
+                    "manifest_sha256": item.get("manifest_sha256"),
+                    "member_manifest_sha256": item.get("member_manifest_sha256"),
+                }
+                for item in record.data_refs
+            ]
+        }
+    elif node.type == TaskStage.ASSESSMENT:
+        summary = {"assessments": list(record.assessments)}
+    elif node.type == TaskStage.PLANNING:
+        summary = {
+            "run_specs": list(record.run_specs),
+            "configurations": list(record.configurations),
+        }
+    elif node.type == TaskStage.POLICY:
+        summary = {"decisions": list(record.policy_decisions)}
+    elif node.type == TaskStage.EXECUTION:
+        history = _attempt_history(record)
+        summary = {
+            "current_attempt": history[-1] if history else None,
+            "attempt_history": history,
+            "capability_snapshot": (
+                _latest_attempt(record) or {}
+            ).get("capability_snapshot", {}),
+            "observed_runtime_environment": (
+                _latest_attempt(record) or {}
+            ).get("observed_runtime_environment", {}),
+        }
+        events = tuple(record.events[-50:])
+        links.append(f"/api/tasks/{task_id}/events")
+    elif node.type == TaskStage.COLLECTION:
+        summary = {
+            "artifacts": [
+                {
+                    "id": str(item.get("id")),
+                    "role": item.get("role"),
+                    "content_sha256": item.get("content_sha256"),
+                    "size_bytes": item.get("size_bytes"),
+                    "uri": item.get("uri"),
+                }
+                for item in record.artifacts
+            ]
+        }
+        evidence_refs.extend(
+            str(item.get("uri"))
+            for item in record.artifacts
+            if item.get("uri")
+        )
+        links.append(f"/api/tasks/{task_id}/artifacts")
+    elif node.type == TaskStage.VALIDATION:
+        summary = {
+            "reports": list(record.validation_reports),
+            "evaluations": list(record.validation_evaluations),
+        }
+        for report in record.validation_reports:
+            evidence_refs.extend(
+                str(value) for value in report.get("evidence_refs", ())
+            )
+        links.append(f"/api/tasks/{task_id}/validation")
+    else:
+        summary = {}
+
+    return NodeDetail(
+        node=node,
+        summary=summary,
+        events=events,
+        evidence_refs=tuple(dict.fromkeys(evidence_refs)),
+        links=tuple(links),
+    )
