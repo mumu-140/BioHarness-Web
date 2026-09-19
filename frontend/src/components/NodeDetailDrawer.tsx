@@ -140,6 +140,7 @@ function EvidenceFiles({
   const openPreview = async (ref: EvidencePreviewRef) => {
     if (!loadEvidencePreview) return;
     setLoadingId(ref.id);
+    setPreview(null);
     setPreviewError(null);
     try {
       const value = await loadEvidencePreview(ref.preview_ref);
@@ -276,7 +277,7 @@ function ReconciliationEvidence({
         <div className="reconciliation-artifacts">
           <span>证据</span>
           <p>
-            已记录 {evidenceItems.length} 项文件证据，可在下方“证据文件”中预览。
+            已记录 {evidenceItems.length} 项文件证据；可预览项会显示在下方“证据文件”中。
           </p>
         </div>
       )}
