@@ -135,3 +135,29 @@ def test_terminal_execution_uses_reconciliation_time_as_finished_at():
     execution = next(node for node in graph.nodes if node.type == "EXECUTION")
 
     assert execution.finished_at.isoformat() == "2026-09-19T02:01:30+00:00"
+
+
+def test_retry_and_reconciliation_context_are_projected_on_execution_node():
+    task = task_payload(question="retry visibility")
+    spec = run_spec_payload(task_id=task["id"])
+    attempts = (
+        attempt_payload(
+            run_spec_id=spec["id"],
+            number=1,
+            state="FAILED",
+            age_seconds=120,
+        ),
+        attempt_payload(
+            run_spec_id=spec["id"],
+            number=2,
+            state="NEEDS_OPERATOR_RECONCILIATION",
+            age_seconds=5,
+        ),
+    )
+    record = TaskRecord(task=task, run_specs=(spec,), attempts=attempts)
+
+    graph = project_task_graph(record)
+    execution = next(node for node in graph.nodes if node.type == "EXECUTION")
+
+    assert execution.annotation == "第 2 次尝试 · 共 2 次"
+    assert execution.warning == "需要人工核验"
