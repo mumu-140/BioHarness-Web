@@ -70,3 +70,19 @@ def test_health_never_leaks_database_url():
     assert "database_url" not in body
     assert "password" not in json.dumps(body).lower()
     assert body["status"] == "ok"
+
+
+def test_static_index_is_served_when_directory_is_configured(tmp_path):
+    index = tmp_path / "index.html"
+    index.write_text(
+        "<html><body>BioHarness Observatory UI</body></html>",
+        encoding="utf-8",
+    )
+    app = create_app(
+        service=FakeService(),
+        poll_interval_seconds=1.0,
+        static_dir=tmp_path,
+    )
+    response = TestClient(app).get("/")
+    assert response.status_code == 200
+    assert "BioHarness Observatory UI" in response.text
