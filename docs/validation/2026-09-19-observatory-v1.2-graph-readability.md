@@ -46,13 +46,13 @@ Backend regression, executed in the existing Python 3.12 development image with 
 Production image build:
 
 - tag: `bioharness-web:observatory-v1.2-test`
-- image: `sha256:c70028e004126d34575eb5c922b8cbb8643c982b1e502835f3c6f36d9f0d18c4`
+- image: `sha256:6e36cd7f81bd92250443a2b16a2c2445d74526ded47b3b86e1c37ef48612ca5a`
 
 ## Expected UI behavior
 
 For normal browser rendering with ResizeObserver support:
 
-- the initial viewport centers on the stage represented by `task.stage`;
+- the initial viewport centers on the stage represented by `task.stage`;\n- switching to another task remounts the flow viewport and refocuses that task's current stage, while same-task SSE refreshes do not intentionally reset the viewport;
 - the full workflow remains visible in the lower-left minimap;
 - the standard lower-right controls can fit the complete route;
 - current-stage and problem-stage visual signals remain independent, so a current stage that also needs attention can show both semantics.
