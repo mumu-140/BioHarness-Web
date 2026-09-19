@@ -394,6 +394,15 @@ def _attempt_history(record: TaskRecord) -> list[dict]:
             "state": item.get("state"),
             "submitted_at": item.get("submitted_at"),
             "last_reconciled_at": item.get("last_reconciled_at"),
+            "executor_namespace": item.get("executor_namespace"),
+            "capability_snapshot": item.get("capability_snapshot", {}),
+            "binding": item.get("binding"),
+            "observed_runtime_environment": item.get(
+                "observed_runtime_environment", {}
+            ),
+            "observed_resource_allocation": item.get(
+                "observed_resource_allocation", {}
+            ),
         }
         for item in sorted(
             record.attempts,

@@ -1067,3 +1067,258 @@ h2 { font-size: 24px; }
 .attempt-provider code {
   min-width: 0;
 }
+
+
+/* V1.5 — per-attempt drill-down */
+.attempt-card.is-expanded {
+  border-color: #8fa5b2;
+  box-shadow:
+    0 0 0 2px rgba(66, 92, 110, 0.07),
+    0 10px 24px rgba(32, 48, 58, 0.07);
+}
+
+.attempt-expand-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-top: 1px solid #e7ecee;
+  background: transparent;
+  padding: 9px 2px 1px;
+  color: #526b7a;
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.attempt-expand-button:hover {
+  color: #263f50;
+}
+
+.attempt-expand-button:focus-visible {
+  outline: 2px solid rgba(66, 92, 110, 0.28);
+  outline-offset: 3px;
+}
+
+.attempt-drilldown {
+  display: grid;
+  gap: 12px;
+  margin: 4px -2px -2px;
+  border-top: 1px solid #e4eaed;
+  padding: 13px 2px 2px;
+}
+
+.attempt-drilldown-section {
+  display: grid;
+  gap: 8px;
+  border-radius: 9px;
+  background: #f5f8f9;
+  padding: 10px;
+}
+
+.attempt-drilldown-section h5 {
+  margin: 0;
+  color: #4f606b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+}
+
+.attempt-context-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.attempt-context-grid > div {
+  min-width: 0;
+}
+
+.attempt-context-grid > div:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.attempt-context-grid h5 {
+  margin-bottom: 7px;
+}
+
+.attempt-event-timeline {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding-left: 14px;
+}
+
+.attempt-event-timeline::before {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 4px;
+  width: 1px;
+  background: #d6dfe3;
+  content: "";
+}
+
+.attempt-event-card {
+  position: relative;
+}
+
+.attempt-event-marker {
+  position: absolute;
+  top: 7px;
+  left: -14px;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  border: 2px solid #f5f8f9;
+  border-radius: 50%;
+  background: #758b98;
+  box-shadow: 0 0 0 1px #c4d0d6;
+}
+
+.attempt-event-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e0e6e9;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+}
+
+.attempt-event-body > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.attempt-event-body > header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.attempt-event-body strong {
+  color: #344955;
+  font-size: 10px;
+}
+
+.attempt-event-body code {
+  color: #8a949b;
+  font: 8px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.attempt-event-meta {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  text-align: right;
+  color: #89949b;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.reconciliation-evidence {
+  display: grid;
+  gap: 8px;
+  border-left: 3px solid #b1783f;
+  border-radius: 7px;
+  background: #fbf5f0;
+  padding: 9px 10px;
+}
+
+.reconciliation-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.reconciliation-heading strong {
+  color: #825130;
+  font-size: 10px;
+}
+
+.reconciliation-heading span {
+  color: #7c6759;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.reconciliation-grid {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 5px 9px;
+  margin: 0;
+  font-size: 9px;
+}
+
+.reconciliation-grid dt {
+  color: #8a7567;
+}
+
+.reconciliation-grid dd {
+  margin: 0;
+  color: #5e5149;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.reconciliation-artifacts {
+  display: grid;
+  gap: 5px;
+}
+
+.reconciliation-artifacts > span {
+  color: #8a7567;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.attempt-payload {
+  border-top: 1px dashed #e1e6e8;
+  padding-top: 7px;
+}
+
+.attempt-payload summary {
+  width: fit-content;
+  color: #637580;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.attempt-payload[open] summary {
+  margin-bottom: 8px;
+}
+
+.attempt-payload .friendly-object,
+.attempt-payload .friendly-list {
+  font-size: 9px;
+}
+
+.attempt-empty {
+  margin: 0;
+  color: #87929a;
+  font-size: 10px;
+}
+
+@media (max-width: 1180px) {
+  .attempt-context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .attempt-context-grid > div:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+
+  .attempt-event-body > header {
+    display: grid;
+  }
+
+  .attempt-event-meta {
+    text-align: left;
+  }
+}
