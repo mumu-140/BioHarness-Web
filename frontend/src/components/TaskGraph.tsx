@@ -17,6 +17,18 @@ interface TaskGraphProps {
   onSelectNode(nodeId: string): void;
 }
 
+type WorkflowPhase = "prepare" | "execute" | "verify";
+
+function phaseForNode(node: TaskNode): WorkflowPhase {
+  if (node.type === "EXECUTION" || node.type === "COLLECTION") {
+    return "execute";
+  }
+  if (node.type === "VALIDATION" || node.type === "RESULT") {
+    return "verify";
+  }
+  return "prepare";
+}
+
 export function horizontalPosition(index: number) {
   return { x: index * 300, y: 120 };
 }
@@ -32,7 +44,11 @@ function currentNodeId(graph: TaskGraphModel): string | null {
 }
 
 function nodeClassName(node: TaskNode, isCurrent: boolean): string {
-  const classes = ["flow-node", "node-" + node.status.toLowerCase()];
+  const classes = [
+    "flow-node",
+    "node-" + node.status.toLowerCase(),
+    "phase-" + phaseForNode(node),
+  ];
   if (isCurrent) classes.push("node-current");
   if (node.status === "ATTENTION" || node.status === "FAILED") {
     classes.push("node-problem");
@@ -56,6 +72,12 @@ function GraphNodeLabel({
       <strong>{nodeTitle(node)}</strong>
       {node.label && node.label !== nodeTitle(node) && (
         <code className="flow-node-technical">{node.label}</code>
+      )}
+      {node.annotation && (
+        <span className="flow-node-annotation">{node.annotation}</span>
+      )}
+      {node.warning && (
+        <span className="flow-node-warning">{node.warning}</span>
       )}
       <span className={"flow-node-status status-" + node.status.toLowerCase()}>
         {statusLabel(node.status)}
@@ -117,6 +139,12 @@ function FallbackGraph({
               {node.label && node.label !== nodeTitle(node) && (
                 <code>{node.label}</code>
               )}
+              {node.annotation && (
+                <span className="flow-node-annotation">{node.annotation}</span>
+              )}
+              {node.warning && (
+                <span className="flow-node-warning">{node.warning}</span>
+              )}
               <em>{statusLabel(node.status)}</em>
             </button>
           </div>
@@ -143,8 +171,13 @@ export default function TaskGraph({
       aria-label="任务流程图"
       data-direction="horizontal"
     >
+      <div className="phase-legend" aria-label="流程分区">
+        <span className="phase-chip phase-prepare">准备与解析</span>
+        <span className="phase-chip phase-execute">执行与收集</span>
+        <span className="phase-chip phase-verify">验证与结果</span>
+      </div>
       <div className="graph-hint">
-        横向流程 · 默认定位当前阶段 · 左下角小地图查看全链路 · 右下角控件可显示全部
+        默认定位当前阶段 · 左下角小地图查看全链路 · 右下角控件可显示全部
       </div>
 
       {canRenderFlow ? (
