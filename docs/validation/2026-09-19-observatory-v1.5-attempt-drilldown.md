@@ -106,3 +106,44 @@ Backend:
 The observatory remains read-only.
 
 V1.5 adds no task mutation, execution control, provider invocation, reconciliation action, policy action, memory mutation, publication action, or database write capability.
+
+
+## Post-merge deployment evidence
+
+Merged `main` revision:
+
+`b2dba2a36840dfa1639ece55d9e5ced817420f5f`
+
+Deployment reused the already-validated V1.4 runtime dependencies and overlaid only the tested V1.5 backend source and frontend static bundle:
+
+- base runtime image: `bioharness-web:observatory-v1.4`;
+- overlay explicitly copies `/app/backend` and `/app/static`;
+- `PYTHONPATH=/app/backend` keeps the tested backend source authoritative over the installed base package;
+- no dependency version changed;
+- overlay image build ran with `--network none`.
+
+Deployed V1.5 image:
+
+`sha256:5c58c79202c5d6bb857482c759ead675da5f4a8ac77848c41cbab1978278204f`
+
+Pre-production smoke on `127.0.0.1:18081`:
+
+- `/api/health` -> 200;
+- `/api/tasks` -> 200;
+- production bundle contained `展开详情`, `事件时间线`, `核验依据`, `原始 payload`, and `执行器能力`;
+- a live execution-node detail contained all new attempt-history projection keys:
+  - `capability_snapshot`
+  - `binding`
+  - `observed_runtime_environment`
+  - `observed_resource_allocation`
+- container root filesystem remained read-only.
+
+Production replacement on `fwq10ys`:
+
+- bind remains `127.0.0.1:18080`;
+- `/api/health` -> 200;
+- `/api/tasks` -> 200;
+- live execution detail confirmed `PROJECTION_KEYS_OK=true`;
+- deployed image matches the V1.5 image digest above;
+- root filesystem remains read-only;
+- rollback container retained as `bioharness-web-observatory-prev-v14-b2dba2a`.
