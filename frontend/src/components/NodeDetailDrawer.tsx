@@ -81,10 +81,18 @@ function FriendlyValue({
   );
 }
 
-function evidenceRefsForEvents(
+function evidenceRefsForAttempt(
+  attemptId: string | null,
   events: Record<string, unknown>[],
   previews: EvidencePreviewRef[],
 ): EvidencePreviewRef[] {
+  if (attemptId) {
+    const scoped = previews.filter(
+      (ref) => ref.run_attempt_id === attemptId,
+    );
+    if (scoped.length > 0) return scoped;
+  }
+
   const lookup = new Map(
     previews.map((ref) => [
       ref.role + "\0" + ref.source_path,
@@ -122,10 +130,12 @@ function formatBytes(value: number): string {
 }
 
 function EvidenceFiles({
+  attemptId,
   events,
   evidencePreviews,
   loadEvidencePreview,
 }: {
+  attemptId: string | null;
   events: Record<string, unknown>[];
   evidencePreviews: EvidencePreviewRef[];
   loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
@@ -133,7 +143,7 @@ function EvidenceFiles({
   const [preview, setPreview] = useState<EvidencePreview | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const refs = evidenceRefsForEvents(events, evidencePreviews);
+  const refs = evidenceRefsForAttempt(attemptId, events, evidencePreviews);
 
   if (refs.length === 0) return null;
 
@@ -391,6 +401,7 @@ function AttemptDrilldown({
       )}
 
       <EvidenceFiles
+        attemptId={attempt.id ? String(attempt.id) : null}
         events={events}
         evidencePreviews={evidencePreviews}
         loadEvidencePreview={loadEvidencePreview}
