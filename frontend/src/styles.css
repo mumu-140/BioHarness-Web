@@ -878,3 +878,174 @@ h2 { font-size: 24px; }
     top: 50px;
   }
 }
+
+
+/* V1.4 — execution attempt timeline */
+.attempt-timeline {
+  display: grid;
+  gap: 0;
+}
+
+.attempt-timeline-block {
+  display: grid;
+}
+
+.attempt-transition {
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  margin-left: 18px;
+  color: #849098;
+  font-size: 10px;
+}
+
+.attempt-transition span {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.attempt-transition strong {
+  font-weight: 700;
+}
+
+.attempt-card {
+  display: grid;
+  gap: 11px;
+  border: 1px solid #e1e7ea;
+  border-left: 3px solid #aab5bb;
+  border-radius: 10px;
+  background: #fbfcfc;
+  padding: 12px 13px;
+}
+
+.attempt-card.is-current {
+  border-color: #9fb1bc;
+  border-left-color: #526f80;
+  background: #f7fafb;
+  box-shadow: 0 0 0 2px rgba(66, 92, 110, 0.06);
+}
+
+.attempt-card.state-failed {
+  border-left-color: #b9673e;
+}
+
+.attempt-card.state-needs_operator_reconciliation,
+.attempt-card.state-unknown {
+  border-left-color: #b1783f;
+}
+
+.attempt-card.state-running,
+.attempt-card.state-submitting,
+.attempt-card.state-collecting {
+  border-left-color: #4f8881;
+}
+
+.attempt-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attempt-card-header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.attempt-card-header strong {
+  color: #263946;
+  font-size: 13px;
+}
+
+.attempt-card-header code {
+  color: #7a858d;
+  font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.attempt-card-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.attempt-current,
+.attempt-state {
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.attempt-current {
+  background: #e9eff3;
+  color: #365468;
+}
+
+.attempt-state {
+  background: #edf1f3;
+  color: #596873;
+}
+
+.attempt-state.status-running,
+.attempt-state.status-submitting,
+.attempt-state.status-collecting {
+  background: #e3f2ef;
+  color: #126e65;
+}
+
+.attempt-state.status-failed,
+.attempt-state.status-needs_operator_reconciliation,
+.attempt-state.status-unknown {
+  background: #f8ece5;
+  color: #9a4d28;
+}
+
+.attempt-card-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.attempt-card-times > div {
+  min-width: 0;
+}
+
+.attempt-card-times dt {
+  margin-bottom: 2px;
+  color: #8a949b;
+  font-size: 9px;
+}
+
+.attempt-card-times dd {
+  margin: 0;
+  color: #52616b;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.attempt-event-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.attempt-event-chip {
+  border: 1px solid #e0e6e9;
+  border-radius: 999px;
+  background: #f3f6f7;
+  padding: 3px 6px;
+  color: #66747d;
+  font-size: 9px;
+}
+
+@media (max-width: 1180px) {
+  .attempt-card-times {
+    grid-template-columns: 1fr;
+  }
+}
