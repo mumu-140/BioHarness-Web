@@ -70,3 +70,36 @@ No backend schema or projection contract change is required for V1.4.
 ## Safety boundary
 
 No task mutation, execution control, provider call, policy action, memory promotion, publication action, or database write capability is added.
+
+
+## Post-merge deployment evidence
+
+Merged `main` revision:
+
+`568dde04ec59c3fb02b561998038435f4c619d7c`
+
+Deployment reused the already-validated V1.3 runtime dependencies and overlaid only the tested V1.4 frontend static bundle:
+
+- base runtime image: `bioharness-web:observatory-v1.3`;
+- no backend source or dependency version changed in V1.4;
+- overlay build ran with `--network none`.
+
+Deployed V1.4 image:
+
+`sha256:a9dc9a0d4f0360ce9f26614220d4916ccc6005fc9a2487a0de0c32d7e95b4adf`
+
+Pre-production smoke on `127.0.0.1:18081`:
+
+- `/api/health` -> 200;
+- `/api/tasks` -> 200;
+- production bundle contained `执行历史`, `再次尝试`, `当前尝试`, and `外部执行名称`;
+- container root filesystem remained read-only.
+
+Production replacement on `fwq10ys`:
+
+- bind remains `127.0.0.1:18080`;
+- `/api/health` -> 200;
+- `/api/tasks` -> 200;
+- deployed image matches the V1.4 image digest above;
+- root filesystem remains read-only;
+- rollback container retained as `bioharness-web-observatory-prev-v13-568dde0`.
