@@ -117,3 +117,21 @@ def test_context_memory_refs_create_memory_node():
     )
     graph = project_task_graph(record)
     assert "MEMORY" in {node.type for node in graph.nodes}
+
+
+def test_terminal_execution_uses_reconciliation_time_as_finished_at():
+    task = task_payload(question="terminal timing")
+    spec = run_spec_payload(task_id=task["id"])
+    attempt = attempt_payload(
+        run_spec_id=spec["id"],
+        number=1,
+        state="FINISHED",
+        age_seconds=120,
+    )
+    attempt["last_reconciled_at"] = "2026-09-19T02:01:30+00:00"
+    record = TaskRecord(task=task, run_specs=(spec,), attempts=(attempt,))
+
+    graph = project_task_graph(record)
+    execution = next(node for node in graph.nodes if node.type == "EXECUTION")
+
+    assert execution.finished_at.isoformat() == "2026-09-19T02:01:30+00:00"

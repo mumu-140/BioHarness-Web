@@ -313,7 +313,12 @@ def project_task_graph(record: TaskRecord):
     if latest is not None:
         execution_id = f"execution:{latest['id']}"
         submitted_at = _as_datetime(latest.get("submitted_at"))
-        finished_at = submitted_at if latest.get("state") in {"FINISHED", "FAILED"} else None
+        finished_at = None
+        if latest.get("state") in {"FINISHED", "FAILED"}:
+            finished_at = (
+                _as_datetime(latest.get("last_reconciled_at"))
+                or submitted_at
+            )
         add_node(
             node_id=execution_id,
             stage=TaskStage.EXECUTION,
@@ -411,19 +416,20 @@ def project_node_detail(record: TaskRecord, node_id: str):
                 candidate_id in used_lookup
                 or f"memory:{candidate_id}" in used_lookup
             )
+            if not used:
+                continue
             candidates.append(
                 {
                     "id": candidate_id,
                     "kind": candidate.get("kind"),
                     "statement": candidate.get("statement"),
                     "status": candidate.get("status"),
-                    "used": used,
+                    "used": True,
                 }
             )
             evidence_refs.extend(
                 str(value)
                 for value in candidate.get("evidence_refs", ())
-                if used
             )
         summary = {
             "used_refs": used_refs,

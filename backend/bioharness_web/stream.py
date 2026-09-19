@@ -80,8 +80,11 @@ async def event_stream(service, poll_interval_seconds: float):
 
     while True:
         try:
-            summaries = await asyncio.to_thread(service.list_tasks)
-            current = task_versions(summaries)
+            revisions = await asyncio.to_thread(service.list_task_versions)
+            current = {
+                task_id: TaskVersion(id=task_id, revision=revision)
+                for task_id, revision in revisions.items()
+            }
 
             for task_id, version in current.items():
                 prior = previous.get(task_id)

@@ -1,6 +1,8 @@
+import pytest
 from uuid import UUID
 
 from bioharness_web.stream import (
+    event_stream,
     TaskVersion,
     build_invalidation,
     format_sse,
@@ -36,3 +38,24 @@ def test_sse_format_is_minimal_and_json_encoded():
     assert payload.startswith("event: task.updated\n")
     assert '"task_id":"' in payload
     assert payload.endswith("\n\n")
+
+
+@pytest.mark.asyncio
+async def test_event_stream_emits_update_when_task_record_revision_changes():
+    class FakeVersionService:
+        def __init__(self):
+            self.calls = 0
+
+        def list_task_versions(self):
+            self.calls += 1
+            revision = "old" if self.calls == 1 else "new"
+            return {TASK_ID: revision}
+
+    stream = event_stream(FakeVersionService(), poll_interval_seconds=0)
+    try:
+        first = await anext(stream)
+        assert '"revision":"old"' in first
+        second = await anext(stream)
+        assert '"revision":"new"' in second
+    finally:
+        await stream.aclose()

@@ -123,9 +123,23 @@ export default function App({
         void loadGraph(taskId).catch((reason: Error) => {
           setError(reason.message);
         });
+
+        if (detail) {
+          const nodeId = detail.node.id;
+          void api
+            .getNodeDetail(taskId, nodeId)
+            .then((value) => {
+              setDetail((current) =>
+                current?.node.id === nodeId ? value : current,
+              );
+            })
+            .catch((reason: Error) => {
+              setError(reason.message);
+            });
+        }
       }
     },
-    [loadGraph, loadTasks, selectedTaskId],
+    [api, detail, loadGraph, loadTasks, selectedTaskId],
   );
 
   useTaskStream({

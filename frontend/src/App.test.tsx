@@ -174,6 +174,31 @@ describe("App", () => {
     expect(screen.getByText("Genome-web TF")).toBeTruthy();
   });
 
+
+
+  it("refetches an open node detail after task.updated", async () => {
+    const user = userEvent.setup();
+    const stream = new FakeEventSource();
+    const api = makeApi();
+    render(<App api={api} eventSourceFactory={() => stream} />);
+
+    const graphRegion = await screen.findByLabelText("Task graph");
+    await user.click(
+      within(graphRegion).getByRole("button", { name: /Genome-web TF/ }),
+    );
+    await screen.findByRole("dialog");
+    const before = vi.mocked(api.getNodeDetail).mock.calls.length;
+
+    stream.emit("task.updated", {
+      task_id: tasks[0].id,
+      revision: "g3",
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(api.getNodeDetail).mock.calls.length).toBeGreaterThan(before);
+    });
+  });
+
   it("refetches selected task after task.updated invalidation", async () => {
     const stream = new FakeEventSource();
     const api = makeApi();

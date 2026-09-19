@@ -16,6 +16,13 @@ class ObservatoryService:
     def list_tasks(self):
         return project_task_summaries(self._repository.list_task_records())
 
+    def list_task_versions(self):
+        records = self._repository.list_task_records()
+        return {
+            UUID(str(record.task["id"])): project_task_graph(record).revision
+            for record in records
+        }
+
     def get_task_record(self, task_id: UUID):
         return self._repository.get_task_record(task_id)
 

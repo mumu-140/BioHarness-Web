@@ -45,7 +45,7 @@ The service needs only a PostgreSQL URL and a network path to that database:
       --name bioharness-web-observatory \
       --restart unless-stopped \
       --network <bioharness-db-network> \
-      -p 18080:8080 \
+      -p 127.0.0.1:18080:8080 \
       -e BIOHARNESS_WEB_DATABASE_URL='postgresql+psycopg://bioharness_web:<secret>@<db-host>:5432/bioharness' \
       -e BIOHARNESS_WEB_POLL_INTERVAL_SECONDS=2 \
       bioharness-web:observatory-v1
@@ -59,7 +59,7 @@ scientific data, or provider outputs.
     curl -fsS http://127.0.0.1:18080/api/tasks
     curl -N --max-time 5 http://127.0.0.1:18080/api/stream
 
-Then open http://<host>:18080/ from an authorized lab network/tunnel.
+Use an SSH tunnel and open http://127.0.0.1:18080/ on the client. The default deployment binds the server port to loopback only.
 
 ## 5. Failure isolation
 

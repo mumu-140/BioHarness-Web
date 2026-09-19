@@ -39,4 +39,4 @@ Production image:
 
     docker build -f deploy/Dockerfile -t bioharness-web:observatory-v1 .
 
-See docs/architecture.md and docs/deployment.md.
+The recommended deployment binds the Web port to server loopback and is accessed through an SSH tunnel. See docs/architecture.md and docs/deployment.md.

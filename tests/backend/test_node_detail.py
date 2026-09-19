@@ -37,22 +37,27 @@ def test_latest_attempt_is_primary_and_history_is_in_detail():
     assert detail.summary["current_attempt"]["attempt_number"] == 2
 
 
-def test_memory_detail_distinguishes_used_refs_from_available_candidates():
+def test_memory_detail_only_exposes_candidates_referenced_by_task_context():
     task = task_payload()
-    context = context_payload(memory_refs=("memory:used",))
+    used_candidate = memory_candidate_payload(statement="Used by task")
+    unrelated_candidate = memory_candidate_payload(statement="Unrelated project memory")
+    used_ref = f"memory:{used_candidate['id']}"
+    context = context_payload(memory_refs=(used_ref,))
     spec = run_spec_payload(task_id=task["id"])
     spec["context_snapshot_id"] = context["id"]
     record = TaskRecord(
         task=task,
         contexts=(context,),
         run_specs=(spec,),
-        memory_candidates=(memory_candidate_payload(statement="Available only"),),
+        memory_candidates=(used_candidate, unrelated_candidate),
     )
 
     graph = project_task_graph(record)
     memory = next(node for node in graph.nodes if node.type == "MEMORY")
     detail = project_node_detail(record, memory.id)
 
-    assert detail.summary["used_refs"] == ["memory:used"]
-    assert detail.summary["available_candidates"][0]["statement"] == "Available only"
-    assert detail.summary["available_candidates"][0]["used"] is False
+    assert detail.summary["used_refs"] == [used_ref]
+    assert [item["statement"] for item in detail.summary["available_candidates"]] == [
+        "Used by task"
+    ]
+    assert detail.summary["available_candidates"][0]["used"] is True
