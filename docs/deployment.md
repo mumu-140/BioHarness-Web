@@ -53,6 +53,29 @@ The service needs only a PostgreSQL URL and a network path to that database:
 The container does not require writable mounts to BioHarness source, Genome-web
 scientific data, or provider outputs.
 
+### Optional read-only evidence previews
+
+To preview persisted execution logs, traces, manifests, and similar textual
+evidence from the Web UI, mount only the provider output root that contains the
+persisted evidence paths. The mount must be read-only.
+
+For example:
+
+    -v /home/yangs/software/BioHarness-P0-Acceptance:/evidence/BioHarness-P0-Acceptance:ro \
+    -e BIOHARNESS_WEB_EVIDENCE_HOST_ROOT=/home/yangs/software/BioHarness-P0-Acceptance \
+    -e BIOHARNESS_WEB_EVIDENCE_MOUNT_ROOT=/evidence/BioHarness-P0-Acceptance \
+    -e BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES=131072
+
+The API never accepts a filesystem path from the browser. A preview request uses
+a task-scoped evidence ID derived from evidence already persisted by BioHarness.
+The server resolves that ID back to persisted evidence, verifies that the path is
+inside the configured host root, maps it into the read-only container mount, and
+rejects symlink/path escapes. Files larger than the preview limit are shown as a
+head-and-tail excerpt rather than being returned in full.
+
+Do not mount a broad home directory or the whole `/home/yangs/software` tree.
+Mount the narrowest provider-output root needed by the observatory.
+
 ## 4. Smoke checks
 
     curl -fsS http://127.0.0.1:18080/api/health
