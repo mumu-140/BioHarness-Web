@@ -149,6 +149,7 @@ export default function TaskGraph({
 
       {canRenderFlow ? (
         <ReactFlow
+          key={graph.task.id}
           nodes={flowNodes}
           edges={toFlowEdges(graph)}
           fitView
