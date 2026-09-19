@@ -225,6 +225,9 @@ def project_task_graph(record: TaskRecord):
         stage: TaskStage,
         label: str,
         status: NodeStatus,
+        attempt_number: int | None = None,
+        attempt_count: int | None = None,
+        attention_reason: str | None = None,
         started_at=None,
         finished_at=None,
     ) -> None:
@@ -234,6 +237,9 @@ def project_task_graph(record: TaskRecord):
                 type=stage,
                 label=label,
                 status=status,
+                attempt_number=attempt_number,
+                attempt_count=attempt_count,
+                attention_reason=attention_reason,
                 started_at=started_at,
                 finished_at=finished_at,
                 detail_ref=f"/api/tasks/{task_id}/nodes/{node_id}",
@@ -319,11 +325,22 @@ def project_task_graph(record: TaskRecord):
                 _as_datetime(latest.get("last_reconciled_at"))
                 or submitted_at
             )
+        attempt_number = int(latest.get("attempt_number", len(record.attempts)))
+        latest_state = str(latest.get("state", ""))
+        attention_reason = None
+        if latest_state == "NEEDS_OPERATOR_RECONCILIATION":
+            attention_reason = "reconciliation_required"
+        elif latest_state == "UNKNOWN":
+            attention_reason = "execution_outcome_unknown"
+
         add_node(
             node_id=execution_id,
             stage=TaskStage.EXECUTION,
             label=str(latest.get("provider_attempt_name") or "Execution"),
             status=_execution_status(record),
+            attempt_number=attempt_number,
+            attempt_count=len(record.attempts),
+            attention_reason=attention_reason,
             started_at=submitted_at,
             finished_at=finished_at,
         )

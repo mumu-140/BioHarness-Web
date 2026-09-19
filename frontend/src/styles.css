@@ -779,3 +779,102 @@ h2 { font-size: 24px; }
   border-radius: 9px;
   box-shadow: 0 8px 20px rgba(32, 48, 58, 0.08);
 }
+
+
+/* V1.3 — phase grouping and execution context */
+.phase-legend {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  z-index: 9;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.phase-chip {
+  border: 1px solid rgba(207, 216, 221, 0.95);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 5px 8px;
+  color: #596873;
+  font-size: 10px;
+  font-weight: 750;
+  box-shadow: 0 5px 14px rgba(32, 48, 58, 0.05);
+}
+
+.phase-chip.phase-prepare {
+  border-top: 3px solid #95a4ad;
+}
+
+.phase-chip.phase-execute {
+  border-top: 3px solid #5f8d88;
+}
+
+.phase-chip.phase-verify {
+  border-top: 3px solid #7f7895;
+}
+
+.graph-hint {
+  top: 54px;
+}
+
+.react-flow__node.flow-node.phase-prepare,
+.graph-fallback .fallback-node.phase-prepare {
+  border-top: 3px solid #95a4ad;
+}
+
+.react-flow__node.flow-node.phase-execute,
+.graph-fallback .fallback-node.phase-execute {
+  border-top: 3px solid #5f8d88;
+}
+
+.react-flow__node.flow-node.phase-verify,
+.graph-fallback .fallback-node.phase-verify {
+  border-top: 3px solid #7f7895;
+}
+
+.flow-node-content {
+  min-height: 126px;
+}
+
+.flow-node-annotation {
+  display: block;
+  color: #66747d;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.flow-node-warning {
+  width: fit-content;
+  border-radius: 999px;
+  background: #f8ece5;
+  padding: 3px 7px;
+  color: #9a4d28;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.fallback-node .flow-node-annotation,
+.fallback-node .flow-node-warning {
+  font-style: normal;
+}
+
+.fallback-node .flow-node-warning {
+  color: #9a4d28;
+}
+
+@media (max-width: 1180px) {
+  .phase-legend {
+    gap: 4px;
+  }
+
+  .phase-chip {
+    padding: 4px 6px;
+    font-size: 9px;
+  }
+
+  .graph-hint {
+    top: 50px;
+  }
+}
