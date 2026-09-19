@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import create_router
 from .db import ReadOnlyDatabase
+from .evidence import EvidencePreviewer
 from .repository import BioHarnessReadRepository
 from .service import ObservatoryService
 from .settings import Settings
@@ -34,7 +35,17 @@ def create_app(
     if service is None:
         settings = settings or Settings.from_env()
         database = ReadOnlyDatabase(settings.database_url)
-        service = ObservatoryService(BioHarnessReadRepository(database))
+        evidence_previewer = None
+        if settings.evidence_host_root and settings.evidence_mount_root:
+            evidence_previewer = EvidencePreviewer(
+                host_root=Path(settings.evidence_host_root),
+                mount_root=Path(settings.evidence_mount_root),
+                max_bytes=settings.evidence_preview_max_bytes,
+            )
+        service = ObservatoryService(
+            BioHarnessReadRepository(database),
+            evidence_previewer=evidence_previewer,
+        )
 
     if poll_interval_seconds is None:
         poll_interval_seconds = (

@@ -1,4 +1,9 @@
-import type { NodeDetail, TaskGraphModel, TaskSummary } from "./types";
+import type {
+  EvidencePreview,
+  NodeDetail,
+  TaskGraphModel,
+  TaskSummary,
+} from "./types";
 
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path, {
@@ -14,6 +19,7 @@ export interface ObservatoryApi {
   listTasks(): Promise<TaskSummary[]>;
   getTaskGraph(taskId: string): Promise<TaskGraphModel>;
   getNodeDetail(taskId: string, nodeId: string): Promise<NodeDetail | null>;
+  getEvidencePreview(previewRef: string): Promise<EvidencePreview>;
 }
 
 export const api: ObservatoryApi = {
@@ -24,4 +30,6 @@ export const api: ObservatoryApi = {
     fetchJson<NodeDetail>(
       "/api/tasks/" + taskId + "/nodes/" + encodeURIComponent(nodeId),
     ),
+  getEvidencePreview: (previewRef) =>
+    fetchJson<EvidencePreview>(previewRef),
 };

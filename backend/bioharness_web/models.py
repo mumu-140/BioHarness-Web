@@ -77,4 +77,5 @@ class NodeDetail(BaseModel):
     summary: dict
     events: tuple[dict, ...] = ()
     evidence_refs: tuple[str, ...] = ()
+    evidence_previews: tuple[dict, ...] = ()
     links: tuple[str, ...] = ()

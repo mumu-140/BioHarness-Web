@@ -209,6 +209,7 @@ export default function App({
           {detail && (
             <NodeDetailDrawer
               detail={detail}
+              loadEvidencePreview={api.getEvidencePreview}
               onClose={() => setDetail(null)}
             />
           )}

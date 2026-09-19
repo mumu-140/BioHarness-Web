@@ -1,8 +1,13 @@
 import { useState } from "react";
 
-import type { NodeDetail } from "../api/types";
+import type {
+  EvidencePreview,
+  EvidencePreviewRef,
+  NodeDetail,
+} from "../api/types";
 import {
   eventLabel,
+  evidenceRoleLabel,
   fieldLabel,
   formatDateTime,
   formatValue,
@@ -13,6 +18,7 @@ import {
 
 interface NodeDetailDrawerProps {
   detail: NodeDetail;
+  loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
   onClose(): void;
 }
 
@@ -72,6 +78,140 @@ function FriendlyValue({
         </div>
       ))}
     </dl>
+  );
+}
+
+function evidenceRefsForAttempt(
+  attemptId: string | null,
+  events: Record<string, unknown>[],
+  previews: EvidencePreviewRef[],
+): EvidencePreviewRef[] {
+  if (attemptId) {
+    const scoped = previews.filter(
+      (ref) => ref.run_attempt_id === attemptId,
+    );
+    if (scoped.length > 0) return scoped;
+  }
+
+  const lookup = new Map(
+    previews.map((ref) => [
+      ref.role + "\0" + ref.source_path,
+      ref,
+    ]),
+  );
+  const seen = new Set<string>();
+  const values: EvidencePreviewRef[] = [];
+
+  for (const event of events) {
+    const payload = asRecord(event.payload);
+    const executorEvidence = asRecord(payload?.executor_evidence);
+    const evidence = executorEvidence?.evidence;
+    if (!Array.isArray(evidence)) continue;
+
+    for (const value of evidence) {
+      const item = asRecord(value);
+      if (!item) continue;
+      const role = String(item.role ?? "");
+      const sourcePath = String(item.path ?? "");
+      const ref = lookup.get(role + "\0" + sourcePath);
+      if (!ref || seen.has(ref.id)) continue;
+      seen.add(ref.id);
+      values.push(ref);
+    }
+  }
+
+  return values;
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return value + " B";
+  if (value < 1024 * 1024) return (value / 1024).toFixed(1) + " KB";
+  return (value / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function EvidenceFiles({
+  attemptId,
+  events,
+  evidencePreviews,
+  loadEvidencePreview,
+}: {
+  attemptId: string | null;
+  events: Record<string, unknown>[];
+  evidencePreviews: EvidencePreviewRef[];
+  loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
+}) {
+  const [preview, setPreview] = useState<EvidencePreview | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const refs = evidenceRefsForAttempt(attemptId, events, evidencePreviews);
+
+  if (refs.length === 0) return null;
+
+  const openPreview = async (ref: EvidencePreviewRef) => {
+    if (!loadEvidencePreview) return;
+    setLoadingId(ref.id);
+    setPreview(null);
+    setPreviewError(null);
+    try {
+      const value = await loadEvidencePreview(ref.preview_ref);
+      setPreview(value);
+    } catch (reason) {
+      setPreview(null);
+      setPreviewError(
+        reason instanceof Error ? reason.message : "无法加载证据预览",
+      );
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  return (
+    <section className="attempt-drilldown-section evidence-files-section">
+      <h5>证据文件</h5>
+      <div className="evidence-preview-list">
+        {refs.map((ref) => {
+          const label = evidenceRoleLabel(ref.role);
+          return (
+            <div className="evidence-preview-row" key={ref.id}>
+              <div>
+                <strong>{label}</strong>
+                <code>{ref.name}</code>
+              </div>
+              <button
+                type="button"
+                aria-label={"预览" + label}
+                disabled={!loadEvidencePreview || loadingId === ref.id}
+                onClick={() => void openPreview(ref)}
+              >
+                {loadingId === ref.id ? "加载中…" : "预览"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {previewError && (
+        <div className="evidence-preview-error" role="alert">
+          预览失败：{previewError}
+        </div>
+      )}
+
+      {preview && (
+        <div className="evidence-preview-panel" aria-label="证据预览">
+          <header>
+            <div>
+              <strong>{evidenceRoleLabel(preview.role)}</strong>
+              <code>{preview.name}</code>
+            </div>
+            <div className="evidence-preview-meta">
+              <span>{formatBytes(preview.size_bytes)}</span>
+              {preview.truncated && <span>已截断</span>}
+            </div>
+          </header>
+          <pre>{preview.content}</pre>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -146,7 +286,9 @@ function ReconciliationEvidence({
       {evidenceItems.length > 0 && (
         <div className="reconciliation-artifacts">
           <span>证据</span>
-          <FriendlyValue value={evidenceItems} />
+          <p>
+            已记录 {evidenceItems.length} 项文件证据；可预览项会显示在下方“证据文件”中。
+          </p>
         </div>
       )}
     </div>
@@ -209,10 +351,14 @@ function AttemptEventTimeline({
 function AttemptDrilldown({
   attempt,
   events,
+  evidencePreviews,
+  loadEvidencePreview,
   number,
 }: {
   attempt: Record<string, unknown>;
   events: Record<string, unknown>[];
+  evidencePreviews: EvidencePreviewRef[];
+  loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
   number: number;
 }) {
   const capabilities = asRecord(attempt.capability_snapshot);
@@ -254,6 +400,13 @@ function AttemptDrilldown({
         </section>
       )}
 
+      <EvidenceFiles
+        attemptId={attempt.id ? String(attempt.id) : null}
+        events={events}
+        evidencePreviews={evidencePreviews}
+        loadEvidencePreview={loadEvidencePreview}
+      />
+
       <section className="attempt-drilldown-section">
         <h5>事件时间线</h5>
         <AttemptEventTimeline events={events} />
@@ -262,7 +415,13 @@ function AttemptDrilldown({
   );
 }
 
-function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
+function ExecutionHistoryTimeline({
+  detail,
+  loadEvidencePreview,
+}: {
+  detail: NodeDetail;
+  loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
+}) {
   const [expandedAttemptKey, setExpandedAttemptKey] = useState<string | null>(
     null,
   );
@@ -390,6 +549,8 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
                   <AttemptDrilldown
                     attempt={attempt}
                     events={attemptEvents}
+                    evidencePreviews={detail.evidence_previews ?? []}
+                    loadEvidencePreview={loadEvidencePreview}
                     number={number}
                   />
                 )}
@@ -402,7 +563,13 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
   );
 }
 
-function ReadableSummary({ detail }: { detail: NodeDetail }) {
+function ReadableSummary({
+  detail,
+  loadEvidencePreview,
+}: {
+  detail: NodeDetail;
+  loadEvidencePreview?: (previewRef: string) => Promise<EvidencePreview>;
+}) {
   const hasExecutionHistory = (
     detail.node.type === "EXECUTION" &&
     Array.isArray(detail.summary.attempt_history) &&
@@ -433,7 +600,10 @@ function ReadableSummary({ detail }: { detail: NodeDetail }) {
         </dl>
       </section>
 
-      <ExecutionHistoryTimeline detail={detail} />
+      <ExecutionHistoryTimeline
+        detail={detail}
+        loadEvidencePreview={loadEvidencePreview}
+      />
 
       {entries.length > 0 && (
         <section className="detail-section">
@@ -489,6 +659,7 @@ function ReadableSummary({ detail }: { detail: NodeDetail }) {
 
 export default function NodeDetailDrawer({
   detail,
+  loadEvidencePreview,
   onClose,
 }: NodeDetailDrawerProps) {
   const [view, setView] = useState<ViewMode>("readable");
@@ -544,7 +715,10 @@ export default function NodeDetailDrawer({
 
       <div className="drawer-body">
         {view === "readable" ? (
-          <ReadableSummary detail={detail} />
+          <ReadableSummary
+            detail={detail}
+            loadEvidencePreview={loadEvidencePreview}
+          />
         ) : (
           <section className="detail-section raw-json-section">
             <div className="raw-json-heading">
