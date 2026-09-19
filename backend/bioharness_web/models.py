@@ -52,6 +52,8 @@ class TaskNode(BaseModel):
     type: TaskStage
     label: str
     status: NodeStatus
+    annotation: str | None = None
+    warning: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     detail_ref: str
