@@ -186,3 +186,44 @@ Final checks remained green:
 - root filesystem read-only;
 - evidence mount `RW=false`;
 - real `json/table/fasta/newick` evidence remained available and non-truncated.
+
+
+## Post-merge production deployment evidence
+
+Merged V1.7 functionality revision:
+
+`7c81eadea8d0c8a65799465bc1b247da29b26b2a`
+
+The merged revision was re-tested on `fwq10ys` before replacement:
+
+- frontend: 5 files / 21 tests passed;
+- TypeScript + Vite production build passed;
+- 198 modules transformed;
+- backend regression: 33 passed / 1 environment-dependent database test skipped.
+
+Final production image:
+
+`sha256:0c10f67670ccd9b7040ba922d303d654144c501384b4a6614ed771f0ae5a0698`
+
+The V1.7 image keeps the already-validated V1.6 backend/runtime layer and replaces
+only the tested frontend static bundle. The image overlay build used
+`--network none`.
+
+Production remains bound to:
+
+`127.0.0.1:18080`
+
+Post-replacement verification:
+
+- `/api/health` -> 200;
+- live evidence formats confirmed: `fasta,json,newick,table`;
+- the frontend bundle contains `表格视图 / JSON 结构 / 序列视图 / 树拓扑 / 查看原始文本`;
+- container root filesystem remains read-only;
+- evidence mount remains read-only:
+  - host: `/home/yangs/software/BioHarness-P0-Acceptance`;
+  - container: `/evidence/BioHarness-P0-Acceptance`;
+  - `RW=false`.
+
+Rollback container retained:
+
+`bioharness-web-observatory-prev-v16-7e15c51`
