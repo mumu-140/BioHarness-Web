@@ -269,6 +269,17 @@ function parseFasta(content: string): Array<{ header: string; sequence: string }
 }
 
 
+function fastaUnit(records: Array<{ header: string; sequence: string }>): string {
+  const nucleotideAlphabet = /^[ACGTUNRYKMSWBDHV]*$/;
+  const isNucleotide = records.every((record) => (
+    nucleotideAlphabet.test(
+      record.sequence.toUpperCase().replace(/[-.*?]/g, ""),
+    )
+  ));
+  return isNucleotide ? "nt" : "aa";
+}
+
+
 function FastaPreview({ content }: { content: string }) {
   const records = parseFasta(content);
   if (records.length === 0) {
@@ -283,6 +294,7 @@ function FastaPreview({ content }: { content: string }) {
   }
 
   const displayed = records.slice(0, 40);
+  const unit = fastaUnit(records);
   return (
     <div className="structured-preview" aria-label="FASTA 序列预览">
       <div className="structured-preview-summary">
@@ -294,7 +306,7 @@ function FastaPreview({ content }: { content: string }) {
           <article className="fasta-record" key={index}>
             <header>
               <strong>{record.header || `序列 ${index + 1}`}</strong>
-              <span>{record.sequence.length} aa/nt</span>
+              <span>{record.sequence.replace(/[-.]/g, "").length} {unit}</span>
             </header>
             <pre>{record.sequence}</pre>
           </article>
