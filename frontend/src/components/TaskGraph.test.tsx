@@ -56,6 +56,61 @@ describe("TaskGraph", () => {
     expect(screen.getByText("需处理")).toBeTruthy();
   });
 
+  it("shows phase grouping and execution retry / reconciliation context", () => {
+    render(
+      <TaskGraph
+        graph={{
+          task: {
+            id: "a",
+            title: "Task A",
+            analysis_class: "test",
+            status: "ATTENTION",
+            stage: "EXECUTION",
+            updated_at: "2026-09-19T02:00:00Z",
+            needs_attention: true,
+          },
+          revision: "phase-1",
+          nodes: [
+            {
+              id: "planning:1",
+              type: "PLANNING",
+              label: "Plan",
+              status: "COMPLETED",
+              detail_ref: "/detail",
+            },
+            {
+              id: "execution:2",
+              type: "EXECUTION",
+              label: "Run 2",
+              status: "ATTENTION",
+              annotation: "第 2 次尝试 · 共 2 次",
+              warning: "需要人工核验",
+              detail_ref: "/detail",
+            },
+            {
+              id: "validation:1",
+              type: "VALIDATION",
+              label: "Validation",
+              status: "WAITING",
+              detail_ref: "/detail",
+            },
+          ],
+          edges: [
+            { source: "planning:1", target: "execution:2" },
+            { source: "execution:2", target: "validation:1" },
+          ],
+        }}
+        onSelectNode={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText("流程分区").textContent).toContain("准备与解析");
+    expect(screen.getByLabelText("流程分区").textContent).toContain("执行与收集");
+    expect(screen.getByLabelText("流程分区").textContent).toContain("验证与结果");
+    expect(screen.getByText("第 2 次尝试 · 共 2 次")).toBeTruthy();
+    expect(screen.getByText("需要人工核验")).toBeTruthy();
+  });
+
   it("marks the current stage and keeps attention nodes visually distinct", () => {
     render(
       <TaskGraph
