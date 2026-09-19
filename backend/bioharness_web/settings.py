@@ -35,6 +35,11 @@ class Settings:
                 "BIOHARNESS_WEB_EVIDENCE_HOST_ROOT and "
                 "BIOHARNESS_WEB_EVIDENCE_MOUNT_ROOT must be configured together"
             )
+        if evidence_host_root and (
+            not os.path.isabs(evidence_host_root)
+            or not os.path.isabs(evidence_mount_root)
+        ):
+            raise ValueError("evidence roots must be absolute paths")
         preview_max_bytes = int(
             os.environ.get("BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES", "131072")
         )
