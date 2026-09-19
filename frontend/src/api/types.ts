@@ -63,6 +63,7 @@ export interface TaskGraphModel {
 export interface EvidencePreviewRef {
   id: string;
   role: string;
+  run_attempt_id?: string | null;
   name: string;
   source_path: string;
   preview_ref: string;
