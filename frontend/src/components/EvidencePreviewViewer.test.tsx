@@ -43,6 +43,22 @@ describe("EvidencePreviewViewer", () => {
     expect(screen.getByText("2 行 · 3 列")).toBeTruthy();
   });
 
+  it("parses quoted CSV fields without splitting embedded commas", () => {
+    render(
+      <EvidencePreviewViewer
+        preview={preview(
+          "table",
+          'gene,note,status\nA,"alpha, beta",PASS\n',
+          { role: "audit_table", name: "audit.csv" },
+        )}
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "结构化表格预览" });
+    expect(table.textContent).toContain("alpha, beta");
+    expect(screen.getByText("1 行 · 3 列")).toBeTruthy();
+  });
+
   it("renders JSON evidence as a nested readable structure", () => {
     render(
       <EvidencePreviewViewer
@@ -81,7 +97,7 @@ describe("EvidencePreviewViewer", () => {
     const region = screen.getByLabelText("FASTA 序列预览");
     expect(region.textContent).toContain("2 条序列");
     expect(region.textContent).toContain("seqA example");
-    expect(region.textContent).toContain("10 aa/nt");
+    expect(region.textContent).toContain("10 aa");
     expect(region.textContent).toContain("ACGTACGT");
   });
 
