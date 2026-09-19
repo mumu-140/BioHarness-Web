@@ -101,7 +101,7 @@ Frontend:
 
 Backend:
 
-- 32 tests passed;
+- 33 tests passed;
 - 1 environment-dependent database test skipped.
 
 ## Live pre-merge smoke
@@ -114,7 +114,7 @@ Pre-merge image:
 
 Image digest:
 
-`sha256:9c3ae9806559b40b2eb430280267f17eb9e9cfb1a2bab53421643400d46ae7ba`
+`sha256:b93fc477530269cbbdfe92886f397c51a863b3267edaca4d91a814fc50d42efc`
 
 Smoke container:
 
@@ -176,11 +176,20 @@ It adds no:
 
 ### Final pre-merge smoke
 
-The final branch head `539469e572bd0018b443325e649642089838808e` was rebuilt and re-smoked after the last safety/documentation fixes.
+The final branch head `32936df49e6825489cd73c1d9a93fbe771ad516e` was rebuilt and re-smoked after the last safety/documentation fixes.
 
 The final pre-merge image remained fully read-only:
 
 - container root filesystem: `read-only = true`;
 - evidence mount: `RW = false`.
 
-The same four live evidence roles were re-fetched successfully and the unknown evidence ID still returned 404.
+The final smoke returned 18 attempt-scoped preview references. In addition to the
+four core execution files, registered artifact-only evidence was also verified
+through the same safe endpoint:
+
+- `audit_table`;
+- `alignment`;
+- `tree`.
+
+All returned references with a persisted `run_attempt_id` matched a real
+Attempt in the node detail. The unknown evidence ID still returned 404.
