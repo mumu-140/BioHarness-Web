@@ -95,9 +95,15 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
 
   const currentAttempt = asRecord(detail.summary.current_attempt);
   const currentId = currentAttempt?.id ? String(currentAttempt.id) : null;
-  const currentNumber = currentAttempt
+  const fallbackCurrentNumber = Math.max(
+    ...attempts.map((attempt, index) => attemptNumber(attempt, index)),
+  );
+  const rawCurrentNumber = currentAttempt
     ? Number(currentAttempt.attempt_number)
-    : Math.max(...attempts.map((attempt, index) => attemptNumber(attempt, index)));
+    : Number.NaN;
+  const currentNumber = Number.isFinite(rawCurrentNumber)
+    ? rawCurrentNumber
+    : fallbackCurrentNumber;
 
   return (
     <section className="detail-section">
