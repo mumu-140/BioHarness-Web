@@ -55,4 +55,58 @@ describe("TaskGraph", () => {
     expect(screen.getByText("运行中")).toBeTruthy();
     expect(screen.getByText("需处理")).toBeTruthy();
   });
+
+  it("marks the current stage and keeps attention nodes visually distinct", () => {
+    render(
+      <TaskGraph
+        graph={{
+          task: {
+            id: "a",
+            title: "Task A",
+            analysis_class: "test",
+            status: "RUNNING",
+            stage: "EXECUTION",
+            updated_at: "2026-09-19T02:00:00Z",
+            needs_attention: true,
+          },
+          revision: "2",
+          nodes: [
+            {
+              id: "planning:1",
+              type: "PLANNING",
+              label: "Plan",
+              status: "COMPLETED",
+              detail_ref: "/detail",
+            },
+            {
+              id: "execution:1",
+              type: "EXECUTION",
+              label: "Run",
+              status: "ACTIVE",
+              detail_ref: "/detail",
+            },
+            {
+              id: "validation:1",
+              type: "VALIDATION",
+              label: "Validation",
+              status: "ATTENTION",
+              detail_ref: "/detail",
+            },
+          ],
+          edges: [
+            { source: "planning:1", target: "execution:1" },
+            { source: "execution:1", target: "validation:1" },
+          ],
+        }}
+        onSelectNode={() => {}}
+      />,
+    );
+
+    const current = screen.getByRole("button", { name: /执行工作流/ });
+    const attention = screen.getByRole("button", { name: /验证分析结果/ });
+
+    expect(current.className).toContain("node-current");
+    expect(current.textContent).toContain("当前阶段");
+    expect(attention.className).toContain("node-attention");
+  });
 });
