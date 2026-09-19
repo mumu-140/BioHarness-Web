@@ -133,12 +133,13 @@ function ExecutionHistoryTimeline({ detail }: { detail: NodeDetail }) {
                 <header className="attempt-card-header">
                   <div>
                     <strong>尝试 {number}</strong>
-                    {attempt.provider_attempt_name && (
-                      <div className="attempt-provider">
-                        <span>外部执行名称</span>
-                        <code>{String(attempt.provider_attempt_name)}</code>
-                      </div>
-                    )}
+                    {attempt.provider_attempt_name !== undefined &&
+                      attempt.provider_attempt_name !== null && (
+                        <div className="attempt-provider">
+                          <span>外部执行名称</span>
+                          <code>{String(attempt.provider_attempt_name)}</code>
+                        </div>
+                      )}
                   </div>
                   <div className="attempt-card-badges">
                     {isCurrent && <span className="attempt-current">当前尝试</span>}
