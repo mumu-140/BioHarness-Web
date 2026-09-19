@@ -61,3 +61,48 @@ def test_memory_detail_only_exposes_candidates_referenced_by_task_context():
         "Used by task"
     ]
     assert detail.summary["available_candidates"][0]["used"] is True
+
+
+def test_execution_detail_keeps_per_attempt_capabilities_and_runtime_context():
+    task = task_payload(question="attempt drilldown")
+    spec = run_spec_payload(task_id=task["id"])
+    attempt = attempt_payload(
+        run_spec_id=spec["id"],
+        number=1,
+        state="NEEDS_OPERATOR_RECONCILIATION",
+    )
+    attempt["capability_snapshot"] = {
+        "mode": "synchronous_process",
+        "logs": True,
+        "trace": True,
+        "poll": False,
+        "cancellation": "unsupported",
+        "reconcile_after_disconnect": "limited",
+    }
+    attempt["observed_runtime_environment"] = {
+        "host": "fwq10ys",
+        "executor": "genome-web-local",
+    }
+    attempt["observed_resource_allocation"] = {
+        "cpu_count": 8,
+        "memory_gb": 16,
+    }
+    attempt["binding"] = {
+        "host": "fwq10ys",
+        "pid": 4242,
+        "process_start_token": "token",
+        "external_execution_id": None,
+        "metadata": {},
+    }
+
+    record = TaskRecord(task=task, run_specs=(spec,), attempts=(attempt,))
+    graph = project_task_graph(record)
+    execution = next(node for node in graph.nodes if node.type == "EXECUTION")
+    detail = project_node_detail(record, execution.id)
+    item = detail.summary["attempt_history"][0]
+
+    assert item["capability_snapshot"]["logs"] is True
+    assert item["capability_snapshot"]["trace"] is True
+    assert item["observed_runtime_environment"]["host"] == "fwq10ys"
+    assert item["observed_resource_allocation"]["cpu_count"] == 8
+    assert item["binding"]["pid"] == 4242
