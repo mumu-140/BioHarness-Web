@@ -127,7 +127,7 @@ Pre-merge image:
 
 Image digest:
 
-`sha256:ccf72fc7032ce7d7f4d861332c9715b5d6c33eec133b652706c52a8f4d81c705`
+`sha256:0c10f67670ccd9b7040ba922d303d654144c501384b4a6614ed771f0ae5a0698`
 
 The V1.7 image reuses the already validated V1.6 runtime and replaces only the
 frontend static bundle. The overlay image was built with `--network none`.
@@ -171,3 +171,18 @@ It adds no:
 - artifact mutation;
 - evidence upload;
 - external frontend dependency.
+
+
+### Final pre-merge smoke
+
+The final branch head `b1cdb3f2548b8bcca130a8c2542894c231956a5e` was rebuilt after the FASTA unit refinement and CSV quoting test.
+
+Final checks remained green:
+
+- frontend: 5 files / 21 tests passed;
+- backend: 33 passed / 1 skipped;
+- production build: PASS;
+- image digest: `sha256:0c10f67670ccd9b7040ba922d303d654144c501384b4a6614ed771f0ae5a0698`;
+- root filesystem read-only;
+- evidence mount `RW=false`;
+- real `json/table/fasta/newick` evidence remained available and non-truncated.
