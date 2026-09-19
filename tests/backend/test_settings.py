@@ -1,0 +1,25 @@
+import pytest
+
+from bioharness_web.settings import Settings
+
+
+def test_database_url_is_required(monkeypatch):
+    monkeypatch.delenv("BIOHARNESS_WEB_DATABASE_URL", raising=False)
+    with pytest.raises(ValueError, match="BIOHARNESS_WEB_DATABASE_URL"):
+        Settings.from_env()
+
+
+def test_non_postgresql_url_is_rejected(monkeypatch):
+    monkeypatch.setenv("BIOHARNESS_WEB_DATABASE_URL", "sqlite:///tmp/x.db")
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        Settings.from_env()
+
+
+def test_poll_interval_has_safe_floor(monkeypatch):
+    monkeypatch.setenv(
+        "BIOHARNESS_WEB_DATABASE_URL",
+        "postgresql+psycopg://web@db/bioharness",
+    )
+    monkeypatch.setenv("BIOHARNESS_WEB_POLL_INTERVAL_SECONDS", "0")
+    with pytest.raises(ValueError, match="poll interval"):
+        Settings.from_env()

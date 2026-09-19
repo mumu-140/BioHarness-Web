@@ -1,0 +1,16 @@
+services:
+  observatory:
+    image: bioharness-web:observatory-v1
+    restart: unless-stopped
+    environment:
+      BIOHARNESS_WEB_DATABASE_URL: ${BIOHARNESS_WEB_DATABASE_URL}
+      BIOHARNESS_WEB_POLL_INTERVAL_SECONDS: ${BIOHARNESS_WEB_POLL_INTERVAL_SECONDS:-2}
+    ports:
+      - "127.0.0.1:${BIOHARNESS_WEB_PORT:-18080}:8080"
+    networks:
+      - bioharness
+
+networks:
+  bioharness:
+    external: true
+    name: ${BIOHARNESS_WEB_DOCKER_NETWORK}
