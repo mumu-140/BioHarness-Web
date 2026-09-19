@@ -14,6 +14,7 @@ import TaskSidebar from "./components/TaskSidebar";
 import useTaskStream, {
   type EventSourceFactory,
 } from "./hooks/useTaskStream";
+import { stageLabel, statusLabel } from "./presentation";
 
 interface AppProps {
   api?: ObservatoryApi;
@@ -107,7 +108,7 @@ export default function App({
         setError(
           reason instanceof Error
             ? reason.message
-            : "Unable to load node detail",
+            : "无法加载节点详情",
         );
       }
     },
@@ -178,11 +179,14 @@ export default function App({
       <main className="workspace">
         <header className="workspace-header">
           <div>
-            <p className="eyebrow">Selected task</p>
-            <h2>{selectedTask?.title ?? "No task selected"}</h2>
+            <p className="eyebrow">当前任务</p>
+            <h2>{selectedTask?.title ?? "未选择任务"}</h2>
             {selectedTask && (
               <p className="workspace-subtitle">
-                {selectedTask.analysis_class} · {selectedTask.status}
+                <span>分析类型：</span>
+                <code>{selectedTask.analysis_class}</code>
+                <span> · 当前阶段：{stageLabel(selectedTask.stage)}</span>
+                <span> · 状态：{statusLabel(selectedTask.status)}</span>
               </p>
             )}
           </div>
@@ -191,13 +195,15 @@ export default function App({
 
         <section className="graph-shell">
           {error ? (
-            <div className="error-state" role="alert">{error}</div>
+            <div className="error-state" role="alert">
+              加载失败：{error}
+            </div>
           ) : graph ? (
             <TaskGraph graph={graph} onSelectNode={handleNodeSelect} />
           ) : selectedTaskId ? (
-            <div className="loading-state">Loading task route…</div>
+            <div className="loading-state">正在加载任务流程…</div>
           ) : (
-            <div className="empty-state">No BioHarness tasks found.</div>
+            <div className="empty-state">暂无 BioHarness 任务。</div>
           )}
 
           {detail && (

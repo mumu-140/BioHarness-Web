@@ -5,14 +5,14 @@ import TaskSidebar from "./TaskSidebar";
 
 
 describe("TaskSidebar", () => {
-  it("marks the selected task with aria-current", () => {
+  it("uses Chinese navigation and status labels while keeping technical names intact", () => {
     render(
       <TaskSidebar
         tasks={[
           {
             id: "a",
-            title: "Task A",
-            analysis_class: "test",
+            title: "Genome-web TF reference",
+            analysis_class: "tf_family_phylogeny_reference",
             status: "RUNNING",
             stage: "EXECUTION",
             updated_at: "2026-09-19T02:00:00Z",
@@ -24,7 +24,14 @@ describe("TaskSidebar", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /Task A/ }).getAttribute("aria-current"))
-      .toBe("true");
+    expect(screen.getByText("任务观察台")).toBeTruthy();
+    expect(screen.getByLabelText("搜索任务")).toBeTruthy();
+    expect(screen.getByLabelText("按状态筛选")).toBeTruthy();
+    expect(screen.getAllByText("运行中").length).toBeGreaterThan(0);
+    expect(screen.getByText("当前阶段：执行")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Genome-web TF reference/ })
+        .getAttribute("aria-current"),
+    ).toBe("true");
   });
 });

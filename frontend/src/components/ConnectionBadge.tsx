@@ -9,8 +9,8 @@ export default function ConnectionBadge({
 }: ConnectionBadgeProps) {
   const degraded = !connected || stale;
   const text = degraded
-    ? "Disconnected · showing last update"
-    : "Connected";
+    ? "连接已断开 · 显示最近一次数据"
+    : "实时连接正常";
 
   return (
     <div

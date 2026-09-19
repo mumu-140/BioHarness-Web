@@ -141,17 +141,17 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App api={makeApi()} eventSourceFactory={() => new FakeEventSource()} />);
 
-    const graphRegion = await screen.findByLabelText("Task graph");
+    const graphRegion = await screen.findByLabelText("任务流程图");
     await user.click(
       within(graphRegion).getByRole("button", { name: /Genome-web TF/ }),
     );
 
     const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("Execution");
+    expect(dialog.textContent).toContain("执行工作流");
     expect(dialog.textContent).toContain("bh-test-1");
 
     await user.click(
-      screen.getByRole("button", { name: "Close details" }),
+      screen.getByRole("button", { name: "关闭详情" }),
     );
 
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -169,7 +169,7 @@ describe("App", () => {
     stream.emitError();
 
     expect(
-      await screen.findByText("Disconnected · showing last update"),
+      await screen.findByText("连接已断开 · 显示最近一次数据"),
     ).toBeTruthy();
     expect(screen.getByText("Genome-web TF")).toBeTruthy();
   });
@@ -182,7 +182,7 @@ describe("App", () => {
     const api = makeApi();
     render(<App api={api} eventSourceFactory={() => stream} />);
 
-    const graphRegion = await screen.findByLabelText("Task graph");
+    const graphRegion = await screen.findByLabelText("任务流程图");
     await user.click(
       within(graphRegion).getByRole("button", { name: /Genome-web TF/ }),
     );

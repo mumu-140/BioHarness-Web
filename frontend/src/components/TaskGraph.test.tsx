@@ -1,11 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import TaskGraph from "./TaskGraph";
+import TaskGraph, { horizontalPosition } from "./TaskGraph";
 
 
 describe("TaskGraph", () => {
-  it("shows active and attention states with text, not color alone", () => {
+  it("places long workflows along the x axis", () => {
+    expect(horizontalPosition(0)).toEqual({ x: 0, y: 120 });
+    expect(horizontalPosition(7)).toEqual({ x: 2100, y: 120 });
+  });
+
+  it("renders the workflow horizontally with Chinese stage and status labels", () => {
     render(
       <TaskGraph
         graph={{
@@ -23,7 +28,7 @@ describe("TaskGraph", () => {
             {
               id: "execution:1",
               type: "EXECUTION",
-              label: "Running step",
+              label: "bh-test-1",
               status: "ACTIVE",
               detail_ref: "/detail",
             },
@@ -43,7 +48,11 @@ describe("TaskGraph", () => {
       />,
     );
 
-    expect(screen.getByText("RUNNING")).toBeTruthy();
-    expect(screen.getByText("NEEDS ATTENTION")).toBeTruthy();
+    const graph = screen.getByLabelText("任务流程图");
+    expect(graph.getAttribute("data-direction")).toBe("horizontal");
+    expect(screen.getByText("执行")).toBeTruthy();
+    expect(screen.getByText("验证")).toBeTruthy();
+    expect(screen.getByText("运行中")).toBeTruthy();
+    expect(screen.getByText("需处理")).toBeTruthy();
   });
 });
