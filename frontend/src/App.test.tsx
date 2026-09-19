@@ -118,6 +118,15 @@ function makeApi() {
     getNodeDetail: vi.fn(async (_taskId: string, nodeId: string) =>
       nodeId === "execution:1" ? executionDetail : null,
     ),
+    getEvidencePreview: vi.fn(async () => ({
+      id: "evidence",
+      role: "execution_log",
+      name: "nextflow.log",
+      format: "text",
+      size_bytes: 0,
+      truncated: false,
+      content: "",
+    })),
   };
   return api;
 }

@@ -43,6 +43,21 @@ class FakeService:
     def get_artifacts(self, task_id):
         return () if task_id == TASK_ID else None
 
+    def get_evidence_preview(self, task_id, evidence_id):
+        if task_id != TASK_ID:
+            return None
+        if evidence_id != "evidence-1":
+            raise KeyError(evidence_id)
+        return {
+            "id": evidence_id,
+            "role": "execution_log",
+            "name": "nextflow.log",
+            "format": "text",
+            "size_bytes": 12,
+            "truncated": False,
+            "content": "hello world\n",
+        }
+
     def get_validation(self, task_id):
         return {"reports": [], "evaluations": []} if task_id == TASK_ID else None
 
@@ -86,3 +101,15 @@ def test_static_index_is_served_when_directory_is_configured(tmp_path):
     response = TestClient(app).get("/")
     assert response.status_code == 200
     assert "BioHarness Observatory UI" in response.text
+
+
+def test_evidence_preview_endpoint_is_read_only_and_id_scoped():
+    response = client().get(f"/api/tasks/{TASK_ID}/evidence/evidence-1")
+    assert response.status_code == 200
+    assert response.json()["role"] == "execution_log"
+    assert response.json()["content"] == "hello world\n"
+
+
+def test_unknown_evidence_id_is_404():
+    response = client().get(f"/api/tasks/{TASK_ID}/evidence/not-registered")
+    assert response.status_code == 404

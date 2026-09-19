@@ -51,6 +51,18 @@ def create_router(service, *, poll_interval_seconds: float) -> APIRouter:
             raise HTTPException(status_code=404, detail="task not found")
         return value
 
+    @router.get("/api/tasks/{task_id}/evidence/{evidence_id}")
+    def get_evidence_preview(task_id: UUID, evidence_id: str):
+        try:
+            value = service.get_evidence_preview(task_id, evidence_id)
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="evidence not found")
+        except ValueError:
+            raise HTTPException(status_code=415, detail="evidence preview unsupported")
+        if value is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        return value
+
     @router.get("/api/tasks/{task_id}/artifacts")
     def get_artifacts(task_id: UUID):
         value = service.get_artifacts(task_id)
