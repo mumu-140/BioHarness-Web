@@ -1049,3 +1049,21 @@ h2 { font-size: 24px; }
     grid-template-columns: 1fr;
   }
 }
+
+
+.attempt-provider {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.attempt-provider span {
+  flex: 0 0 auto;
+  color: #8a949b;
+  font-size: 9px;
+}
+
+.attempt-provider code {
+  min-width: 0;
+}
