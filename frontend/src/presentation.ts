@@ -206,5 +206,5 @@ export function formatValue(value: unknown): string {
 
 export function evidenceRoleLabel(role: unknown): string {
   const value = String(role ?? "");
-  return EVIDENCE_ROLE_LABELS[value] ?? value || "证据文件";
+  return EVIDENCE_ROLE_LABELS[value] ?? (value || "证据文件");
 }
