@@ -121,6 +121,20 @@ const FIELD_LABELS: Record<string, string> = {
   executor_evidence: "执行器证据",
 };
 
+const EVIDENCE_ROLE_LABELS: Record<string, string> = {
+  process_record: "进程记录",
+  wrapper_stdout: "包装器标准输出",
+  wrapper_stderr: "包装器错误输出",
+  provider_invocation: "Provider 调用参数",
+  resolved_manifest: "解析输入清单",
+  execution_log: "执行日志",
+  execution_trace: "执行跟踪",
+  candidate_manifest: "候选结果清单",
+  audit_table: "审计表",
+  alignment: "序列比对",
+  tree: "系统发育树",
+};
+
 const VALUE_LABELS: Record<string, string> = {
   unsupported: "不支持",
   limited: "有限支持",
@@ -187,4 +201,10 @@ export function formatValue(value: unknown): string {
     return value;
   }
   return String(value);
+}
+
+
+export function evidenceRoleLabel(role: unknown): string {
+  const value = String(role ?? "");
+  return EVIDENCE_ROLE_LABELS[value] ?? value || "证据文件";
 }
