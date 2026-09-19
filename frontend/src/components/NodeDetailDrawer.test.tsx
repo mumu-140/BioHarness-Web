@@ -110,13 +110,36 @@ const detail = {
           terminal_outcome: null,
           exit_code: null,
           evidence: [
-            { path: "attempt/provider_evidence.json" },
+            {
+              role: "execution_log",
+              path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/nextflow.log",
+            },
+            {
+              role: "candidate_manifest",
+              path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/manifest.json",
+            },
           ],
         },
       },
     },
   ],
   evidence_refs: [],
+  evidence_previews: [
+    {
+      id: "ev-log",
+      role: "execution_log",
+      name: "nextflow.log",
+      source_path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/nextflow.log",
+      preview_ref: "/api/tasks/a/evidence/ev-log",
+    },
+    {
+      id: "ev-manifest",
+      role: "candidate_manifest",
+      name: "manifest.json",
+      source_path: "/home/yangs/software/BioHarness-P0-Acceptance/sessions/test/manifest.json",
+      preview_ref: "/api/tasks/a/evidence/ev-manifest",
+    },
+  ],
   links: ["/api/tasks/a/events"],
 };
 
@@ -178,7 +201,42 @@ describe("NodeDetailDrawer", () => {
     expect(panel.textContent).toContain("核验依据");
     expect(panel.textContent).toContain("进程探测");
     expect(panel.textContent).toContain("无法确认");
-    expect(panel.textContent).toContain("provider_evidence.json");
+    expect(panel.textContent).toContain("执行日志");
+    expect(panel.textContent).toContain("候选结果清单");
     expect(panel.textContent).toContain("原始 payload");
+  });
+
+  it("loads a persisted evidence file on demand without exposing a filesystem URL", async () => {
+    const user = userEvent.setup();
+    const loadEvidencePreview = vi.fn(async (previewRef: string) => {
+      expect(previewRef).toBe("/api/tasks/a/evidence/ev-log");
+      return {
+        id: "ev-log",
+        role: "execution_log",
+        name: "nextflow.log",
+        format: "text",
+        size_bytes: 42,
+        truncated: false,
+        content: "executor > process TF_TREE completed\n",
+      };
+    });
+
+    render(
+      <NodeDetailDrawer
+        detail={detail}
+        loadEvidencePreview={loadEvidencePreview}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "展开尝试 2详情" }));
+    await user.click(screen.getByRole("button", { name: "预览执行日志" }));
+
+    expect(loadEvidencePreview).toHaveBeenCalledTimes(1);
+    const preview = await screen.findByLabelText("证据预览");
+    expect(preview.textContent).toContain("执行日志");
+    expect(preview.textContent).toContain("nextflow.log");
+    expect(preview.textContent).toContain("executor > process TF_TREE completed");
+    expect(preview.textContent).not.toContain("/home/yangs/software");
   });
 });
