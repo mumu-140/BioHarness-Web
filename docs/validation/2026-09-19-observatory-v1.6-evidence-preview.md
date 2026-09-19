@@ -101,7 +101,7 @@ Frontend:
 
 Backend:
 
-- 31 tests passed;
+- 32 tests passed;
 - 1 environment-dependent database test skipped.
 
 ## Live pre-merge smoke
@@ -114,7 +114,7 @@ Pre-merge image:
 
 Image digest:
 
-`sha256:e7f1ebabe4f6e6f02d78ea0926a043784f2f1d1b1327875ad5fd7cf8eb318014`
+`sha256:9c3ae9806559b40b2eb430280267f17eb9e9cfb1a2bab53421643400d46ae7ba`
 
 Smoke container:
 
@@ -172,3 +172,15 @@ It adds no:
 - policy mutation;
 - memory mutation;
 - database write.
+
+
+### Final pre-merge smoke
+
+The final branch head `539469e572bd0018b443325e649642089838808e` was rebuilt and re-smoked after the last safety/documentation fixes.
+
+The final pre-merge image remained fully read-only:
+
+- container root filesystem: `read-only = true`;
+- evidence mount: `RW = false`.
+
+The same four live evidence roles were re-fetched successfully and the unknown evidence ID still returned 404.
