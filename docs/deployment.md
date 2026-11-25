@@ -1,91 +1,72 @@
-# Deployment
+# Deployment Principles
 
-V1 is intended for trusted lab/internal networking.
+**Status: target principles only.** The V2 runtime and production deployment have not been implemented or selected.
 
-## 1. Create a SELECT-only PostgreSQL role
+## 1. Deployment shape
 
-Run as a database administrator and replace the password value through your
-secret-management workflow:
+BioHarness-Web is a backend-hosted application:
 
-    CREATE ROLE bioharness_web LOGIN PASSWORD '<secret>';
-    GRANT CONNECT ON DATABASE bioharness TO bioharness_web;
-    GRANT USAGE ON SCHEMA public TO bioharness_web;
-    GRANT SELECT ON ALL TABLES IN SCHEMA public TO bioharness_web;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA public
-      GRANT SELECT ON TABLES TO bioharness_web;
-    ALTER ROLE bioharness_web SET default_transaction_read_only = on;
+- browser: UI only; no provider credentials or direct access to scientific workspaces;
+- Web backend: direct model API calls, Core Host adapter, configured Module tools and visual projections;
+- Core workspace: authoritative request and scientific progress records;
+- Modules and data/HPC: domain-specific capability and scientific data stores.
 
-Do not grant ownership, CREATE, INSERT, UPDATE, DELETE, TRUNCATE or REFERENCES.
+The backend runs where it can access the selected Core workspace and configured Module tools. It also needs outbound connectivity to selected model provider APIs unless a separately configured local model endpoint is used.
 
-For an already existing role, revoke accidental write capabilities before use:
+## 2. Workspace access
 
-    REVOKE CREATE ON SCHEMA public FROM bioharness_web;
-    REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-      ON ALL TABLES IN SCHEMA public FROM bioharness_web;
-    ALTER ROLE bioharness_web SET default_transaction_read_only = on;
+- Bind each Web workspace to an explicit canonical research workspace.
+- Use Core's public Host interface for scientific request state.
+- Use Project Governance's public CLI/MCP for project tree and route queries.
+- Do not mount or expose a broad home directory.
+- Configure narrow evidence roots and module work directories.
+- Keep large scientific datasets in existing storage/HPC locations.
+- Do not allow browser-supplied arbitrary paths to reach the backend filesystem.
 
-Verify:
+A remote compute adapter may use an explicitly configured host/CLI/MCP tool. Web must not become an independent scheduler or copy large datasets between machines by default.
 
-    SHOW default_transaction_read_only;
-    SELECT count(*) FROM scientific_task_specs;
+## 3. Credentials
 
-A write or DDL statement must fail.
+- Model API keys, MCP credentials, SSH keys and other secrets stay on the backend.
+- Supply secrets through the deployment environment or an approved secret manager.
+- Never commit secrets or include them in model prompts, browser responses or operational traces.
+- Redact sensitive command arguments and environment variables before recording tool events.
 
-## 2. Build
+## 4. Network exposure
 
-From the repository root:
+Initial deployment is limited to a trusted private network.
 
-    docker build -f deploy/Dockerfile -t bioharness-web:observatory-v1 .
+Preferred access patterns:
 
-## 3. Run
+1. loopback-bound service accessed through an SSH tunnel; or
+2. authenticated HTTPS reverse proxy on an approved private domain.
 
-The service needs only a PostgreSQL URL and a network path to that database:
+Do not expose the application publicly until authentication, TLS, session isolation, workspace isolation and audit behavior have been reviewed.
 
-    docker run -d \
-      --name bioharness-web-observatory \
-      --restart unless-stopped \
-      --network <bioharness-db-network> \
-      -p 127.0.0.1:18080:8080 \
-      -e BIOHARNESS_WEB_DATABASE_URL='postgresql+psycopg://bioharness_web:<secret>@<db-host>:5432/bioharness' \
-      -e BIOHARNESS_WEB_POLL_INTERVAL_SECONDS=2 \
-      bioharness-web:observatory-v1
+SSE connections must support reconnect and report stale/disconnected state without changing Core task state.
 
-The container does not require writable mounts to BioHarness source, Genome-web
-scientific data, or provider outputs.
+## 5. Process and filesystem isolation
 
-### Optional read-only evidence previews
+- Run the backend as a non-root service account.
+- Use the narrowest required workspace and tool mounts.
+- Mount source datasets read-only unless a documented workflow requires a separate writable output directory.
+- Keep generated outputs in explicit project output locations.
+- Do not grant arbitrary shell execution to model-generated text.
+- Stop/restart of Web must not mutate Core or Module stores.
 
-To preview persisted execution logs, traces, manifests, and similar textual
-evidence from the Web UI, mount only the provider output root that contains the
-persisted evidence paths. The mount must be read-only.
+## 6. Desktop
 
-For example:
+Desktop packaging is deferred. Tauri may later use the same Web frontend and backend contract. The local-sidecar versus remote-backend decision is based on actual multi-device and filesystem requirements, not assumed in advance.
 
-    -v <deploy-root>/BioHarness-P0-Acceptance:/evidence/BioHarness-P0-Acceptance:ro \
-    -e BIOHARNESS_WEB_EVIDENCE_HOST_ROOT=<deploy-root>/BioHarness-P0-Acceptance \
-    -e BIOHARNESS_WEB_EVIDENCE_MOUNT_ROOT=/evidence/BioHarness-P0-Acceptance \
-    -e BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES=131072
+## 7. Deployment TODO
 
-The API never accepts a filesystem path from the browser. A preview request uses
-a task-scoped evidence ID derived from evidence already persisted by BioHarness.
-The server resolves that ID back to persisted evidence, verifies that the path is
-inside the configured host root, maps it into the read-only container mount, and
-rejects symlink/path escapes. Files larger than the preview limit are shown as a
-head-and-tail excerpt rather than being returned in full.
+- [ ] Select the first authorized host and canonical workspace.
+- [ ] Verify installed Core Host and Module CLI/MCP versions on that host.
+- [ ] Select model provider endpoint and store its key server-side.
+- [ ] Define authentication and session-to-workspace mapping.
+- [ ] Define narrow workspace, evidence and output roots.
+- [ ] Verify SSE behavior through the intended reverse proxy or SSH tunnel.
+- [ ] Verify that stopping Web leaves Core and Modules unchanged.
+- [ ] Record exact image/build SHA, configuration identity and smoke-test evidence before production use.
 
-Do not mount a broad home directory or the whole `<deploy-root>` tree.
-Mount the narrowest provider-output root needed by the observatory.
-
-## 4. Smoke checks
-
-    curl -fsS http://127.0.0.1:18080/api/health
-    curl -fsS http://127.0.0.1:18080/api/tasks
-    curl -N --max-time 5 http://127.0.0.1:18080/api/stream
-
-Use an SSH tunnel and open http://127.0.0.1:18080/ on the client. The default deployment binds the server port to loopback only.
-
-## 5. Failure isolation
-
-Stopping or deleting the Web container must not affect BioHarness execution.
-If the database or SSE stream becomes temporarily unavailable, the frontend
-keeps the last successful task graph visible and labels it stale.
+No production deployment is authorized or claimed by this planning document.
