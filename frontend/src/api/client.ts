@@ -50,6 +50,33 @@ export async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function sendJson<T>(method: "POST" | "PUT", url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    let detail: Partial<SourceError> = {};
+    try {
+      detail = ((await response.json()) as { detail?: Partial<SourceError> }).detail ?? {};
+    } catch {
+      // not JSON: keep the HTTP status as the only fact
+    }
+    throw new ApiError(
+      response.status,
+      detail.code ?? "HTTP_" + response.status,
+      typeof detail.message === "string" ? detail.message : "请求失败(HTTP " + response.status + ")",
+    );
+  }
+  return response.json() as Promise<T>;
+}
+
+export function conversationsUrl(workspace: string, rest = ""): string {
+  return `/api/workspaces/${encodeURIComponent(workspace)}/conversations${rest}`;
+}
+
 export async function signIn(token: string): Promise<boolean> {
   const response = await fetch("/api/session", {
     method: "POST",

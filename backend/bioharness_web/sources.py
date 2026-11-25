@@ -125,6 +125,30 @@ def path_redactor(workspace: Workspace):
     return redact
 
 
+def path_expander(workspace: Workspace):
+    """The inverse of path_redactor for what a model proposes: labels back to directories."""
+    labels = [("$WORKSPACE", str(workspace.path))] + [
+        (f"$EVIDENCE_ROOT_{index}", str(root))
+        for index, root in enumerate(workspace.evidence_roots[1:], 1)
+    ]
+    labels.sort(key=lambda item: -len(item[0]))
+
+    def expand(value: Any) -> Any:
+        if isinstance(value, str):
+            # Only a value that is itself a labelled path; a label inside prose stays as written.
+            for label, path in labels:
+                if value == label or value.startswith(label + "/"):
+                    return path + value[len(label):]
+            return value
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if isinstance(value, dict):
+            return {key: expand(item) for key, item in value.items()}
+        return value
+
+    return expand
+
+
 def source_error(owner: str, raw: dict) -> dict:
     """Core nests {code, message, ...}; Governance returns a plain message."""
     error = raw.get("error")
@@ -174,6 +198,11 @@ class Sources:
         self.runner = runner
         self._cache: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
         self._inflight: dict[tuple, asyncio.Future] = {}
+
+    def invalidate(self, workspace_id: str) -> None:
+        """Forget cached snapshots of a workspace after this host changed Core state."""
+        for key in [key for key in self._cache if key[0] == workspace_id]:
+            del self._cache[key]
 
     def workspace(self, workspace_id: str) -> Workspace:
         try:

@@ -65,3 +65,24 @@ def test_preview_size_has_a_floor(tmp_path):
 def test_poll_interval_has_a_floor(tmp_path):
     with pytest.raises(ValueError, match="poll interval"):
         Settings.from_env(env(tmp_path, BIOHARNESS_WEB_POLL_INTERVAL_SECONDS="0.2"))
+
+
+def test_the_runtime_needs_the_model_and_the_ledger_together(tmp_path):
+    model = {"BIOHARNESS_WEB_MODEL_BASE_URL": "http://127.0.0.1:9/v1", "BIOHARNESS_WEB_MODEL_API_KEY": "k",
+             "BIOHARNESS_WEB_MODEL_NAME": "m"}
+    assert Settings.from_env(env(tmp_path)).runtime_enabled is False
+    with pytest.raises(ValueError, match="together"):
+        Settings.from_env(env(tmp_path, **model))
+    with pytest.raises(ValueError, match="together"):
+        Settings.from_env(env(tmp_path, BIOHARNESS_WEB_MODEL_NAME="m",
+                              BIOHARNESS_WEB_LEDGER=str(tmp_path / "ledger.sqlite3")))
+    with pytest.raises(ValueError, match="LEDGER"):
+        Settings.from_env(env(tmp_path, **model, BIOHARNESS_WEB_LEDGER="relative.sqlite3"))
+    ready = Settings.from_env(env(tmp_path, **model, BIOHARNESS_WEB_LEDGER=str(tmp_path / "ledger.sqlite3"),
+                                  BIOHARNESS_WEB_MCP_SERVERS='{"gov": ["bioharness-governance", "mcp"]}',
+                                  BIOHARNESS_WEB_TOOL_ENV="HTTPS_PROXY, NO_PROXY"))
+    assert ready.runtime_enabled is True and ready.model.name == "m"
+    assert ready.mcp_servers == {"gov": ("bioharness-governance", "mcp")}
+    assert ready.tool_env_passthrough == ("HTTPS_PROXY", "NO_PROXY")
+    with pytest.raises(ValueError, match="MCP"):
+        Settings.from_env(env(tmp_path, BIOHARNESS_WEB_MCP_SERVERS='{"gov": "not-a-list"}'))

@@ -78,6 +78,18 @@ The service needs Python 3.12+, the built frontend and the public `bioharness-ho
 | `BIOHARNESS_WEB_POLL_INTERVAL_SECONDS` | Default 5, minimum 1. |
 | `BIOHARNESS_WEB_SERVICE_ID`, `BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES` | Optional. |
 
+The native runtime is off unless all of the following are set; the read side is unaffected.
+
+| Variable | Meaning |
+|---|---|
+| `BIOHARNESS_WEB_MODEL_BASE_URL`, `BIOHARNESS_WEB_MODEL_API_KEY`, `BIOHARNESS_WEB_MODEL_NAME` | An OpenAI-compatible chat-completions endpoint called directly by the backend. The model needs tool calling, streaming and a context of roughly 350 000 characters. |
+| `BIOHARNESS_WEB_LEDGER` | Absolute path of the technical SQLite ledger, in a directory only the service user can read. It holds conversation text and observed tool traffic; keep it out of the repository and out of the workspace. |
+| `BIOHARNESS_WEB_MCP_SERVERS` | Optional. JSON object `{"name": ["command", "arg", ...]}` of stdio MCP servers whose tools the model may call; `{workspace}` in an argument is replaced by the workspace directory. |
+| `BIOHARNESS_WEB_CORE_CALL_TIMEOUT_SECONDS` | Default 3900. Must exceed the advisor timeout configured in the workspace (Core allows up to 3600 s); when it passes, the call's outcome is recorded as unknown. |
+| `BIOHARNESS_WEB_TOOL_ENV` | Optional. Comma-separated names of environment variables that Core and the MCP servers receive (for example a proxy an advisor needs). Nothing else of the service environment reaches them. |
+
+With the runtime on, the service itself writes only its ledger file, and changes the workspace only through Core's public commands, exactly as an Agent host does. A configured MCP tool writes whatever that module writes: configure only modules whose behaviour in the workspace you accept. Stopping the service interrupts runs in progress; their requests stay recoverable in Core.
+
 Start it with `python -m bioharness_web`. Configured directories are replaced by `$WORKSPACE` and `$EVIDENCE_ROOT_n` in responses. A recorded evidence file outside them is shown by file name only (`$OUTSIDE_CONFIGURED_ROOTS/name`) and cannot be previewed. Free text written by a model or a tool (summaries, instructions) and the content of a previewed evidence file are shown as recorded and are not scanned for paths. Core state of any workspace is never previewed, even when it lies under a configured evidence root. The single shared token is adequate for one trusted operator on a private network, not for multiple users: it does not expire, sign-in attempts are not rate limited, and the session cookie is marked Secure only when the service itself sees HTTPS (run it behind the proxy with forwarded-scheme support, or keep it on loopback). The Core and Governance commands are started with a reduced environment and never receive the token. The V1 container files were removed with the PostgreSQL service; a container image for this service is not provided yet.
 
 No production deployment is authorized or claimed by this planning document.

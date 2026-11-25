@@ -34,6 +34,32 @@ export interface Meta {
   workspaces: string[];
   poll_interval_seconds: number;
   tools: Record<string, { command: string; found: boolean }>;
+  runtime?: { enabled: boolean; model: string | null; module_tool_servers: string[] };
+}
+
+// ---- native runtime: conversations, runs and the recorded event log ----------
+export interface Conversation {
+  id: string;
+  workspace: string;
+  request_id: string | null;
+  created_at: string;
+  last_run_state?: string | null;
+}
+
+export interface ConversationState {
+  conversation: Conversation;
+  active_run: { id: string } | null;
+  begin_reconcile: "OUTCOME_UNKNOWN" | "EXISTING_REQUEST" | null;
+  begin_candidates: (OpenRequest & { question_match: string })[];
+  open_listing: { listed: number; may_be_incomplete: boolean; source_message: string | null } | null;
+}
+
+export interface ConversationEvent {
+  seq: number | null; // null: text still being written, not a recorded event
+  run_id: string | null;
+  type: string;
+  data: Record<string, unknown>;
+  at?: string;
 }
 
 // ---- Core: science_now ------------------------------------------------------

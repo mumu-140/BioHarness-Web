@@ -52,6 +52,17 @@ def _permitted(workspace: Workspace, resolved: Path) -> bool:
     return any(root == resolved or root in resolved.parents for root in workspace.evidence_roots)
 
 
+def path_permitted(workspace: Workspace, raw: str) -> bool:
+    """Whether a path a model proposed may be handed to Core or a module tool: inside a
+    configured root, outside every Core state directory, after resolving links and '..'."""
+    try:
+        path = Path(raw).expanduser()  # as Core does for an evidence path
+        resolved = (path if path.is_absolute() else workspace.path / path).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return _permitted(workspace, resolved)
+
+
 def _allowed_file(workspace: Workspace, source: str) -> Path | None:
     """The real path of `source` if it lies inside a configured root."""
     if not os.path.isabs(source):

@@ -4,6 +4,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { type ApiError, getJson } from "./api/client";
 import type { Meta, NowData, OpenData, TreeData } from "./api/types";
 import ConnectionBadge from "./components/ConnectionBadge";
+import ConversationPanel from "./components/ConversationPanel";
 import Inspector from "./components/Inspector";
 import Navigator from "./components/Navigator";
 import NowPanel from "./components/NowPanel";
@@ -30,6 +31,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [requestId, setRequestId] = useState<string | null>(null);
   const [stepId, setStepId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("tree");
+  const [dockOpen, setDockOpen] = useState(true);
 
   // A service configured with a single workspace has nothing to choose between.
   const workspaces = meta.data?.workspaces;
@@ -213,6 +215,32 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             </>
           )}
         </section>
+
+        {meta.data.runtime?.enabled && workspace && (
+          <div className={"dock " + (dockOpen ? "is-open" : "")}>
+            <button type="button" className="dock-toggle" aria-expanded={dockOpen} onClick={() => setDockOpen(!dockOpen)}>
+              {dockOpen ? "收起对话与执行轨迹" : "展开对话与执行轨迹"}
+            </button>
+            {dockOpen && (
+              <ConversationPanel
+                workspace={workspace}
+                model={meta.data.runtime.model}
+                requestId={requestId}
+                scopeId={scopeId}
+                delivered={nowData?.phase === "DELIVERED"}
+                onRequestKnown={(id, scope, project) => {
+                  if (id !== requestId) selectRequest(id, scope, project);
+                }}
+                onNewQuestion={() => {
+                  setRequestId(null);
+                  setStepId(null);
+                  setTab("tree");
+                }}
+                eventSourceFactory={eventSourceFactory}
+              />
+            )}
+          </div>
+        )}
       </main>
 
       {workspace && (

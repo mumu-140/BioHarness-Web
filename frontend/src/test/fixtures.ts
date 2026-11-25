@@ -171,20 +171,27 @@ export const ROUTES = {
 
 type Route = { status?: number; body: unknown };
 
-/** Replaces fetch by a table of URL -> answer and records every requested URL. */
+/**
+ * Replaces fetch by a table of answers and records what was requested. A GET is looked
+ * up by its URL; another method first by "METHOD url", then by the URL alone.
+ */
 export function stubFetch(routes: Record<string, Route | (() => Route)>) {
   const calls: string[] = [];
+  const bodies: Record<string, unknown> = {};
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    calls.push((init?.method ?? "GET") + " " + url);
-    const entry = routes[url];
-    if (!entry) return new Response(JSON.stringify({ detail: { code: "NOT_STUBBED", message: url } }), { status: 500 });
+    const method = init?.method ?? "GET";
+    const call = method + " " + url;
+    calls.push(call);
+    if (typeof init?.body === "string") bodies[call] = JSON.parse(init.body);
+    const entry = (method === "GET" ? undefined : routes[call]) ?? routes[url];
+    if (!entry) return new Response(JSON.stringify({ detail: { code: "NOT_STUBBED", message: call } }), { status: 500 });
     const route = typeof entry === "function" ? entry() : entry;
     const status = route.status ?? 200;
     return new Response(status === 204 ? null : JSON.stringify(route.body), { status });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { calls, routes };
+  return { calls, routes, bodies };
 }
 
 export class FakeEventSource implements EventSourceLike {

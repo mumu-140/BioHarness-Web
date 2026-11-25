@@ -4,13 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioharness-web"
-version = "0.2.0"
-description = "BioHarness Research Workspace: read-side service over the public Core and Project Governance interfaces"
+version = "0.3.0"
+description = "BioHarness Research Workspace: read side and native model runtime over the public Core and Module interfaces"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.116,<0.117",
-  "pydantic>=2.11,<3",
+  "fastapi>=0.116,<1",
+  "pydantic>=2.12,<3",
   "uvicorn[standard]>=0.35,<1",
+  "pydantic-ai-slim[openai]>=2.75,<3",
+  "mcp>=2.3,<3",
 ]
 
 [project.scripts]
@@ -18,7 +20,7 @@ bioharness-web = "bioharness_web.__main__:main"
 
 [project.optional-dependencies]
 dev = [
-  "anyio>=4.4,<4.15",
+  "anyio>=4.9,<5",
   "httpx>=0.28,<1",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",

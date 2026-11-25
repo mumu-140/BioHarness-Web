@@ -21,6 +21,8 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
     await page.getByRole('button', { name: '进入' }).click();
     await page.locator('.react-flow__node').first().waitFor({ timeout: 15000 });
     errors.length = 0; // the 401 answers before signing in are the expected ones
+    const dock = page.locator('.dock-toggle');
+    await dock.click(); // the read-side checks look at the canvas alone
 
     // ---- research tree ----
     const treeNodes = await page.locator('.react-flow__node').allInnerTexts();
@@ -88,6 +90,32 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
     check('page follows an external Core change without reload', report.includes('Core 当前步骤'), after.map(t => t.replace(/\n/g, ' | ')).join(' ## '));
     check('progress chip updated', (await page.locator('.now-panel').innerText()).includes('步骤 2/3'));
     await page.screenshot({ path: '/qa/out/after-external-change.png' });
+
+    // ---- a conversation conducted by the native runtime (scripted model, real Core) ----
+    await dock.click();
+    await page.getByRole('button', { name: '新问题' }).click();
+    const QUESTION = 'Fixture question: explain what a count table is.';
+    await page.getByLabel('消息').fill(QUESTION);
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.chat-message.is-assistant', { hasText: 'Delivered: a count table' }).waitFor({ timeout: 60000 });
+    await page.getByRole('button', { name: '发送' }).waitFor({ timeout: 30000 }); // the run has ended
+    const chat = await page.locator('.chat-viewport').innerText();
+    check('conversation shows the question and the delivered answer', chat.includes(QUESTION) && chat.includes('Delivered: a count table'));
+    const trace = await page.locator('.trace').innerText();
+    const order = ['science_begin', 'science_plan', 'science_submit', 'science_deliver'].map(n => trace.indexOf(n));
+    check('execution trace lists the Core calls in order', order.every(i => i >= 0) && order.join() === [...order].sort((a, b) => a - b).join(), JSON.stringify(order));
+    check('trace says a returned call is not scientific validity', trace.includes('调用返回不代表科学结果成立'));
+    await page.locator('.now-panel', { hasText: '已交付' }).waitFor({ timeout: 30000 });
+    const delivered = await page.locator('.now-panel').innerText();
+    check('workspace follows the new request to Core\'s delivered state', delivered.includes(QUESTION) && delivered.includes('fixture answer') && delivered.includes('未评审'), delivered.slice(0, 300));
+    const newRequest = (await page.locator('.context-bar').innerText());
+    check('context bar names the new request, not the earlier one', !newRequest.includes(RID) && /sci-\d{8}-[0-9a-f]{6}/.test(newRequest), newRequest);
+    await page.getByLabel('消息').waitFor();
+    check('a delivered request takes no further message', await page.getByLabel('消息').isDisabled());
+    await page.screenshot({ path: '/qa/out/conversation.png' });
+    await page.reload();
+    await page.locator('.navigator').waitFor({ timeout: 15000 });
+    check('nothing sensitive in the page after the conversation', !(await page.content()).match(/sk-browser-check|browser-check-[0-9a-f]{8}/));
   } catch (e) {
     check('script completed', false, e.message.split('\n').slice(0, 6).join(' / '));
     try { await page.screenshot({ path: '/qa/out/failure.png' }); } catch {}
