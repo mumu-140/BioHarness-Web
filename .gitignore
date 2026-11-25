@@ -8,3 +8,7 @@ node_modules/
 frontend/dist/
 .env
 .DS_Store
+
+# Core state written by developer Agent hosts; never part of this public repository
+.bioharness/
+*.tsbuildinfo

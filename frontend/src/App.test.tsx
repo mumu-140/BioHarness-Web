@@ -1,228 +1,332 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { SWRConfig } from "swr";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { ObservatoryApi } from "./api/client";
-import type { NodeDetail, TaskGraphModel, TaskSummary } from "./api/types";
-import type {
-  EventSourceFactory,
-  EventSourceLike,
-} from "./hooks/useTaskStream";
+import { FakeEventSource, META, NOW, OPEN, ROUTES, SHA, snapshot, stubFetch, TREE } from "./test/fixtures";
 
+const VIEWS = "/api/workspaces/pilot/views";
+const NOW_URL = VIEWS + "/now?request_id=sci-1";
 
-const tasks: TaskSummary[] = [
-  {
-    id: "00000000-0000-0000-0000-000000000101",
-    title: "Genome-web TF reference",
-    analysis_class: "tf_family_phylogeny_reference",
-    status: "RUNNING",
-    stage: "EXECUTION",
-    updated_at: "2026-09-19T02:00:00Z",
-    needs_attention: false,
-  },
-  {
-    id: "00000000-0000-0000-0000-000000000102",
-    title: "RNA-seq task",
-    analysis_class: "rnaseq",
-    status: "WAITING",
-    stage: "DATA",
-    updated_at: "2026-09-19T02:01:00Z",
-    needs_attention: false,
-  },
-];
-
-const graphs: Record<string, TaskGraphModel> = {
-  [tasks[0].id]: {
-    task: tasks[0],
-    revision: "g1",
-    nodes: [
-      {
-        id: "execution:1",
-        type: "EXECUTION",
-        label: "Genome-web TF",
-        status: "ACTIVE",
-        detail_ref: "/detail",
-      },
-    ],
-    edges: [],
-  },
-  [tasks[1].id]: {
-    task: tasks[1],
-    revision: "g2",
-    nodes: [
-      {
-        id: "data",
-        type: "DATA",
-        label: "Resolve data",
-        status: "WAITING",
-        detail_ref: "/detail",
-      },
-    ],
-    edges: [],
-  },
-};
-
-const executionDetail: NodeDetail = {
-  node: graphs[tasks[0].id].nodes[0],
-  summary: {
-    current_attempt: {
-      attempt_number: 1,
-      state: "RUNNING",
-      provider_attempt_name: "bh-test-1",
-    },
-  },
-  events: [],
-  evidence_refs: [],
-  links: [],
-};
-
-
-class FakeEventSource implements EventSourceLike {
-  onopen: ((event: Event) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-  private listeners = new Map<string, Array<(event: MessageEvent) => void>>();
-
-  addEventListener(
-    type: string,
-    listener: (event: MessageEvent) => void,
-  ): void {
-    const current = this.listeners.get(type) ?? [];
-    current.push(listener);
-    this.listeners.set(type, current);
-  }
-
-  close(): void {}
-
-  emitOpen(): void {
-    this.onopen?.(new Event("open"));
-  }
-
-  emitError(): void {
-    this.onerror?.(new Event("error"));
-  }
-
-  emit(type: string, data: unknown): void {
-    const event = { data: JSON.stringify(data) } as MessageEvent;
-    for (const listener of this.listeners.get(type) ?? []) {
-      listener(event);
-    }
-  }
-}
-
-
-function makeApi() {
-  const api: ObservatoryApi = {
-    listTasks: vi.fn(async () => tasks),
-    getTaskGraph: vi.fn(async (taskId: string) => graphs[taskId]),
-    getNodeDetail: vi.fn(async (_taskId: string, nodeId: string) =>
-      nodeId === "execution:1" ? executionDetail : null,
-    ),
-    getEvidencePreview: vi.fn(async () => ({
-      id: "evidence",
-      role: "execution_log",
-      name: "nextflow.log",
-      format: "text",
-      size_bytes: 0,
-      truncated: false,
-      content: "",
-    })),
+function routes(overrides: Record<string, { status?: number; body: unknown }> = {}) {
+  return {
+    "/api/meta": { body: META },
+    [VIEWS + "/tree"]: { body: snapshot("tree", {}, TREE) },
+    [VIEWS + "/tree?project_id=dap"]: { body: snapshot("tree", { project_id: "dap" }, TREE) },
+    [VIEWS + "/open"]: { body: snapshot("open", {}, OPEN) },
+    [NOW_URL]: { body: snapshot("now", { request_id: "sci-1" }, NOW) },
+    [VIEWS + "/routes?limit=100&scope_id=dap"]: { body: snapshot("routes", { scope_id: "dap", limit: 100 }, ROUTES) },
+    ...overrides,
   };
-  return api;
 }
 
+function renderApp() {
+  return render(
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+      <App eventSourceFactory={(url) => new FakeEventSource(url)} />
+    </SWRConfig>,
+  );
+}
+
+async function openRequest(id: string) {
+  const open = await screen.findByRole("region", { name: "开放请求" });
+  await userEvent.click(await within(open).findByText(id));
+}
+
+beforeEach(() => {
+  FakeEventSource.instances = [];
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("App", () => {
-  it("renders task list on the left and graph for selected task", async () => {
-    render(<App api={makeApi()} eventSourceFactory={() => new FakeEventSource()} />);
-    expect((await screen.findAllByText("Genome-web TF reference")).length).toBe(2);
-    expect(await screen.findByText("Genome-web TF")).toBeTruthy();
-  });
-
-  it("selecting another task replaces the graph", async () => {
+  it("asks for the access token when the service answers 401, then loads", async () => {
     const user = userEvent.setup();
-    render(<App api={makeApi()} eventSourceFactory={() => new FakeEventSource()} />);
-    await user.click(await screen.findByText("RNA-seq task"));
-    expect(await screen.findByText("Resolve data")).toBeTruthy();
+    let signedIn = false;
+    stubFetch({
+      ...routes(),
+      "/api/meta": () =>
+        signedIn
+          ? { body: META }
+          : { status: 401, body: { detail: { code: "UNAUTHENTICATED", message: "sign in" } } },
+      "/api/session": () => {
+        signedIn = true;
+        return { status: 204, body: null };
+      },
+    });
+    renderApp();
+    await user.type(await screen.findByLabelText("服务访问令牌"), "the-token");
+    await user.click(screen.getByRole("button", { name: "进入" }));
+    expect(await screen.findByRole("heading", { name: "科研工作台" })).toBeTruthy();
   });
 
-  it("opens only selected node detail and closing preserves task selection", async () => {
-    const user = userEvent.setup();
-    render(<App api={makeApi()} eventSourceFactory={() => new FakeEventSource()} />);
+  it("shows the research tree from Project Governance and selects no request by itself", async () => {
+    const { calls } = stubFetch(routes());
+    renderApp();
+    const tree = await screen.findByRole("region", { name: "科研树" });
+    expect(await within(tree).findByText("dap-branch")).toBeTruthy();
+    expect(within(tree).getAllByText("sci-2").length).toBe(1);
 
-    const graphRegion = await screen.findByLabelText("任务流程图");
-    await user.click(
-      within(graphRegion).getByRole("button", { name: /Genome-web TF/ }),
+    // the unscoped request is listed by Core only and never placed under a scope
+    expect(within(tree).queryByText("sci-9")).toBeNull();
+    const open = screen.getByRole("region", { name: "开放请求" });
+    expect(await within(open).findByText("未归属研究范围")).toBeTruthy();
+    expect(within(open).getByText(/需明确选择,不会自动选定/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "科研流程" }));
+    expect(screen.getByText(/请在左侧明确选择一个请求/)).toBeTruthy();
+    expect(calls.some((call) => call.includes("/views/now"))).toBe(false);
+  });
+
+  it("marks goal-version differences and related links as context, not gates", async () => {
+    stubFetch(routes());
+    renderApp();
+    expect(await screen.findByText("目标版本有差异")).toBeTruthy();
+    await userEvent.click(within(screen.getByLabelText("科研树", { selector: ".graph-fallback" })).getByText("dap-branch"));
+    const inspector = screen.getByRole("complementary", { name: "检查器" });
+    expect(within(inspector).getByText(/dap 绑定 v0,当前 v1/)).toBeTruthy();
+    expect(within(inspector).getByText(/相关链接是背景参考,不是前置条件/)).toBeTruthy();
+  });
+
+  it("renders the selected request's plan with the status Core reports", async () => {
+    stubFetch(routes());
+    renderApp();
+    await openRequest("sci-1");
+
+    const state = await screen.findByRole("region", { name: "Core 当前状态" });
+    expect(within(state).getByText("Which motif does the factor bind?")).toBeTruthy();
+    expect(within(state).getByText("Do step 'call' now.")).toBeTruthy();
+    expect(within(state).getByText("步骤 1/2")).toBeTruthy();
+    expect(within(state).getByText(/Report the motif/)).toBeTruthy();
+
+    const graph = screen.getByLabelText("科研流程图");
+    const steps = within(graph).getAllByRole("button");
+    expect(steps.map((step) => within(step).getByRole("strong").textContent)).toEqual(["inputs", "call"]);
+    expect(within(steps[0]).getByText(/已完成 · 尝试 1 · 未评审/)).toBeTruthy();
+    expect(within(steps[1]).getByText("Core 当前步骤")).toBeTruthy();
+    expect(within(steps[0]).queryByText("Core 当前步骤")).toBeNull();
+  });
+
+  it("shows a step's declared method and its recorded submissions, and previews by exact anchor", async () => {
+    const preview =
+      `/api/workspaces/pilot/evidence-preview?evidence_id=e1&request_id=sci-1&sha256=${SHA}&submission_index=1`;
+    const { calls } = stubFetch(
+      routes({
+        [preview]: {
+          body: {
+            ok: true,
+            selector: {},
+            recorded_reference: "MATCH",
+            snapshot_integrity: "MATCH",
+            preview: {
+              evidence_id: "e1",
+              kind: "file",
+              name: "inputs.tsv",
+              recorded_sha256: SHA,
+              recorded_bytes: 20,
+              content_available: true,
+              unavailable_reason: null,
+              current_file_identity: "DIFFERS_FROM_RECORD",
+              format: "text",
+              size_bytes: 20,
+              truncated: false,
+              content: "sample one",
+            },
+          },
+        },
+      }),
     );
+    renderApp();
+    await openRequest("sci-1");
+    const graph = await screen.findByLabelText("科研流程图");
 
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("执行工作流");
-    expect(dialog.textContent).toContain("bh-test-1");
+    await userEvent.click(within(graph).getByText("call"));
+    const inspector = screen.getByRole("complementary", { name: "检查器" });
+    expect(within(inspector).getByText("macs3 callpeak")).toBeTruthy();
+    expect(await within(inspector).findByText("没有记录的提交。")).toBeTruthy();
 
-    await user.click(
-      screen.getByRole("button", { name: "关闭详情" }),
+    await userEvent.click(within(graph).getByText("inputs"));
+    expect(await within(inspector).findByText("Six samples confirmed.")).toBeTruthy();
+    expect(within(inspector).getByText(/否:为提交方报告,未经独立验证/)).toBeTruthy();
+    expect(within(inspector).getByText("$WORKSPACE/inputs.tsv")).toBeTruthy();
+
+    await userEvent.click(within(inspector).getByRole("button", { name: "预览" }));
+    expect(await within(inspector).findByText("sample one")).toBeTruthy();
+    expect(within(inspector).getByText("当前文件与记录不一致")).toBeTruthy();
+    expect(calls).toContain("GET " + preview);
+  });
+
+  it("says that an unscoped request has no public submission history", async () => {
+    const unscoped = { ...NOW, request_id: "sci-9", scope_context: undefined };
+    stubFetch(
+      routes({
+        [VIEWS + "/now?request_id=sci-9"]: { body: snapshot("now", { request_id: "sci-9" }, unscoped) },
+      }),
     );
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: /Genome-web TF reference/ })
-        .getAttribute("aria-current"),
-    ).toBe("true");
+    renderApp();
+    await openRequest("sci-9");
+    await userEvent.click(within(await screen.findByLabelText("科研流程图")).getByText("inputs"));
+    expect(screen.getByText(/此请求未归属研究范围/)).toBeTruthy();
+    expect(screen.getByText("未归属")).toBeTruthy();
   });
 
-  it("marks data stale on stream error while keeping the graph visible", async () => {
-    const stream = new FakeEventSource();
-    render(<App api={makeApi()} eventSourceFactory={() => stream} />);
-
-    expect(await screen.findByText("Genome-web TF")).toBeTruthy();
-    stream.emitError();
-
-    expect(
-      await screen.findByText("连接已断开 · 显示最近一次数据"),
-    ).toBeTruthy();
-    expect(screen.getByText("Genome-web TF")).toBeTruthy();
-  });
-
-
-
-  it("refetches an open node detail after task.updated", async () => {
-    const user = userEvent.setup();
-    const stream = new FakeEventSource();
-    const api = makeApi();
-    render(<App api={api} eventSourceFactory={() => stream} />);
-
-    const graphRegion = await screen.findByLabelText("任务流程图");
-    await user.click(
-      within(graphRegion).getByRole("button", { name: /Genome-web TF/ }),
+  it("shows a Core refusal with its code instead of an empty view", async () => {
+    stubFetch(
+      routes({
+        [VIEWS + "/now?request_id=sci-404"]: {
+          body: snapshot("now", { request_id: "sci-404" }, null, {
+            error: { origin: "core", code: "REQUEST_NOT_FOUND", message: "no such request" },
+          }),
+        },
+      }),
     );
-    await screen.findByRole("dialog");
-    const before = vi.mocked(api.getNodeDetail).mock.calls.length;
-
-    stream.emit("task.updated", {
-      task_id: tasks[0].id,
-      revision: "g3",
-    });
-
-    await waitFor(() => {
-      expect(vi.mocked(api.getNodeDetail).mock.calls.length).toBeGreaterThan(before);
-    });
+    renderApp();
+    await userEvent.type(await screen.findByLabelText("按 request_id 打开"), "sci-404");
+    await userEvent.click(screen.getByRole("button", { name: "打开" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("REQUEST_NOT_FOUND");
+    expect(screen.queryByRole("region", { name: "Core 当前状态" })).toBeNull();
   });
 
-  it("refetches selected task after task.updated invalidation", async () => {
-    const stream = new FakeEventSource();
-    const api = makeApi();
-    render(<App api={api} eventSourceFactory={() => stream} />);
+  it("says when Core shortened its answer", async () => {
+    stubFetch(
+      routes({
+        [NOW_URL]: {
+          body: snapshot("now", { request_id: "sci-1" }, NOW, {
+            shortened: { note: "Parts marked PREVIEW were shortened", fields: ["question"] },
+          }),
+        },
+      }),
+    );
+    renderApp();
+    await openRequest("sci-1");
+    expect(await screen.findByText(/省略了部分内容\(question\)/)).toBeTruthy();
+  });
 
-    await screen.findByText("Genome-web TF");
-    const before = vi.mocked(api.getTaskGraph).mock.calls.length;
+  it("refetches only when a notification names different content", async () => {
+    const { calls, routes: table } = stubFetch(routes());
+    renderApp();
+    await openRequest("sci-1");
+    await screen.findByRole("region", { name: "Core 当前状态" });
+    const source = FakeEventSource.latest();
+    expect(source.url).toBe("/api/workspaces/pilot/stream?project_id=dap&request_id=sci-1");
+    const count = () => calls.filter((call) => call === "GET " + NOW_URL).length;
+    const before = count();
+    const where = { workspace: "pilot", view: "now", selector: { request_id: "sci-1" } };
 
-    stream.emit("task.updated", {
-      task_id: tasks[0].id,
-      revision: "g2",
+    act(() => source.emit("version", { ...where, content_sha256: "v1-now" }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(count()).toBe(before);
+
+    table[NOW_URL] = {
+      body: snapshot("now", { request_id: "sci-1" }, { ...NOW, phase: "READY_TO_DELIVER", action: "DELIVER" }, { content_sha256: "v2-now" }),
+    };
+    act(() => source.emit("version", { ...where, content_sha256: "v2-now" }));
+    await waitFor(() => expect(count()).toBe(before + 1));
+    expect(await screen.findByText("可交付")).toBeTruthy();
+  });
+
+  it("reports a disconnected channel and an unreachable source without discarding the snapshot", async () => {
+    stubFetch(routes());
+    renderApp();
+    await screen.findByText("目标版本有差异");
+    const source = FakeEventSource.latest();
+    expect(screen.getByRole("status").textContent).toContain("更新通道已断开");
+
+    act(() => source.onopen?.(new Event("open")));
+    expect(screen.getByRole("status").textContent).toContain("更新通道正常");
+
+    act(() => source.emit("source.stale", { workspace: "pilot", view: "tree", selector: {}, code: "TOOL_TIMEOUT" }));
+    expect(screen.getByRole("status").textContent).toContain("Project Governance 暂时读取失败");
+    expect(screen.getAllByText("dap-branch").length).toBeGreaterThan(0);
+
+    act(() => source.emit("version", { workspace: "pilot", view: "tree", selector: {}, content_sha256: "v1-tree" }));
+    expect(screen.getByRole("status").textContent).toContain("更新通道正常");
+  });
+
+  it("offers the project list again after a project was chosen", async () => {
+    const project = (id: string) => ({ ...TREE.nodes[0], scope_id: id, path: [id], requests: undefined });
+    const overview = { nodes: [], projects: [project("alpha"), project("beta")], note: "Select an explicit project_id" };
+    const chosen = (id: string) => ({ ...TREE, project_id: id, nodes: [{ ...TREE.nodes[0], scope_id: id, path: [id] }], related_requests: [], goal_version_changes: [] });
+    const { calls } = stubFetch(
+      routes({
+        [VIEWS + "/tree"]: { body: snapshot("tree", {}, overview) },
+        [VIEWS + "/tree?project_id=alpha"]: { body: snapshot("tree", { project_id: "alpha" }, chosen("alpha")) },
+        [VIEWS + "/tree?project_id=beta"]: { body: snapshot("tree", { project_id: "beta" }, chosen("beta")) },
+        [VIEWS + "/open"]: { body: snapshot("open", {}, { ...OPEN, open_requests: [] }) },
+      }),
+    );
+    renderApp();
+    expect(await screen.findByText("此工作区有多个项目,请在左侧明确选择一个。")).toBeTruthy();
+    expect(calls.some((call) => call.includes("project_id="))).toBe(false); // none chosen for the user
+
+    const select = screen.getByLabelText("科研项目");
+    await userEvent.selectOptions(select, "alpha");
+    const tree = screen.getByRole("region", { name: "科研树" });
+    expect(await within(tree).findByText("alpha")).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText("科研项目"), "beta");
+    expect(await within(tree).findByText("beta")).toBeTruthy();
+    expect(within(tree).queryByText("alpha")).toBeNull();
+
+    await userEvent.selectOptions(screen.getByLabelText("科研项目"), "");
+    expect(await screen.findByText("此工作区有多个项目,请在左侧明确选择一个。")).toBeTruthy();
+  });
+
+  it("asks to sign in again when the session ends after the page has loaded", async () => {
+    const { routes: table } = stubFetch(routes());
+    renderApp();
+    await openRequest("sci-1");
+    await screen.findByRole("region", { name: "Core 当前状态" });
+    table[NOW_URL] = { status: 401, body: { detail: { code: "UNAUTHENTICATED", message: "sign in" } } };
+    act(() =>
+      FakeEventSource.latest().emit("version", {
+        workspace: "pilot", view: "now", selector: { request_id: "sci-1" }, content_sha256: "changed",
+      }),
+    );
+    expect(await screen.findByLabelText("服务访问令牌")).toBeTruthy();
+  });
+
+  it("reads the most recent submissions when a scope has more than one page", async () => {
+    const page = (offset: number, summary: string) => ({
+      ...ROUTES, attempt_count: 130, offset, attempts: [{ ...ROUTES.attempts[0], summary }],
     });
+    const { calls } = stubFetch(
+      routes({
+        [VIEWS + "/routes?limit=100&scope_id=dap"]: { body: snapshot("routes", { scope_id: "dap", limit: 100 }, page(0, "oldest page")) },
+        [VIEWS + "/routes?limit=100&offset=30&scope_id=dap"]: {
+          body: snapshot("routes", { scope_id: "dap", limit: 100, offset: 30 }, page(30, "most recent page")),
+        },
+      }),
+    );
+    renderApp();
+    await openRequest("sci-1");
+    const graph = await screen.findByLabelText("科研流程图");
+    await userEvent.click(within(graph).getByText("inputs"));
+    const inspector = screen.getByRole("complementary", { name: "检查器" });
+    expect(await within(inspector).findByText("most recent page")).toBeTruthy();
+    expect(within(inspector).queryByText("oldest page")).toBeNull();
+    expect(within(inspector).getByText(/共 130 条提交,这里只读取了最近的 1 条/)).toBeTruthy();
 
-    await waitFor(() => {
-      expect(vi.mocked(api.getTaskGraph).mock.calls.length).toBeGreaterThan(before);
-    });
+    await userEvent.click(within(graph).getByText("call"));
+    expect(await within(inspector).findByText(/在已读取的提交中没有符合的记录;更早的提交未读取/)).toBeTruthy();
+    expect(within(inspector).queryByText("没有记录的提交。")).toBeNull();
+    expect(calls).toContain("GET " + VIEWS + "/routes?limit=100&offset=30&scope_id=dap");
+  });
+
+  it("says that a full open list may be incomplete and quotes Core", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => ({ request_id: "sci-" + (100 + index), question: "q" }));
+    stubFetch(
+      routes({
+        [VIEWS + "/open"]: {
+          body: snapshot("open", {}, { ...OPEN, open_requests: many, may_be_incomplete: true, source_message: "25 requests are open" }),
+        },
+      }),
+    );
+    renderApp();
+    const open = await screen.findByRole("region", { name: "开放请求" });
+    expect(await within(open).findByText(/可能还有未列出的.*25 requests are open/)).toBeTruthy();
   });
 });

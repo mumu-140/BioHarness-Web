@@ -1,10 +1,7 @@
 import type { ReactNode } from "react";
 
-import type { EvidencePreview } from "../api/types";
-
-
 interface EvidencePreviewViewerProps {
-  preview: EvidencePreview;
+  preview: { format: string; truncated: boolean; content: string };
 }
 
 type JsonValue =
