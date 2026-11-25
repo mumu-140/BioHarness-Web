@@ -18,10 +18,10 @@ BioHarness Research Workspace 为科研人员提供一个能够理解、组织�
 
 ## 固定产品方向
 
-1. **先 Web，后 Desktop。** Desktop 后续使用同一套前端和应用接口，优先评估 Tauri 薄封装。
+1. **先 Web，后 Desktop。** Desktop 后续使用同一套前端和应用接口，默认是连接远端 BioHarness 服务的 Tauri 薄封装；本地 Sidecar 仅在真实需求证明后评估。
 2. **原生 Model API。** Web 后端直接调用模型提供商 API，自身承担模型与工具调用循环，不依赖 Claude Code、Codex、CodeArts 或其他外部 Agent。
 3. **Core 是唯一科研主线。** Web 使用 Core 当前公开接口，遵循 Core 返回的下一步安排，不另建科研状态机。
-4. **Modules 保持独立。** Memory、文献、统计、评审和领域计算仍归 BioHarness-Modules；Web 负责呈现与调用公开能力。
+4. **Modules 保持独立。** Memory、文献、统计、评审和领域计算仍归 BioHarness-Modules；Web 负责呈现与调用公开能力；Modules 中原预留 Research Workspace 不再独立开发，唯一产品入口归本仓。
 5. **科研可视化优先。** 科研树、科研流程、证据溯源和执行轨迹是不同视图，不能混成一个泛化流程图。
 6. **V1 不构成兼容约束。** 原有只读 PostgreSQL 模型、页面、API 和部署方案均可按 V2 需要重构或删除。保留 Git 历史及明确归档的设计记录即可。
 
