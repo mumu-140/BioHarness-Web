@@ -1,7 +1,7 @@
 # BioHarness Research Workspace V2 — Product Plan
 
 **Date:** 2026-11-25  
-**Status:** Planning baseline / W0  
+**Status:** W0 read-side design exit satisfied / W1 ready; native provider activation open
 **Implementation status:** Not started  
 **Repository:** mumu-140/BioHarness-Web
 
@@ -161,18 +161,21 @@ Support panel collapse, graph zoom/pan, search, filtering, node selection, branc
 
 ## 9. Technology choices
 
-| Area | Initial candidate | TODO |
+Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-integration-review.md). Prefer reusable open-source packages and small reviewed components; do not fork complete chat products.
+
+| Area | Selected direction | Verification remaining |
 |---|---|---|
-| Frontend | React + TypeScript + Vite | Audit current components; retain/adapt/refactor |
-| Graph | React Flow | Confirm node/edge model for four distinct views |
-| Layout | Dagre first; ELK if needed | Pilot on a representative branched research graph |
-| UI components | Accessible lightweight component system | Select after wireframe; avoid broad dependency migration |
-| Backend | Python + FastAPI | Audit process management, streaming and configuration |
-| Model API | Official SDKs / OpenAI-compatible APIs | Select first providers and normalized event schema |
-| Module tools | MCP / documented CLI/API | Verify actual module interfaces |
-| Streaming | SSE + authoritative snapshot refresh | Shared W1/W2 updates, resync and deduplication |
-| Desktop | Remote-service Tauri client | Topology fixed; packaging deferred until Web acceptance |
-| Persistence | Core/Modules stores plus minimal Web telemetry | Choose telemetry storage; no new scientific DB by default |
+| Frontend | React + TypeScript + Vite | W1 package/build and browser QA |
+| Graph/layout | React Flow + Dagre | Real project tree and current-plan rendering; ELK only if justified |
+| Server-query state | SWR + local selection | Shared snapshot/invalidation and stale-response behavior |
+| Conversation | assistant-ui + AG-UI; adapt durable client/stream primitives | W2 integration; no upstream Agent runtime |
+| Evidence viewer | Existing safe preview components; Orrery candidate for W4 | Exact evidence and actual artifacts; no second W1 canvas |
+| Backend | Python + FastAPI | W1 public CLI adapters; W2 execution lifecycle |
+| Model API | Pydantic AI direct API; first OpenAI-compatible transport candidate | Owner-configured provider/model and real tool/stream smoke in W2 |
+| Module tools | Existing MCP/CLI/API public contracts | Actual configured availability; direct Review transport in module |
+| Streaming | Shared HTTP snapshots + SSE invalidation; AG-UI conversation frames | W1/W2 reconnect/resync, deduplication and lifecycle tests |
+| Desktop | Remote-service Tauri client | Packaging deferred until W5 |
+| Persistence | Existing Core/Module stores; no W1 DB; one W2 local SQLite technical ledger | Operation identity/reconciliation only, never scientific state |
 
 ## 10. Development milestones and TODO
 
@@ -188,52 +191,52 @@ Support panel collapse, graph zoom/pan, search, filtering, node selection, branc
 
 #### A — Core and Module contracts
 
-- [ ] Pin exact Core/Modules revisions and installed public Host/Module versions in an authorized Linux pilot environment; record supported CLI/MCP/API commands, schemas, resource installation versus declaration and public request-discovery limits.
-- [ ] Verify request/scope binding, explicit request IDs, unscoped and multi-open-request recovery, current plan/revision, Core intra-plan dependencies and historical evidence; compare actual Governance tree/context/routes/evidence outputs and exact source references. Confirm cross-request relations are contextual, not a project state machine.
-- [ ] Verify existing file locks, atomic records, scope declaration, concurrent same-request revision conflicts and STATE_CHANGED recovery using supported access. Do not assume SQLite for Core or a transactional Governance view.
-- [ ] Establish the shared W1/W2 snapshot/refresh contract: source identity/revision or opaque version, public query, observed invalidation, external-writer polling, reconnect/full resync, deduplication and stale/unknown states. No Core event bus required.
-- [ ] Establish the minimal common Module invocation projection and typed optional renderers from actual outputs, including evidence refs and redacted input/output summaries. Verify Statistics report-binding reuse and actual Memory/Literature/Review tool contracts; mark unavailable capabilities explicitly.
+- [x] Pin exact Core/Modules revisions and installed public Host/Module versions in an authorized Linux pilot environment; record supported CLI/MCP/API commands, schemas, resource installation versus declaration and public request-discovery limits.
+- [x] Verify request/scope binding, explicit request IDs, unscoped and multi-open-request recovery, current plan/revision, Core intra-plan dependencies and historical evidence; compare actual Governance tree/context/routes/evidence outputs and exact source references. Confirm cross-request relations are contextual, not a project state machine.
+- [x] Verify existing file locks, atomic records, scope declaration, concurrent same-request revision conflicts and STATE_CHANGED recovery using supported access. Do not assume SQLite for Core or a transactional Governance view.
+- [x] Establish the shared W1/W2 snapshot/refresh contract: source identity/revision or opaque version, public query, observed invalidation, external-writer polling, reconnect/full resync, deduplication and stale/unknown states. No Core event bus required.
+- [x] Establish the minimal common Module invocation projection and typed optional renderers from actual outputs, including evidence refs and redacted input/output summaries. Verify Statistics report-binding reuse and actual Memory/Literature/Review tool contracts; mark unavailable capabilities explicitly.
 
 **Output A:** Core-to-Web public contract and ownership matrix, actual representative read samples, concurrency/recovery observations, shared projection/Module inspector contract and unresolved gaps with owners. No private imports, duplicate scientific rules or fabricated dependencies.
 
 #### B — Native Model API and execution lifecycle
 
-- [ ] Compare the smallest useful set of official provider SDKs/documented compatible APIs for streaming, structured tool calls, timeout/error handling and actual tool availability. Select the initial provider(s) from real access; no model credentials in Git.
-- [ ] Verify how the Web host passes original user text and uses Core's trusted native user-message confirmation seam; distinguish actual user input from model/tool text, preserve pending amendment behavior, do not add an Agent-facing confirmation tool.
-- [ ] Inspect the existing Scientific Review advisor and external runner; specify the smallest direct API adapter in that module (not in Web), or document why review remains unavailable. Retain INTAKE/PLAN/WORK/DELIVERY advice and UNREVIEWED behavior.
-- [ ] Define the technical execution lifecycle: backend/existing executor independent of HTTP/SSE, minimal durable operation/job identity, status/outputs/logs references, disconnect/reconnect, unknown outcomes, process restart, timeout, explicit cancellation and idempotency/reconciliation before retry. Distinguish Core request recovery from executor job recovery.
-- [ ] Select remote Linux service topology, explicit service/workspace identity, authenticated client access, server-side credential handling and allowed evidence/output roots. Identify an authorized pilot host and minimally adequate technical metadata storage; no generic scheduler/queue/database by default.
+- [ ] Compare the smallest useful set of official provider SDKs/documented compatible APIs for streaming, structured tool calls, timeout/error handling and actual tool availability. Select the initial provider(s) from real access; no model credentials in Git. **SDK/transport selected in source audit; exact authorized provider/model and live access remain unverified. Complete this activation check before W2 live acceptance.**
+- [x] Verify how the Web host passes original user text and uses Core's trusted native user-message confirmation seam; distinguish actual user input from model/tool text, preserve pending amendment behavior, do not add an Agent-facing confirmation tool.
+- [x] Inspect the existing Scientific Review advisor and external runner; specify the smallest direct API adapter in that module (not in Web), or document why review remains unavailable. Retain INTAKE/PLAN/WORK/DELIVERY advice and UNREVIEWED behavior.
+- [x] Define the technical execution lifecycle: backend/existing executor independent of HTTP/SSE, minimal durable operation/job identity, status/outputs/logs references, disconnect/reconnect, unknown outcomes, process restart, timeout, explicit cancellation and idempotency/reconciliation before retry. Distinguish Core request recovery from executor job recovery.
+- [x] Select remote Linux service topology, explicit service/workspace identity, authenticated client access, server-side credential handling and allowed evidence/output roots. Identify an authorized pilot host and minimally adequate technical metadata storage; no generic scheduler/queue/database by default.
 
 **Output B:** selected provider/Host transport and minimal execution lifecycle contract with concrete failure/recovery cases, reviewer/confirmation seam decisions and remote topology. No implementation is claimed from a design record; actual fault tests occur in W2.
 
 #### C — Reference source and interaction audit
 
-- [ ] Review only references relevant to the four scientific views, including the previously reviewed grow-me reference, Galaxy/AiiDA provenance, existing Web/React Flow and one or two useful research-workspace candidates. Inspect actual pinned source, licenses, maintenance/dependencies and user interaction; stop once the design decisions are supported.
-- [ ] Compare tree/graph layout, branch navigation, state management, streaming UI, evidence inspection and conversation-to-node interaction; select a lightweight frontend stack. Prefer existing implementation where fit is verified; explicitly reject generic linear-chat-only UI and heavyweight low-code workflow engines.
-- [ ] Classify legacy Web components as retain/adapt/replace/remove and record exact upstream component/source references for any code proposed for reuse.
+- [x] Review only references relevant to the four scientific views, including the previously reviewed grow-me reference, Galaxy/AiiDA provenance, existing Web/React Flow and one or two useful research-workspace candidates. Inspect actual pinned source, licenses, maintenance/dependencies and user interaction; stop once the design decisions are supported.
+- [x] Compare tree/graph layout, branch navigation, state management, streaming UI, evidence inspection and conversation-to-node interaction; select a lightweight frontend stack. Prefer existing implementation where fit is verified; explicitly reject generic linear-chat-only UI and heavyweight low-code workflow engines.
+- [x] Classify legacy Web components as retain/adapt/replace/remove and record exact upstream component/source references for any code proposed for reuse.
 
 **Output C:** concise reuse-versus-reject matrix, chosen canvas/layout/state/streaming components and license/source constraints. No external code copied merely to complete the audit.
 
 #### D — Real research walkthrough
 
-- [ ] Use the existing real multi-branch DAP-seq scope replay and existing statistical report-binding case as first candidates. Re-open actual authorized source/acceptance records before using them; retain data identity, limitations and privacy. If unavailable, select another actual multi-branch project, not a fabricated demo.
-- [ ] Walk through a static desktop-browser wireframe using the real project: project scope, concurrent questions, current/historical plans, alternative routes, technical failure versus supported negative result, evidence anchors, result/figure previews and statistical units/denominators/report verification.
-- [ ] Distinguish computational association, experimental evidence, source/hash verification, observed tool execution and scientific interpretation. Preserve historical evidence and unresolved questions; record information that is actually missing instead of inventing it.
-- [ ] Verify W1–W4 can express the walkthrough and identify the minimum first pilot, artifact viewers and real interaction gaps.
+- [x] Use the existing real multi-branch DAP-seq scope replay and existing statistical report-binding case as first candidates. Re-open actual authorized source/acceptance records before using them; retain data identity, limitations and privacy. If unavailable, select another actual multi-branch project, not a fabricated demo.
+- [x] Walk through a static desktop-browser wireframe using the real project: project scope, concurrent questions, current/historical plans, alternative routes, technical failure versus supported negative result, evidence anchors, result/figure previews and statistical units/denominators/report verification.
+- [x] Distinguish computational association, experimental evidence, source/hash verification, observed tool execution and scientific interpretation. Preserve historical evidence and unresolved questions; record information that is actually missing instead of inventing it.
+- [x] Verify W1–W4 can express the walkthrough and identify the minimum first pilot, artifact viewers and real interaction gaps.
 
 **Output D:** source-linked walkthrough/wireframe and pilot acceptance scenarios, with private data and raw receipts retained outside the public repository.
 
-**W0 exit:** A–D outputs reviewed together in a single short audit record at docs/audits/w0-integration-review.md (create when findings are available; raw/private evidence remains in the authorized workspace). Each decision states source/version, observed vs proposed status, conclusion, owner and remaining gap. W1 begins when the public read/projection path, shared update semantics, first pilot and remote topology are settled, and W2's lifecycle/confirmation/reviewer decisions have a bounded path; any unresolved implementation-critical gap is explicit and addressed by its existing owner. Do not require completed W2 runtime tests, full scientific validation or an unrelated module release before W1. This is a development milestone, not a Core scientific gate. Update this sole TODO in place; do not create another plan.
+**W0 exit — W1 read-side satisfied (2026-11-25):** A–D outputs reviewed in the [single W0 audit record](../audits/w0-integration-review.md). Actual public-contract checks: 32/32; Memory focused tests: 3/3; existing report binding reverified with negative control; real static walkthrough complete. Raw/private evidence stays in authorized Linux CI. Browser rendering and package compatibility are W1 checks; actual authorized provider/model and direct Review adapter are W2 activation/integration gaps. No live model API, production deployment or new scientific validation is claimed. Each decision states source/version, observed vs proposed status, conclusion, owner and remaining gap. W1 begins when the public read/projection path, shared update semantics, first pilot and remote topology are settled, and W2's lifecycle/confirmation/reviewer decisions have a bounded path; any unresolved implementation-critical gap is explicit and addressed by its existing owner. Do not require completed W2 runtime tests, full scientific validation or an unrelated module release before W1. This is a development milestone, not a Core scientific gate. Update this sole TODO in place; do not create another plan.
 
 ### W1 — Research Tree and scientific workflow canvas
 
 **Goal:** the Web application displays real Core/Project Governance state.
 
-- [ ] Replace the V1 PostgreSQL task projection with adapters for current Core and Project Governance public interfaces using the W0 contract. Reuse the same adapter and version-aware snapshot/SSE refresh path in W2; no throwaway static polling UI.
+- [ ] Replace the V1 PostgreSQL task projection with current Core Host CLI and Project Governance public read adapters; JSON stdin/structured errors, exact workspace/request identity. Use the W0 snapshot/query-key/SSE invalidation contract with SWR, including stale/shortened/unavailable source views. Reuse this path in W2; no throwaway static polling UI or direct record-file read.
 - [ ] Add explicit workspace/project/scope/request selection.
 - [ ] Render the Project Governance research tree and scope context.
 - [ ] Preserve unscoped requests and explicit request identity.
-- [ ] Render the selected Core plan as a dynamic workflow graph.
+- [ ] Render the selected Core plan as a dynamic workflow graph using React Flow and Dagre; reuse compatible existing controls, scope navigation and inspector components. Pin/verify package versions and browser behavior in isolated Linux. Do not adopt an external workflow engine.
 - [ ] Show requirements, step dependencies, current instruction, progress and unresolved work.
 - [ ] Add node inspector for objective, method, parameters, check, result and source references.
 - [ ] Preserve actual exposed plan revisions and historical task references; show goal-version differences without inventing cross-branch hard dependencies or automatic invalidation.
@@ -246,7 +249,7 @@ Support panel collapse, graph zoom/pan, search, filtering, node selection, branc
 
 **Goal:** conduct a real Core-governed research task without an external Agent.
 
-- [ ] Implement backend-only model provider configuration and credential handling.
+- [ ] Complete open W0 provider activation check with owner-configured authorized direct API endpoint/model. Use Pydantic AI direct requests/streaming (or official SDK for demonstrated gap), backend-only credentials and actual tool-call/stream smoke. Reuse assistant-ui/AG-UI conversation components and resumable-stream primitives without adopting Agent orchestration.
 - [ ] Implement streaming chat and structured tool-call handling.
 - [ ] Extend/reuse the W1 Core Host adapter for mutation through the verified public CLI or stdio MCP interface; share the same projection updates.
 - [ ] Implement request-scoped context assembly from original question, Core instruction, selected scope, relevant Module resources and evidence.
@@ -256,7 +259,7 @@ Support panel collapse, graph zoom/pan, search, filtering, node selection, branc
 - [ ] Integrate the verified trusted native user-message confirmation seam for amendments; test genuine confirmation versus model/tool imitation. No sixth model-callable Core tool.
 - [ ] Where required, adapt the existing Scientific Review module to direct API calls under a separately scoped module change; verify optional advisor and UNREVIEWED semantics. No external Agent required for native operation, no new scientific review gate.
 - [ ] Record actual model/tool events with secret redaction.
-- [ ] Implement the W0 technical lifecycle with backend/executor operation identity independent of HTTP/SSE, bounded metadata, explicit cancellation and outcome reconciliation.
+- [ ] Implement the W0 technical lifecycle with backend/executor operation identity independent of HTTP/SSE, one local technical SQLite ledger for durable operation/conversation association, bounded metadata, explicit cancellation and outcome reconciliation. No second scientific state or scheduler.
 - [ ] Verify reconnect, backend restart, duplicate-start prevention, ambiguous science_begin/submit response, concurrent STATE_CHANGED, timeout/unknown outcome, tool failure, partial output and user wait. Avoid blind retry; recover authoritative Core and actual executor state.
 
 **Acceptance:** EXPLAIN, EVALUATE and ANALYZE tasks complete using direct provider APIs; no external Agent process is required; Core determines the persisted plan and next action; the same request resumes after restart with explicit request_id; tool results and file evidence are submitted through Core; UI distinguishes model/tool observation from scientific validation; disconnect does not cancel a long operation; actual job recovery, unknown outcomes, cancellation and duplicate prevention are tested; genuine user confirmation is accepted only through its trusted path.

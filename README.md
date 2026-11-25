@@ -1,6 +1,6 @@
 # BioHarness Research Workspace
 
-**状态：PLANNING / W0。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+**状态：W0 读侧审计准出 / W1 待实施。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
 
 ## 产品目的
 
@@ -40,7 +40,8 @@ BioHarness Research Workspace 为科研人员提供一个能够理解、组织�
 2. [docs/architecture.md](docs/architecture.md)：产品架构和职责边界。
 3. [docs/plans/2026-11-25-research-workspace-v2.md](docs/plans/2026-11-25-research-workspace-v2.md)：唯一路线、TODO 和验收条件。
 4. [docs/deployment.md](docs/deployment.md)：目标部署原则。
-5. [docs/history/README.md](docs/history/README.md)：旧 Observatory 文档的历史定位。
+5. [docs/audits/w0-integration-review.md](docs/audits/w0-integration-review.md)：W0 实际验证、开源复用决策及尚未完成的 API 接入检查。
+6. [docs/history/README.md](docs/history/README.md)：旧 Observatory 文档的历史定位。
 
 ## 当前实现状态
 

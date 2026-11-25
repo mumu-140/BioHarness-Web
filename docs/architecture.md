@@ -182,7 +182,7 @@ There is one authority for each kind of data:
 - UI preferences: Web user/workspace settings.
 - Model/tool operational trace: Web runtime telemetry, explicitly non-authoritative for scientific task state.
 
-The Web telemetry store may be append-only files or an existing observability backend. W0 chooses the smallest adequate implementation, including the minimum durable technical operation identity needed for recovery. It never becomes a scientific task or project database. Memory SQLite is owned by Memory, not Web. Governance reads are not transactional cross-request snapshots; refresh when needed and report partial/stale/unreadable data rather than infer state.
+W1 read-side requires no Web persistence database. W2 uses a single local SQLite technical ledger for durable operation identity and conversation association, with bounded operational trace; reuse upstream thread-store primitives if compatible. This is justified by ambiguous-start/restart recovery and atomic identity uniqueness, not a scientific state store. It never becomes a scientific task or project database. Memory SQLite is owned by Memory, not Web. Governance reads are not transactional cross-request snapshots; refresh when needed and report partial/stale/unreadable data rather than infer state.
 
 A visual graph is a projection, not a new source of truth. Every node/edge carries a source reference or an explicit unknown/candidate status.
 
@@ -211,20 +211,22 @@ W0 must record a bounded lifecycle contract and validation cases before W1, incl
 
 ## 11. Technology direction
 
-| Layer | Initial candidate | Decision status |
-|---|---|---|
-| Frontend | React + TypeScript + Vite | Reuse current stack unless source review shows a concrete problem |
-| Scientific graph | React Flow (@xyflow/react) | Existing dependency; first candidate |
-| Tree/graph layout | Dagre for simple directed trees; ELK only for demonstrated complex layouts | Evaluate in W1 |
-| UI components | Lightweight accessible component system such as shadcn/ui | Evaluate after wireframe |
-| Backend | Python 3.12+ + FastAPI | Existing candidate |
-| Model API | Official provider SDKs / OpenAI-compatible API adapters | Direct API only |
-| Module tools | MCP and documented CLI/API adapters | Reuse public interfaces |
-| Streaming | SSE | First candidate |
-| Desktop | Tauri client connecting to remote service | Packaging deferred until Web acceptance |
-| Persistence | Existing Core/Module stores plus minimal Web telemetry | No new scientific DB by default |
+[W0 integration and reuse audit](audits/w0-integration-review.md) records exact pinned source references, public-contract observations, reuse limits and remaining checks.
 
-The stack is a direction, not a reason to preserve unsuitable V1 code.
+| Layer | Selected direction | Implementation boundary |
+|---|---|---|
+| Frontend | React + TypeScript + Vite | Retain compatible current components; no Next.js migration |
+| Scientific graph | React Flow + Dagre | Source-backed controlled graph, no general workflow editor |
+| State and refresh | SWR + local selection; existing SSE invalidation adapted | Query cache only; source snapshots remain authoritative |
+| Conversation UI | assistant-ui / AG-UI | Adapt durable client and independent resumable-stream primitives; no full upstream Agent runtime or client-owned scientific transcript |
+| Artifact/evidence view | Existing safe preview components; selective Vercel/Aivory patterns; Orrery candidate for W4 | Exact evidence anchors and bounded previews; no second W1 canvas |
+| Backend | Python 3.12+ + FastAPI | Core public CLI read first; documented MCP/CLI/API tools |
+| Model API | Pydantic AI direct API (official SDK fallback for demonstrated gap) | First owner-configured OpenAI-compatible transport candidate; actual provider/model activation remains open |
+| Streaming | HTTP snapshots + shared SSE invalidation, AG-UI conversation frames | Connection independent of operation lifetime; refetch authoritative state |
+| Persistence | Existing Core/Module stores; no W1 database; W2 local SQLite technical ledger | Durable operation/conversation association only, not scientific state |
+| Desktop | Tauri client connecting to remote service | Deferred until Web acceptance |
+
+Prefer pinned open-source components and small reviewed adaptations over bespoke infrastructure or full application forks. The source-level selection is not a package/build acceptance; lock actual dependencies and verify in the authorized Linux implementation stage.
 
 ## 12. Desktop strategy and remote topology
 
