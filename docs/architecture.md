@@ -39,9 +39,9 @@ Project Governance is the current source for research-tree, scope-context, route
 
 ### BioHarness-Web
 
-Web owns researcher-facing interaction, direct provider API calls and streaming, the request-scoped model/tool execution loop, adapters to Core and configured Module tools, observed operational events, visual projections and UI preferences.
+Web owns researcher-facing interaction, native user-message/session custody, direct model API calls, context assembly, streaming, request-scoped model/tool execution, configured tool routing, technical execution/recovery, observed operational events, visual projections and UI preferences. These are host responsibilities, not scientific orchestration. Core alone determines scientific progression; the owning module alone supplies its domain logic (including Statistics report binding).
 
-Web does not own scientific truth, a parallel research plan, a second Memory, a second project tree or a separate scientific verdict engine.
+Web does not own scientific truth, a parallel research plan, a second Memory, a second project tree or a separate scientific verdict engine. It never reproduces Core's step eligibility, dependency, requirement coverage, goal-amendment or delivery checks. No independent Research Workspace client/package is developed in Modules; this repository is the sole product.
 
 ### BioHarness-Eval
 
@@ -60,9 +60,9 @@ Eval remains independent. It is not a production runtime dependency.
 9. Core reviews the submitted work and determines the next action. The loop continues, asks the user when necessary, revises the plan when appropriate, or reaches delivery.
 10. Web submits the final answer through science_deliver and renders the recorded delivery and limitations.
 
-The model may propose scientific reasoning and tool use. Core controls the persisted scientific plan and progression. Mainline changes retain Core's existing native-user-confirmation semantics; a model or tool cannot confirm a change on the user's behalf.
+The model may propose scientific reasoning and tool use. Core controls the persisted scientific plan and progression. Mainline changes retain Core's existing trusted native-user-message confirmation path; the Web host must preserve the actual user message and verify the supported host seam in W0. A model or tool cannot confirm a change on the user's behalf. No sixth model-callable Core tool is assumed.
 
-Core advisor feedback is advice, not a blocking gate. A missing or failed advisor is shown as unreviewed, not converted into a new approval state.
+Core advisor feedback is advice, not a blocking gate. A missing or failed advisor is shown as unreviewed, not converted into a new approval state. The existing Scientific Review runtime currently uses an external reviewer runner; W0 verifies the seam for direct model API review inside that module, and W2 integrates the minimum compatible adapter if needed. No second review controller is built in Web.
 
 ## 4. Core and Module integration
 
@@ -70,7 +70,7 @@ Core advisor feedback is advice, not a blocking gate. A missing or failed adviso
 
 The adapter invokes only supported public Core calls, passes the original user question verbatim to intake, retains and explicitly passes request_id for every continuation, parses the structured Core response and follows its instruction/action/call, recovers through science_now after restart or interrupted execution, and preserves must_not_stop, wait-for-user and partial-delivery semantics.
 
-The initial implementation compares the supported CLI and stdio MCP transports under the installed Core version. The selected transport and exact invocation are recorded in the W0 decision. No new Core REST API is assumed.
+The initial implementation compares supported CLI and stdio MCP transports under the installed Core version. W0 records exact public calls, schemas, workspace selection, request discovery limits, revision/error semantics, recovery, and trusted user-message confirmation. No new Core REST API, event bus or private import is assumed. Use actual supported request discovery; a Governance tree does not enumerate all unscoped requests, and a native MCP process ID is not an Agent session identity.
 
 ### Module tool adapters
 
@@ -101,13 +101,15 @@ It is based on explicit Project Governance scope records and request references.
 
 An unscoped Core request remains unscoped. The UI must not invent a project or silently bind a request to the most recently viewed scope. If multiple open requests exist, the researcher selects the intended request explicitly.
 
+Governance is read-only, recomputed from Core records, not a project lifecycle or state machine. Scope ancestry, related-request edges and recorded goal-version differences are context, not execution gates. A goal-version difference prompts evidence review; it is not proof of a changed scientific premise or invalid result. Do not introduce cross-request hard dependencies or automatic SUPERSEDED states. Cross-request reuse requires actual evidence references and scientific applicability checks.
+
 ### 5.2 Scientific Workflow
 
 The workflow view answers: **How is this specific scientific question being addressed now?**
 
 Generate it from the selected Core request and current plan: objective and requirements, plan steps and serves links, dependencies and optional exploration steps, declared method/parameters/deliverables/checks, recorded submissions and unresolved steps, plan revisions and invalidated downstream reuse.
 
-The graph is dynamic. It must not impose a fixed biological workflow template. It shows the scientific plan and recorded progress, not every low-level event. Step state is projected from Core records; Web must not maintain a competing status machine.
+The graph is dynamic. It must not impose a fixed biological workflow template. It shows the scientific plan and recorded progress, not every low-level event. Step state, within-plan depends_on and reuse invalidation are projected from authoritative Core responses/records exposed by public interfaces; Web does not independently evaluate these rules. Missing history stays unavailable until an existing supported read path is verified.
 
 ### 5.3 Evidence and Provenance
 
@@ -152,7 +154,11 @@ A generic JSON viewer is insufficient. Use small domain-specific renderers over 
 | Analysis / Workflow | inputs, software/version, parameters, actual invocation, outputs, logs, failure and recovery |
 | Model Runtime | provider/model, request timing, token/cost metadata when available, tool calls and transport errors |
 
-The UI renders what the module actually returns. It does not recreate module algorithms in TypeScript.
+The UI renders what the module actually returns. It does not recreate module algorithms in TypeScript. Statistics report binding invokes the existing module renderer/verifier and displays its structured result, evidence and report; numerical consistency is distinct from scientific correctness.
+
+### Common inspector and optional domain renderers
+
+W0 defines a minimal common invocation projection: service/workspace and explicit request/step association when known; operation and tool/module identity and version when supplied; observed phase, start/end, status/error; bounded redacted input/output references and evidence anchors. Preserve actual source and missing fields. Internal phases, snapshots, consumption and validation are displayed only when the owner or runtime records them. The common inspector handles unknown modules; high-value domain renderers are ordinary optional UI components selected by supported output type/version. No new module schema, registry, plugin SDK or mandatory internal instrumentation is required.
 
 ## 8. Direct model API runtime
 
@@ -168,7 +174,7 @@ Do not pass all historical conversations or entire datasets to a model by defaul
 
 There is one authority for each kind of data:
 
-- Core request/plan/submission/delivery: Core workspace records.
+- Core request/plan/submission/delivery: Core workspace records. The current FileScienceStore uses one JSON request, per-request file locking and atomic replacement, revisions, and a separate scope-declaration lock. There is no Core SQLite/PostgreSQL database. Public calls remain the authority; stale concurrent changes require refresh/reconciliation.
 - Project tree and route projections: Project Governance over Core records.
 - Memory content, relations and usage feedback: Memory module store.
 - Literature and scientific source material: the source/module that provides it, with references returned to Core.
@@ -176,17 +182,32 @@ There is one authority for each kind of data:
 - UI preferences: Web user/workspace settings.
 - Model/tool operational trace: Web runtime telemetry, explicitly non-authoritative for scientific task state.
 
-The Web telemetry store may be append-only files or an existing observability backend. W0 chooses the smallest adequate implementation. Do not introduce a second task database or graph database by default.
+The Web telemetry store may be append-only files or an existing observability backend. W0 chooses the smallest adequate implementation, including the minimum durable technical operation identity needed for recovery. It never becomes a scientific task or project database. Memory SQLite is owned by Memory, not Web. Governance reads are not transactional cross-request snapshots; refresh when needed and report partial/stale/unreadable data rather than infer state.
 
 A visual graph is a projection, not a new source of truth. Every node/edge carries a source reference or an explicit unknown/candidate status.
 
-## 10. Realtime and interruption
+## 10. Shared projection, realtime and execution lifecycle
 
-Use HTTP request/response for user actions and SSE for server-to-browser model/tool progress unless a measured requirement justifies WebSocket.
+### 10.1 One update path for W1 and W2
 
-The UI distinguishes model streaming, tool running, Core waiting for a user, Core open with a next action, tool/model failure, disconnected/stale UI, completed delivery and partial delivery.
+Use HTTP request/response for user actions and SSE for server-to-client invalidation and streaming. Both W1 read-side projections and W2 live actions use the same public-query adapter and update path.
 
-Stopping a browser stream is not equivalent to cancelling a remote scientific process. The runtime reports whether a model call, local process or remote tool was actually interrupted. Core recovery remains through science_now.
+- Read current snapshots from Core public calls and Governance/Module public queries. Associate each snapshot with service/workspace, explicit request identity when applicable, and available source revision or opaque projection version. Keep scientific state distinct from technical events.
+- Web emits observed model/tool events and projection invalidations; refresh after Core mutations and poll supported queries at a measured interval to notice external writers. No Core event bus or direct file watching is required.
+- W0 defines initial snapshot, event identity/order, duplicate/out-of-order handling, targeted refetch, reconnect and full resync when replay is unavailable. UI shows last successful snapshot and stale/disconnected state. No event is proof of a change unless supported by the source.
+- Render current plan and scope from the refreshed authoritative projection; do not infer scientific status from streaming tokens, timestamps, tool exit or SSE delivery.
+
+### 10.2 Technical execution lifecycle (W0 contract)
+
+Browser/HTTP/SSE lifetime is separate from model/tool operation lifetime. A long bioinformatics operation runs in a backend-managed worker or a configured existing external executor; closing the browser is not a cancellation. W0 selects the smallest supported mechanism; no scheduler or queue product is assumed.
+
+- Persist enough technical identity to correlate and recover in-flight work (service/workspace, explicit Core request, step/plan reference when available, operation ID, external job/process handle when supported, timestamps, observed outcome and output references). This is operational metadata, not a second scientific task record.
+- Recover by re-reading Core through science_now and querying/reconciling the executor's actual state. Core recovery does not prove that a remote process is still running or reattachable. Report unknown outcomes honestly and inspect before retrying.
+- Separate connection loss, provider timeout, process failure, partial output, Core WAIT_FOR_USER, cancellation requested, cancellation confirmed, and scientific delivery. Cancel only a supported identified operation on actual user request; stopping a stream does not stop remote computation.
+- Prevent duplicate starts/submissions after ambiguous network errors. Use host operation correlation and provider idempotency only when supported. An unbound science_begin can create a new request on replay; recover its identity or flag uncertainty. On STATE_CHANGED refresh science_now; do not retry stale mutations blindly.
+- On successful actual execution, return source-linked outputs and evidence through the existing science_submit path. No fabricated completion on timeout or loss of a transport.
+
+W0 must record a bounded lifecycle contract and validation cases before W1, including same-request concurrency, cross-session recovery, timeout with unknown outcome, reconnect, user confirmation and long-operation result handoff. Implementation and fault-injection acceptance are W2.
 
 ## 11. Technology direction
 
@@ -200,14 +221,16 @@ Stopping a browser stream is not equivalent to cancelling a remote scientific pr
 | Model API | Official provider SDKs / OpenAI-compatible API adapters | Direct API only |
 | Module tools | MCP and documented CLI/API adapters | Reuse public interfaces |
 | Streaming | SSE | First candidate |
-| Desktop | Tauri | Deferred until Web acceptance |
+| Desktop | Tauri client connecting to remote service | Packaging deferred until Web acceptance |
 | Persistence | Existing Core/Module stores plus minimal Web telemetry | No new scientific DB by default |
 
 The stack is a direction, not a reason to preserve unsuitable V1 code.
 
-## 12. Desktop strategy
+## 12. Desktop strategy and remote topology
 
-Desktop is a later packaging target, not a second product implementation. Tauri may wrap the same React frontend and connect to the same Web backend or an explicitly configured local sidecar. Desktop must not fork the scientific workflow, Core adapter, Module adapters or model runtime.
+The default product topology is a remote Linux BioHarness service with Browser and later Tauri Desktop clients. Core, Modules, research data and external compute may reside in configured service-side workspaces and compute locations. The user interface uses authenticated application APIs and SSE with an explicit service/workspace/request identity; a client filesystem path is not a server filesystem path. Evidence previews resolve only authorized server-side references. A shared mount or different Git worktree is not automatically the same canonical workspace.
+
+Desktop reuses the same frontend and backend contracts. A local sidecar or hybrid mode is optional only after a real requirement is demonstrated; it must not fork the scientific workflow or tool runtime. W0 freezes the default remote topology and workspace addressing; W5 handles packaging, native integration and multi-device validation. Host selection, authentication and deployment parameters are verified rather than assumed.
 
 ## 13. Non-goals
 

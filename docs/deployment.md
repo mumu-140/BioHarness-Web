@@ -4,7 +4,7 @@
 
 ## 1. Deployment shape
 
-BioHarness-Web is a backend-hosted application:
+BioHarness-Web is a remote-service-first application. A Linux backend is the default; browsers and later Desktop clients connect to its authenticated application API and SSE:
 
 - browser: UI only; no provider credentials or direct access to scientific workspaces;
 - Web backend: direct model API calls, Core Host adapter, configured Module tools and visual projections;
@@ -15,7 +15,7 @@ The backend runs where it can access the selected Core workspace and configured 
 
 ## 2. Workspace access
 
-- Bind each Web workspace to an explicit canonical research workspace.
+- Bind each Web workspace to an explicit service identity and canonical research workspace. Treat requests and evidence references as workspace-scoped, resolve them on the server, and never interpret a client-local path as a remote path. Different worktrees/machines do not implicitly share Core state.
 - Use Core's public Host interface for scientific request state.
 - Use Project Governance's public CLI/MCP for project tree and route queries.
 - Do not mount or expose a broad home directory.
@@ -43,7 +43,7 @@ Preferred access patterns:
 
 Do not expose the application publicly until authentication, TLS, session isolation, workspace isolation and audit behavior have been reviewed.
 
-SSE connections must support reconnect and report stale/disconnected state without changing Core task state.
+SSE connections must support reconnect, snapshot resync and stale/disconnected state without changing Core task state. Long model/tool operations are not tied to browser connection lifetime. Reconcile executor job identity and observed outcome after service restart; do not assume cancellation or silently rerun a job.
 
 ## 5. Process and filesystem isolation
 
@@ -52,21 +52,16 @@ SSE connections must support reconnect and report stale/disconnected state witho
 - Mount source datasets read-only unless a documented workflow requires a separate writable output directory.
 - Keep generated outputs in explicit project output locations.
 - Do not grant arbitrary shell execution to model-generated text.
-- Stop/restart of Web must not mutate Core or Module stores.
+- Web stop/restart must not itself rewrite Core or Module scientific records. Verify what happens to in-flight local/remote operations and recover or report unknown outcomes explicitly.
 
 ## 6. Desktop
 
-Desktop packaging is deferred. Tauri may later use the same Web frontend and backend contract. The local-sidecar versus remote-backend decision is based on actual multi-device and filesystem requirements, not assumed in advance.
+The first Desktop topology is a thin Tauri client connected to the same remote service, with authenticated API/SSE and explicit workspace identity. Packaging is deferred to W5; local sidecar or hybrid operation is optional only if a real need is demonstrated.
 
-## 7. Deployment TODO
+## 7. Deployment acceptance
 
-- [ ] Select the first authorized host and canonical workspace.
-- [ ] Verify installed Core Host and Module CLI/MCP versions on that host.
-- [ ] Select model provider endpoint and store its key server-side.
-- [ ] Define authentication and session-to-workspace mapping.
-- [ ] Define narrow workspace, evidence and output roots.
-- [ ] Verify SSE behavior through the intended reverse proxy or SSH tunnel.
-- [ ] Verify that stopping Web leaves Core and Modules unchanged.
-- [ ] Record exact image/build SHA, configuration identity and smoke-test evidence before production use.
+Deployment choices and TODO are maintained in the [single V2 plan](plans/2026-11-25-research-workspace-v2.md): W0 selects an authorized pilot environment and documents workspace mapping, model endpoints, credentials and connectivity; W2 verifies interruption/recovery and transport contracts; W4 verifies the integrated pilot deployment, access isolation, evidence roots, build identities and smoke results. No duplicate deployment checklist is maintained here.
+
+This public source repository must not contain private scientific data, private infrastructure details, credentials, or non-public evaluation receipts. Keep actual environment configuration and raw audit material in the authorized private research/CI workspace.
 
 No production deployment is authorized or claimed by this planning document.
