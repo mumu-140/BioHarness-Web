@@ -1,6 +1,6 @@
 # BioHarness Research Workspace — Architecture
 
-**Status: target architecture baseline, 2026-11-25.** This document defines the intended V2 product. It does not claim that the runtime has been implemented.
+**Status: target architecture baseline, 2026-11-25; W1 read side implemented 2026-11-26 (section 10.3).** This document defines the intended V2 product. Apart from section 10.3 it does not claim that the runtime has been implemented.
 
 ## 1. Product purpose
 
@@ -60,7 +60,7 @@ Eval remains independent. It is not a production runtime dependency.
 9. Core reviews the submitted work and determines the next action. The loop continues, asks the user when necessary, revises the plan when appropriate, or reaches delivery.
 10. Web submits the final answer through science_deliver and renders the recorded delivery and limitations.
 
-The model may propose scientific reasoning and tool use. Core controls the persisted scientific plan and progression. Mainline changes retain Core's existing trusted native-user-message confirmation path; the Web host must preserve the actual user message and verify the supported host seam in W0. A model or tool cannot confirm a change on the user's behalf. No sixth model-callable Core tool is assumed.
+The model may propose scientific reasoning and tool use. Core controls the persisted scientific plan and progression. Mainline changes retain Core's existing trusted native-user-message confirmation path; the Web host must preserve the actual user message and verify the supported host seam in W0. A model or tool cannot confirm a change on the user's behalf. No sixth model-callable Core tool is assumed. The existing channel is Core's Agent-host hook, where the caller declares its own host and session; Core provides it for Claude Code, Codex and CodeArts. How a first-party Web host uses or replaces it is an open Core decision for W2 (see the plan).
 
 Core advisor feedback is advice, not a blocking gate. A missing or failed advisor is shown as unreviewed, not converted into a new approval state. The existing Scientific Review runtime currently uses an external reviewer runner; W0 verifies the seam for direct model API review inside that module, and W2 integrates the minimum compatible adapter if needed. No second review controller is built in Web.
 
@@ -70,7 +70,7 @@ Core advisor feedback is advice, not a blocking gate. A missing or failed adviso
 
 The adapter invokes only supported public Core calls, passes the original user question verbatim to intake, retains and explicitly passes request_id for every continuation, parses the structured Core response and follows its instruction/action/call, recovers through science_now after restart or interrupted execution, and preserves must_not_stop, wait-for-user and partial-delivery semantics.
 
-The initial implementation compares supported CLI and stdio MCP transports under the installed Core version. W0 records exact public calls, schemas, workspace selection, request discovery limits, revision/error semantics, recovery, and trusted user-message confirmation. No new Core REST API, event bus or private import is assumed. Use actual supported request discovery; a Governance tree does not enumerate all unscoped requests, and a native MCP process ID is not an Agent session identity.
+The initial implementation compares supported CLI and stdio MCP transports under the installed Core version. W0 records exact public calls, schemas, workspace selection, request discovery limits, revision/error semantics, recovery, and trusted user-message confirmation. No new Core REST API, event bus or private import is assumed. Use actual supported request discovery; a Governance tree does not enumerate all unscoped requests, and a native MCP process ID is not an Agent session identity. CLI and MCP behave differently when request_id is omitted, so every continuation and every mutating call passes it explicitly. The one deliberate exception is the read-only open-request listing, which asks science_now without one precisely to obtain Core's own list (section 10.3); its answer is never used as a selection.
 
 ### Module tool adapters
 
@@ -81,8 +81,8 @@ A resource declaration does not install a tool, grant filesystem access or prove
 First integration candidates:
 
 - Project Governance: project tree, context, routes and evidence.
-- Memory: FAST/STANDARD/DEEP retrieval, T1/T2/T3 expansion, TaskMemoryGraph and explicit use feedback.
-- Literature: paper and method search with source-backed results.
+- Memory: FAST/STANDARD retrieval, T1/T2/T3 expansion and explicit use feedback (DEEP and TaskMemoryGraph once the module exposes them publicly).
+- Literature: paper search and fetch with source-backed records.
 - Scientific Review: existing Core advisor bridge and review records.
 - Statistics: biological/statistical method guidance, grouping and denominator semantics.
 - Domain workflows: selected real capabilities such as DAP-seq, Genome-web TF or RNA-seq after their current public contracts are verified.
@@ -109,7 +109,7 @@ The workflow view answers: **How is this specific scientific question being addr
 
 Generate it from the selected Core request and current plan: objective and requirements, plan steps and serves links, dependencies and optional exploration steps, declared method/parameters/deliverables/checks, recorded submissions and unresolved steps, plan revisions and invalidated downstream reuse.
 
-The graph is dynamic. It must not impose a fixed biological workflow template. It shows the scientific plan and recorded progress, not every low-level event. Step state, within-plan depends_on and reuse invalidation are projected from authoritative Core responses/records exposed by public interfaces; Web does not independently evaluate these rules. Missing history stays unavailable until an existing supported read path is verified.
+The graph is dynamic. It must not impose a fixed biological workflow template. It shows the scientific plan and recorded progress, not every low-level event. Step state, within-plan depends_on and reuse invalidation are projected from authoritative Core responses/records exposed by public interfaces; Web does not independently evaluate these rules. Missing history stays unavailable until an existing supported read path is verified. At Core 0.2.0 that covers plan revisions, reuse invalidation and the submissions of unscoped requests.
 
 ### 5.3 Evidence and Provenance
 
@@ -147,8 +147,8 @@ A generic JSON viewer is insufficient. Use small domain-specific renderers over 
 | Module | Important visible information |
 |---|---|
 | Project Governance | scopes, goals, branches, prior routes, explicit related requests, evidence references |
-| Memory | T1 themes, T2 memories, T3 sources, retrieval depth, relation path, applicability gaps, conflicts and explicit use feedback |
-| Literature | query, source/database, search time, paper, passage, DOI/URL, method and limitations |
+| Memory | T1 themes, T2 memories, T3 sources, retrieval depth, applicability gaps, conflicts and explicit use feedback; relation paths when publicly returned |
+| Literature | query, source/database, search time, paper, abstract, DOI/URL, fetch/validation record and limitations; passages when publicly returned |
 | Scientific Review | intake guidance, plan/work/delivery review, concerns, unreviewed status and response |
 | Statistics | experimental unit, data grain, grouping variables, combinations, numerator/denominator, background, test/model, effect size and multiple-testing correction |
 | Analysis / Workflow | inputs, software/version, parameters, actual invocation, outputs, logs, failure and recovery |
@@ -208,6 +208,17 @@ Browser/HTTP/SSE lifetime is separate from model/tool operation lifetime. A long
 - On successful actual execution, return source-linked outputs and evidence through the existing science_submit path. No fabricated completion on timeout or loss of a transport.
 
 W0 must record a bounded lifecycle contract and validation cases before W1, including same-request concurrency, cross-session recovery, timeout with unknown outcome, reconnect, user confirmation and long-operation result handoff. Implementation and fault-injection acceptance are W2.
+
+### 10.3 Implemented read side (W1)
+
+The backend holds no scientific state and no database. It is configured with explicit workspace ids mapped to server directories, the two CLI commands and one service access token; it binds loopback unless configured otherwise.
+
+- `GET /api/workspaces/{workspace}/views/{view}` returns one snapshot. Views: `now` (Core science_now for an exact request_id), `open` (the open requests Core itself names when science_now is asked without a request_id; never a selection), and Governance `tree`, `context`, `routes`, `evidence`. Each CLI is run with fixed argv, without a shell, with a timeout, an output-size bound, a concurrency bound and an environment reduced to what a process needs to start (no service token, no provider credential, no inherited BIOHARNESS_* override). Core receives its arguments as JSON on stdin; Governance takes flags only. Core is not called for a workspace whose `.bioharness` state directories do not all exist, because the Core CLI would create them.
+- A snapshot carries service, workspace, view, selector, owner and interface, observation time, the owner's data or refusal, the version the owner exposes (Governance view_sha256/shared_sha256; none for Core), an opaque content digest, Core's shortening note and Governance warnings. The digest answers "same or different", never "newer". It is taken over the bounded answer, so a change confined to text Core omitted is not detected.
+- `GET /api/workspaces/{workspace}/stream` is the SSE channel. The server polls the watched views and sends the digest it observed; the browser refetches when it differs from the snapshot it holds. Events carry no scientific data. Governance is polled every interval and Core every third interval.
+- `GET /api/workspaces/{workspace}/evidence-preview` takes the exact recorded anchor, has Governance resolve it, and only then reads the recorded file if it lies inside a configured root and outside any Core state directory; the check is repeated on the opened file. The file content is shown as recorded and is not rewritten. It reports recorded-reference match, Core snapshot integrity and whether the current file still matches, as three separate facts.
+- Every data route requires the access token (bearer header, or an HttpOnly session cookie obtained by signing in). There is no write route.
+- The frontend keeps selection in React state and snapshots in an SWR cache keyed by the view URL. Research tree and workflow are separate React Flow canvases laid out with Dagre from the returned edges only: recorded parent scopes and declared depends_on. Explicit related links are drawn dashed as context. Step status, review label and the current step are whatever Core returned.
 
 ## 11. Technology direction
 

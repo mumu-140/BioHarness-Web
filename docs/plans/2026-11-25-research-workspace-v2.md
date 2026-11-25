@@ -1,8 +1,8 @@
 # BioHarness Research Workspace V2 — Product Plan
 
 **Date:** 2026-11-25  
-**Status:** W0 read-side design exit satisfied / W1 ready; native provider activation open
-**Implementation status:** Not started  
+**Status:** W1 read side implemented and tested on synthetic fixtures, including in a real browser; real-project acceptance open; native provider activation open
+**Implementation status:** W1 in progress (see W1 checklist); W2–W5 not started  
 **Repository:** mumu-140/BioHarness-Web
 
 ## 1. Purpose
@@ -54,7 +54,7 @@ The current main baseline reviewed for this plan is fa87344508df95b4a869e51999d7
 
 The repository contains React 19, TypeScript, Vite and @xyflow/react; a FastAPI backend; a PostgreSQL read-only Observatory service and projection models; SSE invalidation and a task-stage graph; archived September 2026 Observatory design and implementation documents; and V1-specific validation records.
 
-The current implementation is a read-only observer over the former managed-record/PostgreSQL model. It does not yet call the current Core science_* mainline, run direct model APIs or execute configured Modules as a first-party host.
+That baseline was a read-only observer over the former managed-record/PostgreSQL model. W1 removed its PostgreSQL projection, task-stage graph and container files and replaced them with the public-CLI read side described under W1. The repository still does not run direct model APIs, mutate Core or execute configured Modules as a first-party host.
 
 Existing code is not automatically reusable merely because it is present. The implementation review classifies each component as retain, adapt, replace or remove. No V1 database/API/page compatibility is required.
 
@@ -74,13 +74,15 @@ The initial integration uses the supported Core Host CLI or stdio MCP. The curre
 
 Every follow-up call uses the explicit request_id. The Web runtime must not read/write Core state files directly, import Core private implementation or maintain a competing task state machine. Current Core persistence is FileScienceStore (JSON, locks, atomic replacement and revision), not SQLite. Governance is a read-only projection; Memory SQLite remains module-owned. W0 verifies actual public transport, concurrent stale-response handling and native user-message confirmation.
 
+CLI and stdio MCP share the five calls and their schemas, but they differ when request_id is omitted: the CLI passes no session and resumes or adopts the single open request, while MCP passes an empty session, never resumes at science_begin and refuses an unbound mutating call. Web therefore passes request_id on every continuation and mutating call and never relies on either default. The only call without one is the read-only open-request listing, whose purpose is to obtain Core's own list; it never selects a request. Governance refusals are a plain error string; only Core nests error.code.
+
 ### 5.2 Modules
 
 First candidate integrations:
 
 1. Project Governance — tree, context, routes and evidence.
-2. Memory — FAST/STANDARD/DEEP, T1/T2/T3, TaskMemoryGraph and explicit usage feedback.
-3. Literature — literature and method discovery with source references.
+2. Memory — FAST/STANDARD recall, T1/T2/T3 expansion and explicit usage feedback through its MCP tools. DEEP recall and TaskMemoryGraph exist inside the module but are not on its public MCP surface at the reviewed revision; Web does not show them until the owner exposes them.
+3. Literature — paper search and fetch with source references. The public CLI returns paper metadata, abstract and download/validation records, not passages.
 4. Scientific Review — existing Core advisor bridge; verify the direct provider API seam in the existing module, preserving non-blocking advice semantics.
 5. Statistics — scientific statistical design and interpretation, including reuse of the existing deterministic report renderer/verifier.
 6. Domain workflows — selected real capabilities such as DAP-seq, Genome-web TF or RNA-seq after current public contracts are verified.
@@ -232,16 +234,25 @@ Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-int
 
 **Goal:** the Web application displays real Core/Project Governance state.
 
-- [ ] Replace the V1 PostgreSQL task projection with current Core Host CLI and Project Governance public read adapters; JSON stdin/structured errors, exact workspace/request identity. Use the W0 snapshot/query-key/SSE invalidation contract with SWR, including stale/shortened/unavailable source views. Reuse this path in W2; no throwaway static polling UI or direct record-file read.
-- [ ] Add explicit workspace/project/scope/request selection.
-- [ ] Render the Project Governance research tree and scope context.
-- [ ] Preserve unscoped requests and explicit request identity.
-- [ ] Render the selected Core plan as a dynamic workflow graph using React Flow and Dagre; reuse compatible existing controls, scope navigation and inspector components. Pin/verify package versions and browser behavior in isolated Linux. Do not adopt an external workflow engine.
-- [ ] Show requirements, step dependencies, current instruction, progress and unresolved work.
-- [ ] Add node inspector for objective, method, parameters, check, result and source references.
-- [ ] Preserve actual exposed plan revisions and historical task references; show goal-version differences without inventing cross-branch hard dependencies or automatic invalidation.
-- [ ] Implement initial snapshot/refetch, stale marking and reconnect/full resync through the common W1/W2 channel.
-- [ ] Add loading, empty, stale, disconnected and unreadable-record states.
+- [x] Replace the V1 PostgreSQL task projection with current Core Host CLI and Project Governance public read adapters; JSON stdin/structured errors, exact workspace/request identity. Use the W0 snapshot/query-key/SSE invalidation contract with SWR, including stale/shortened/unavailable source views. Reuse this path in W2; no throwaway static polling UI or direct record-file read.
+- [x] Add explicit workspace/project/scope/request selection.
+- [x] Render the Project Governance research tree; scope detail comes from tree and routes.
+- [ ] Use the Governance context view in the UI (the API already serves it).
+- [x] Preserve unscoped requests and explicit request identity. Open requests come from Core's own answers to science_now without a request_id (at most 20 listed); a delivered unscoped request can only be opened by its exact ID because no public call lists it.
+- [x] Render the selected Core plan as a dynamic workflow graph using React Flow and Dagre; package versions are locked and the production build passes. Do not adopt an external workflow engine.
+- [x] Verify graph rendering and interaction in a real browser: `tests/browser/run.sh` drives the built service in headless Chromium against a synthetic workspace (both canvases, edges, selection, inspector, evidence preview, no server path in the page, and following a Core change made by another host without reload). Component tests run the non-canvas fallback only.
+- [x] Show requirements, step dependencies, current instruction, progress and unresolved work.
+- [x] Add node inspector for objective, method, parameters, check, result and source references. Per-step submissions and evidence come from Governance routes, so they exist only for scoped requests; for an unscoped request the inspector says so.
+- [x] Show historical task references and goal-version differences without inventing cross-branch hard dependencies or automatic invalidation. Plan revisions and within-plan reuse invalidation have no public read path (science_now returns the current plan and a count of retained historical submissions only); the UI states this instead of reconstructing them. Owner of the gap: Core.
+- [x] Implement initial snapshot/refetch, stale marking and reconnect/full resync through the common W1/W2 channel.
+- [x] Add loading, empty, stale, disconnected and unreadable-record states.
+- [x] Require the service access token on every data route, bind loopback by default, and replace configured server directories by labels in the owners' answers and in preview metadata. Recorded file evidence outside configured directories is shown by file name only. Free text written by a model or tool, and the content of a previewed evidence file, are shown as recorded and are not scanned for paths.
+- [x] Preview file evidence by its exact recorded anchor inside configured roots. Text evidence content is not returned by any public call and is shown as unavailable.
+- [x] Independent five-lens review of the W1 code (security, correctness, frontend, rule compliance, test quality) with each serious finding re-verified; the confirmed defects were fixed and covered by tests (among them: an oversized tool answer could wedge a read, the preview could be raced out of its root or read another workspace's Core state, a partial Core state directory was completed by a read, a single scoped open request was shown as unscoped, the project could not be changed after a choice, older step submissions were silently missing).
+- [ ] Known limits left as they are for a single trusted operator on a private network: one shared token without expiry or rate limiting; the session cookie is marked Secure only when the service sees HTTPS; each preview re-hashes the file (up to 64 MiB); the inspector reads at most the 100 most recent submissions of a scope.
+- [ ] Run the private real-project acceptance below in the authorized environment.
+
+**Tested so far:** backend unit tests, contract tests that build a synthetic workspace through the installed public Core 0.2.0 and Governance 0.1.2 CLIs and read it back through the Web API (including that reads leave the workspace unchanged), frontend component tests, and the headless-Chromium check of the built service against a synthetic workspace. Not yet tested: a real project, other browsers, graphs larger than a few nodes.
 
 **Acceptance:** a real project appears with the same scope ancestry and explicit related links as Project Governance; unscoped requests are not silently assigned; multiple open requests require explicit selection; workflow graph matches science_now and the selected Core plan; node details resolve to the correct Core request/step and source references; no direct SQL or private Core imports are used.
 
@@ -256,7 +267,7 @@ Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-int
 - [ ] Implement configured MCP/CLI tool adapters.
 - [ ] Implement the Core intake → plan → step → submit → next action → delivery loop.
 - [ ] Preserve explicit request_id and recover after browser/server restart using science_now.
-- [ ] Integrate the verified trusted native user-message confirmation seam for amendments; test genuine confirmation versus model/tool imitation. No sixth model-callable Core tool.
+- [ ] Settle with Core how a first-party Web host confirms a mainline amendment, then integrate it; test genuine confirmation versus model/tool imitation. No sixth model-callable Core tool. The only existing channel is the Agent-host hook CLI: the caller declares the host (claude, codex or codearts) and session itself, and the original user prompt is stored only for the claude host. Core ships wiring for those three Agent hosts and none for Web, so trust rests entirely on the backend being the sole caller. Whether Web may drive that hook, and under which host identity, is a Core decision.
 - [ ] Where required, adapt the existing Scientific Review module to direct API calls under a separately scoped module change; verify optional advisor and UNREVIEWED semantics. No external Agent required for native operation, no new scientific review gate.
 - [ ] Record actual model/tool events with secret redaction.
 - [ ] Implement the W0 technical lifecycle with backend/executor operation identity independent of HTTP/SSE, one local technical SQLite ledger for durable operation/conversation association, bounded metadata, explicit cancellation and outcome reconciliation. No second scientific state or scheduler.
@@ -270,15 +281,15 @@ Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-int
 
 - [ ] Reuse the W0 common invocation projection and fallback inspector; attach optional domain renderers only for actual supported outputs.
 - [ ] Project Governance inspector: tree, context, routes and evidence.
-- [ ] Memory inspector: T1/T2/T3, retrieval mode, TaskMemoryGraph, relation paths, condition gaps, conflicts and explicit use feedback.
-- [ ] Literature inspector: query, sources, papers, passages, methods and citations.
+- [ ] Memory inspector: T1/T2/T3, retrieval mode (FAST/STANDARD), condition gaps, conflicts and explicit use feedback as returned by the public MCP tools. TaskMemoryGraph, DEEP recall and relation paths are shown only once the Memory module exposes them publicly.
+- [ ] Literature inspector: query, sources, papers, abstracts, identifiers and fetch/validation records. Passage-level views wait for a public interface that returns passages.
 - [ ] Scientific Review inspector: intake/plan/work/delivery advice, concerns and unreviewed status.
 - [ ] Statistics inspector: unit, grain, grouping dimensions, combinations, numerator/denominator, background, methods, effect sizes and correction; invoke/display the existing deterministic report-binding renderer/verifier with evidence references, never duplicate its checks.
 - [ ] Analysis/workflow inspector: inputs, versions, parameters, tool calls, outputs, errors and recovery.
 - [ ] Add real invocation timeline with request, module, tool, time, status and evidence references.
 - [ ] Add explicit unavailable-module state; do not render a planned module as installed.
 
-**Acceptance:** each inspector uses actual module output or observed runtime events; no module algorithm is duplicated; Memory candidate/retrieved/consumed/outcome are distinct; Literature claims link to source passages; Statistics exposes denominator/background and analysis unit when supplied.
+**Acceptance:** each inspector uses actual module output or observed runtime events; no module algorithm is duplicated; Memory candidate/retrieved/consumed/outcome are distinct; Literature claims link to the source records the module returns (passages only if the module provides them); Statistics exposes denominator/background and analysis unit when supplied.
 
 ### W4 — Evidence, results and research comparison
 
@@ -367,6 +378,8 @@ See [deployment principles](../deployment.md). No production service or host is 
 Resolve in W0 A–D, not in another TODO or architecture plan: exact pinned Core/Module contracts and Host transport; native confirmation and reviewer seam; shared snapshot/event and invocation-view contract; first provider/model and long-operation recovery mechanism; canonical service/workspace mapping, authorization and telemetry; concrete reusable UI components; first real pilot and artifact viewers; authorized Linux host.
 
 Desktop topology and sole Web product ownership are settled. No new Core or Module capability is presumed without source-backed need.
+
+Gaps found while building W1, each for its existing owner and none blocking the read side: a public read of plan history and reuse invalidation, of text-evidence content and of delivered unscoped requests (Core); a supported amendment-confirmation path for a non-Agent host (Core); public DEEP recall/TaskMemoryGraph (Memory); passage-level results (Literature). Until an owner provides one, Web shows the item as unavailable.
 
 ## 15. Out of scope until justified
 

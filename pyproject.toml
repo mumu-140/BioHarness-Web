@@ -4,16 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bioharness-web"
-version = "0.1.0"
-description = "Read-only task graph observatory for BioHarness"
+version = "0.2.0"
+description = "BioHarness Research Workspace: read-side service over the public Core and Project Governance interfaces"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116,<0.117",
   "pydantic>=2.11,<3",
-  "sqlalchemy>=2.0,<3",
-  "psycopg[binary]>=3.2,<4",
   "uvicorn[standard]>=0.35,<1",
 ]
+
+[project.scripts]
+bioharness-web = "bioharness_web.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -29,3 +30,4 @@ packages = ["backend/bioharness_web"]
 [tool.pytest.ini_options]
 pythonpath = ["backend"]
 testpaths = ["tests"]
+asyncio_mode = "auto"

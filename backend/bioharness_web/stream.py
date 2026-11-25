@@ -1,130 +1,65 @@
+"""Tell a connected browser that a watched view may have changed.
+
+The server polls the owners' public queries; a `version` event carries the
+opaque content identity of the snapshot it just observed. The browser compares
+that with the snapshot it holds and refetches when they differ, so a duplicate,
+late or repeated event is harmless and a reconnect resynchronises by itself.
+An event is a notification only: scientific state always comes from a snapshot.
+
+Project Governance reads are cheap and polled every interval. science_now
+re-checks recent evidence files on every call, so Core views are polled less often.
+"""
+from __future__ import annotations
+
 import asyncio
-import hashlib
 import json
-from datetime import datetime, timezone
-from uuid import UUID
+import logging
+from typing import Any, AsyncIterator, Sequence
 
-from pydantic import BaseModel
+from .cli import ToolError
+from .sources import CORE, VIEWS, Sources
 
-from .models import TaskSummary
+log = logging.getLogger(__name__)
 
-
-class TaskVersion(BaseModel):
-    id: UUID
-    revision: str
+CORE_POLL_EVERY = 3  # Core views are read on every third governance poll
 
 
-class SseEvent(BaseModel):
-    event: str
-    data: dict
+def format_sse(event: str, data: dict) -> str:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return f"event: {event}\ndata: {payload}\n\n"
 
 
-class StreamState(BaseModel):
-    connected: bool
-    stale: bool
-    last_error: str | None = None
-
-
-def build_invalidation(
-    previous: TaskVersion | None,
-    current: TaskVersion,
-) -> SseEvent:
-    return SseEvent(
-        event="task.updated",
-        data={
-            "task_id": str(current.id),
-            "revision": current.revision,
-        },
-    )
-
-
-def stream_state_after_poll_error(error: Exception) -> StreamState:
-    return StreamState(
-        connected=True,
-        stale=True,
-        last_error=str(error),
-    )
-
-
-def format_sse(event: SseEvent) -> str:
-    payload = json.dumps(
-        event.data,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    return f"event: {event.event}\ndata: {payload}\n\n"
-
-
-def _summary_revision(summary: TaskSummary) -> str:
-    payload = json.dumps(
-        summary.model_dump(mode="json"),
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def task_versions(summaries) -> dict[UUID, TaskVersion]:
-    return {
-        summary.id: TaskVersion(
-            id=summary.id,
-            revision=_summary_revision(summary),
-        )
-        for summary in summaries
-    }
-
-
-async def event_stream(service, poll_interval_seconds: float):
-    previous: dict[UUID, TaskVersion] = {}
-    stale = False
-
+async def version_stream(
+    sources: Sources,
+    workspace_id: str,
+    watches: Sequence[tuple[str, dict[str, Any]]],
+    interval: float,
+) -> AsyncIterator[str]:
+    seen: dict[int, str] = {}
+    unreachable: set[int] = set()
+    tick = 0
     while True:
-        try:
-            revisions = await asyncio.to_thread(service.list_task_versions)
-            current = {
-                task_id: TaskVersion(id=task_id, revision=revision)
-                for task_id, revision in revisions.items()
-            }
-
-            for task_id, version in current.items():
-                prior = previous.get(task_id)
-                if prior is None or prior.revision != version.revision:
-                    yield format_sse(build_invalidation(prior, version))
-
-            for task_id in previous.keys() - current.keys():
-                yield format_sse(
-                    SseEvent(
-                        event="task.removed",
-                        data={"task_id": str(task_id)},
-                    )
-                )
-
-            if stale:
-                yield format_sse(
-                    SseEvent(
-                        event="observatory.connected",
-                        data={
-                            "stale": False,
-                            "at": datetime.now(timezone.utc).isoformat(),
-                        },
-                    )
-                )
-            previous = current
-            stale = False
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            if not stale:
-                yield format_sse(
-                    SseEvent(
-                        event="observatory.stale",
-                        data={
-                            "stale": True,
-                            "at": datetime.now(timezone.utc).isoformat(),
-                            "reason": str(error),
-                        },
-                    )
-                )
-            stale = True
-
-        await asyncio.sleep(poll_interval_seconds)
+        for index, (view, selector) in enumerate(watches):
+            every = CORE_POLL_EVERY if VIEWS[view][0] == CORE else 1
+            if tick % every:
+                continue
+            where = {"workspace": workspace_id, "view": view, "selector": selector}
+            try:
+                snapshot = await sources.get(workspace_id, view, selector, max_age=interval / 2)
+            except Exception as error:  # one failing read must not end the stream
+                code = error.code if isinstance(error, ToolError) else "INTERNAL_ERROR"
+                if not isinstance(error, ToolError):
+                    log.exception("unexpected failure while polling %s", view)
+                if index not in unreachable:
+                    unreachable.add(index)
+                    yield format_sse("source.stale", {**where, "code": code})
+                continue
+            version = snapshot["content_sha256"]
+            if seen.get(index) != version or index in unreachable:
+                seen[index] = version
+                unreachable.discard(index)
+                yield format_sse("version", {**where, "content_sha256": version,
+                                             "observed_at": snapshot["observed_at"]})
+        yield ": keep-alive\n\n"  # lets the server notice a closed connection
+        tick += 1
+        await asyncio.sleep(interval)

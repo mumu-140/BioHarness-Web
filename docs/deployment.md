@@ -1,6 +1,6 @@
 # Deployment Principles
 
-**Status: target principles only.** The V2 runtime and production deployment have not been implemented or selected.
+**Status: target principles, plus how to run the W1 read-side service (section 8).** No production deployment has been selected or made.
 
 ## 1. Deployment shape
 
@@ -63,5 +63,21 @@ The first Desktop topology is a thin Tauri client connected to the same remote s
 Deployment choices and TODO are maintained in the [single V2 plan](plans/2026-11-25-research-workspace-v2.md): W0 selects an authorized pilot environment and documents workspace mapping, model endpoints, credentials and connectivity; W2 verifies interruption/recovery and transport contracts; W4 verifies the integrated pilot deployment, access isolation, evidence roots, build identities and smoke results. No duplicate deployment checklist is maintained here.
 
 This public source repository must not contain private scientific data, private infrastructure details, credentials, or non-public evaluation receipts. Keep actual environment configuration and raw audit material in the authorized private research/CI workspace.
+
+## 8. Running the W1 read-side service
+
+The service needs Python 3.12+, the built frontend and the public `bioharness-host` and `bioharness-governance` commands installed for the same user. It reads the configured workspaces and writes nothing. Core state must be in the canonical place, `<workspace>/.bioharness`; a workspace where that directory or one of its `requests`, `evidence`, `sessions` subdirectories is missing is reported as having no Core state and Core is not called for it, because the Core CLI would create them. A workspace may not be `/` or the service user's home directory.
+
+| Variable | Meaning |
+|---|---|
+| `BIOHARNESS_WEB_WORKSPACES` | Required. JSON object mapping a workspace id to a server directory, or to `{"path": ..., "evidence_roots": [...]}` when evidence files live outside the workspace. |
+| `BIOHARNESS_WEB_ACCESS_TOKEN` | Required, at least 16 characters. Every data route needs it. |
+| `BIOHARNESS_WEB_HOST`, `BIOHARNESS_WEB_PORT` | Default `127.0.0.1:8080`. Keep loopback and reach it through an SSH tunnel or an authenticated HTTPS reverse proxy. |
+| `BIOHARNESS_WEB_STATIC_DIR` | Directory of the built frontend (`frontend/dist`). |
+| `BIOHARNESS_WEB_CORE_CLI`, `BIOHARNESS_WEB_GOVERNANCE_CLI` | Commands to run; default to the names on PATH. |
+| `BIOHARNESS_WEB_POLL_INTERVAL_SECONDS` | Default 5, minimum 1. |
+| `BIOHARNESS_WEB_SERVICE_ID`, `BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES` | Optional. |
+
+Start it with `python -m bioharness_web`. Configured directories are replaced by `$WORKSPACE` and `$EVIDENCE_ROOT_n` in responses. A recorded evidence file outside them is shown by file name only (`$OUTSIDE_CONFIGURED_ROOTS/name`) and cannot be previewed. Free text written by a model or a tool (summaries, instructions) and the content of a previewed evidence file are shown as recorded and are not scanned for paths. Core state of any workspace is never previewed, even when it lies under a configured evidence root. The single shared token is adequate for one trusted operator on a private network, not for multiple users: it does not expire, sign-in attempts are not rate limited, and the session cookie is marked Secure only when the service itself sees HTTPS (run it behind the proxy with forwarded-scheme support, or keep it on loopback). The Core and Governance commands are started with a reduced environment and never receive the token. The V1 container files were removed with the PostgreSQL service; a container image for this service is not provided yet.
 
 No production deployment is authorized or claimed by this planning document.

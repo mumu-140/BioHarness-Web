@@ -1,6 +1,6 @@
 # BioHarness Research Workspace
 
-**状态：W0 读侧审计准出 / W1 待实施。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+**状态：W1 读侧已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；真实项目验收未完成；W2 起尚未实施。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
 
 ## 产品目的
 
@@ -45,8 +45,13 @@ BioHarness Research Workspace 为科研人员提供一个能够理解、组织�
 
 ## 当前实现状态
 
-现有仓库包含 React、TypeScript、Vite、React Flow 和 FastAPI，当前实现仍是面向旧 managed-record/PostgreSQL 模型的只读 Observatory。它尚未接入现行 Core 五接口，也没有原生模型 API 执行循环或当前 Modules 的完整集成。
+W1 读侧已替换旧的 PostgreSQL Observatory：FastAPI 后端只通过公开 CLI 读取 Core `science_now` 和 Project Governance `tree/context/routes/evidence`，不保存科研状态、没有数据库、没有写接口；React 前端提供科研树、科研流程图、检查器和证据预览。接口与快照约定见[架构 10.3 节](docs/architecture.md)，运行方式见[部署说明](docs/deployment.md)。
 
-已有代码仅是候选复用资产，不构成兼容约束。任何组件都应先按 V2 需求评估，再决定保留、改造、替换或删除。
+尚未实现：原生模型 API 执行循环、对 Core 的写入、Modules 工具调用、对话界面和 Desktop。尚未验证：真实科研项目上的验收、较大规模图的渲染、Chromium 以外的浏览器。
 
-**本规划不宣称 V2 runtime、模型 API、科研树接入或 Desktop 已经实现。**
+```bash
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
+.venv/bin/python -m pytest          # 契约测试需要已安装 bioharness-host 与 bioharness-governance，否则跳过
+cd frontend && npm ci && npx vitest run && npm run build && cd ..
+tests/browser/run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 真实浏览器检查，需要 docker
+```

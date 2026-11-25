@@ -26,14 +26,14 @@ Raw outputs, research records, private static walkthrough, precise workspace add
 
 Invocation examples (workspace supplied by trusted deployment configuration):
 
-- Core CLI: bioharness-host call --workspace WORKSPACE science_now - ; stdin JSON with request_id. The wrapper must inspect the JSON ok/error fields, not only process exit. Errors are nested under error.code (including REQUEST_AMBIGUOUS and STATE_CHANGED).
+- Core CLI: bioharness-host call --workspace WORKSPACE science_now - ; stdin JSON with request_id. The wrapper must inspect the JSON ok/error fields, not only process exit. Core errors are nested under error.code (including REQUEST_AMBIGUOUS and STATE_CHANGED); Governance errors are a plain string.
 - Core MCP: bioharness-host mcp --workspace WORKSPACE. Discover the exact five tools.
 - Governance CLI: bioharness-governance --workspace WORKSPACE tree --project-id PROJECT; context --scope-id SCOPE --request-id REQUEST; routes --scope-id SCOPE --include-descendants; evidence with the four exact anchor arguments.
 - Governance MCP: bioharness-governance --workspace WORKSPACE mcp. Discover its four read-only tools.
 
 Source: Core Host science.py, cli.py, hooks.py, settings.py and scientific kernel/store/progress; Governance cli.py and view.py at the pinned revisions.
 
-Observed: 32/32 bounded public-contract checks passed, including explicit and multiple-open request selection, original question recovery across CLI processes, scope binding and wrong-scope negative case, intra-plan dependency progression, evidence tuple and wrong-hash negative case, native user confirmation, same-request concurrent review conflict, exact CLI/MCP parity, and real historical replay reads. The first test harness misread nested error.code; corrected the harness and repeated in fresh fixtures, without changing Core. A synchronized test-only advisor made two genuine concurrent CLI plan calls overlap; exactly one accepted and the other returned STATE_CHANGED. This tests the conflict path, not all filesystem failure modes.
+Observed: 32/32 bounded public-contract checks passed, including explicit and multiple-open request selection, original question recovery across CLI processes, scope binding and wrong-scope negative case, intra-plan dependency progression, evidence tuple and wrong-hash negative case, native user confirmation, same-request concurrent review conflict, CLI/MCP parity for calls with an explicit request_id, and real historical replay reads. The first test harness misread nested error.code; corrected the harness and repeated in fresh fixtures, without changing Core. A synchronized test-only advisor made two genuine concurrent CLI plan calls overlap; exactly one accepted and the other returned STATE_CHANGED. This tests the conflict path, not all filesystem failure modes.
 
 Limits and decisions:
 
@@ -136,5 +136,17 @@ W1 scope: read-only vertical slice over actual public Core/Governance queries, s
 ## Disposition
 
 A: verified public read, confirmation and concurrent-conflict paths; projection and module envelope selected. B: direct SDK/lifecycle/remote-service design selected, trusted hook verified; owner-configured live provider and Scientific Review API transport not implemented or live-tested. C: bounded source/license reuse decisions made; packages not yet installed/built. D: real source-backed static walkthrough and report verification complete; browser QA remains W1.
+
+## Corrections from the W1 build (2026-11-26)
+
+Checked against Core 69f2fbf (0.2.0) and Modules 3acc891 (Governance 0.1.2) source and the installed CLIs, using synthetic workspaces only.
+
+- CLI and MCP are equivalent only when request_id is given. Without it the CLI (no session) resumes an identical question or adopts the single open request, while MCP (empty session) always creates a new request at science_begin and refuses an unbound mutating call. Source: Host mcp_server.py and the kernel's begin/resolve paths.
+- The confirmation seam verified in B is the Agent-host hook CLI. Host identity and session are declared by the caller, the original prompt is stored only for the claude host, and Core ships wiring for Claude Code, Codex and CodeArts only. It was exercised here as a transport; it is not a Core-provided interface for a Web host. Source: Host hooks.py and cli.py.
+- A Core read is not free of side effects on an empty or partial state directory: constructing the store creates whichever of `requests`, `evidence`, `sessions` is missing, and doctor writes and removes a probe file. Reads of a complete existing workspace changed no file. The Web adapter calls Core only where all three directories exist and never calls doctor.
+- science_now re-hashes the evidence files of the last 12 submissions on each call, so it is polled less often than Governance. Measured on the build host: about 0.25 s per science_now call and under 0.1 s per Governance call on a three-request workspace.
+- science_now returns the current plan, Core-computed step progress and a count of retained historical submissions. It does not return plan history, per-submission records or a reuse-invalidation list. Governance returns submissions and evidence references for scoped requests only, and returns evidence identity, not content. File evidence can be previewed from its recorded source inside configured roots; text evidence content has no public read path.
+- Shortened Core answers and recorded evidence sources contain absolute server paths. The Web adapter replaces configured workspace and evidence-root directories by labels before anything reaches a browser.
+- Memory: the public MCP tools implement FAST and STANDARD recall; DEEP and TaskMemoryGraph are module-internal at this revision. Literature: search and fetch return paper records and download/validation entries, not passages.
 
 Under the existing W0 exit definition, W1's public read path, shared refresh, real pilot and remote topology are settled. Remaining W2 provider activation is explicitly open, and its review adapter belongs to the existing module; do not call W0 a completed live API or production acceptance. No Core/Modules/Eval source, production service, scientific result or dataset changed. Update implementation status and remaining checks in the single V2 plan.

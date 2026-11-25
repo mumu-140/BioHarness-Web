@@ -1,61 +1,92 @@
-import pytest
-from uuid import UUID
+import json
 
-from bioharness_web.stream import (
-    event_stream,
-    TaskVersion,
-    build_invalidation,
-    format_sse,
-    stream_state_after_poll_error,
-)
+from bioharness_web import stream as stream_module
+from bioharness_web.cli import ToolError
+from bioharness_web.sources import Sources
+from bioharness_web.stream import version_stream
 
 
-TASK_ID = UUID("00000000-0000-0000-0000-000000000101")
+def parse(chunk: str):
+    lines = dict(line.split(": ", 1) for line in chunk.strip().split("\n"))
+    return lines["event"], json.loads(lines["data"])
 
 
-def test_stream_emits_task_updated_invalidation():
-    previous = TaskVersion(id=TASK_ID, revision="old")
-    current = TaskVersion(id=TASK_ID, revision="new")
-    event = build_invalidation(previous, current)
-    assert event.event == "task.updated"
-    assert event.data == {
-        "task_id": str(TASK_ID),
-        "revision": "new",
-    }
+async def collect(generator, cycles: int, monkeypatch, between=None):
+    """Events from `cycles` polling rounds, with the sleep between rounds replaced."""
+    events, rounds = [], 0
+
+    async def no_sleep(_seconds):
+        nonlocal rounds
+        rounds += 1
+        if between:
+            between(rounds)
+
+    monkeypatch.setattr(stream_module.asyncio, "sleep", no_sleep)
+    async for chunk in generator:
+        if chunk.startswith(":"):
+            if rounds + 1 >= cycles:
+                break
+            continue
+        events.append(parse(chunk))
+    await generator.aclose()
+    return events
 
 
-def test_database_poll_failure_emits_stale_state_without_crashing_stream():
-    state = stream_state_after_poll_error(RuntimeError("db unavailable"))
-    assert state.connected is True
-    assert state.stale is True
-    assert "db unavailable" in state.last_error
+async def test_announces_each_watched_view_once_then_only_changes(settings, fake_runner, monkeypatch):
+    fake_runner.answers["tree"] = {"ok": True, "nodes": []}
+    sources = Sources(settings, fake_runner)
+
+    def change(round_number):
+        if round_number == 2:
+            fake_runner.answers["tree"] = {"ok": True, "nodes": [{"scope_id": "s"}]}
+
+    generator = version_stream(sources, "pilot", [("tree", {})], interval=0.0)
+    events = await collect(generator, 4, monkeypatch, change)
+    assert [name for name, _ in events] == ["version", "version"]
+    first, second = events[0][1], events[1][1]
+    assert first["view"] == "tree" and first["workspace"] == "pilot"
+    assert first["content_sha256"] != second["content_sha256"]
 
 
-def test_sse_format_is_minimal_and_json_encoded():
-    current = TaskVersion(id=TASK_ID, revision="new")
-    event = build_invalidation(None, current)
-    payload = format_sse(event)
-    assert payload.startswith("event: task.updated\n")
-    assert '"task_id":"' in payload
-    assert payload.endswith("\n\n")
+async def test_unreachable_source_is_reported_once_and_recovery_is_announced(settings, fake_runner, monkeypatch):
+    answer = {"ok": True, "nodes": []}
+    fake_runner.answers["tree"] = answer
+    sources = Sources(settings, fake_runner)
+
+    def change(round_number):
+        fake_runner.answers["tree"] = (ToolError("TOOL_TIMEOUT", "slow")
+                                       if round_number in (1, 2) else answer)
+
+    generator = version_stream(sources, "pilot", [("tree", {})], interval=0.0)
+    events = await collect(generator, 5, monkeypatch, change)
+    assert [name for name, _ in events] == ["version", "source.stale", "version"]
+    assert events[1][1]["code"] == "TOOL_TIMEOUT"
+    # same content as before the outage, announced again so the browser clears "stale"
+    assert events[0][1]["content_sha256"] == events[2][1]["content_sha256"]
 
 
-@pytest.mark.asyncio
-async def test_event_stream_emits_update_when_task_record_revision_changes():
-    class FakeVersionService:
-        def __init__(self):
-            self.calls = 0
+async def test_core_views_are_polled_less_often_than_governance(settings, fake_runner, monkeypatch):
+    fake_runner.answers["tree"] = {"ok": True, "nodes": []}
+    fake_runner.answers["now"] = {"ok": True, "request_id": "r1", "phase": "WORK"}
+    sources = Sources(settings, fake_runner)
+    generator = version_stream(sources, "pilot",
+                               [("tree", {}), ("now", {"request_id": "r1"})], interval=0.0)
+    await collect(generator, 6, monkeypatch)
+    core = sum("science_now" in argv for argv, _ in fake_runner.calls)
+    governance = sum("tree" in argv for argv, _ in fake_runner.calls)
+    assert governance == 6 and core == 2
 
-        def list_task_versions(self):
-            self.calls += 1
-            revision = "old" if self.calls == 1 else "new"
-            return {TASK_ID: revision}
 
-    stream = event_stream(FakeVersionService(), poll_interval_seconds=0)
-    try:
-        first = await anext(stream)
-        assert '"revision":"old"' in first
-        second = await anext(stream)
-        assert '"revision":"new"' in second
-    finally:
-        await stream.aclose()
+async def test_an_unexpected_failure_is_reported_as_stale_and_the_stream_goes_on(settings, fake_runner, monkeypatch):
+    answer = {"ok": True, "nodes": []}
+    fake_runner.answers["tree"] = RuntimeError("boom: /secret/path")
+    sources = Sources(settings, fake_runner)
+
+    def change(round_number):
+        if round_number == 1:
+            fake_runner.answers["tree"] = answer
+
+    generator = version_stream(sources, "pilot", [("tree", {})], interval=0.0)
+    events = await collect(generator, 3, monkeypatch, change)
+    assert [name for name, _ in events] == ["source.stale", "version"]
+    assert events[0][1]["code"] == "INTERNAL_ERROR" and "secret" not in str(events[0][1])

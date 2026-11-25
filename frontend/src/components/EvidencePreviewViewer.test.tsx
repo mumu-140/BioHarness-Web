@@ -1,25 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { EvidencePreview } from "../api/types";
 import EvidencePreviewViewer from "./EvidencePreviewViewer";
 
 
-function preview(
-  format: string,
-  content: string,
-  overrides: Partial<EvidencePreview> = {},
-): EvidencePreview {
-  return {
-    id: "evidence-1",
-    role: "execution_log",
-    name: "evidence.txt",
-    format,
-    size_bytes: content.length,
-    truncated: false,
-    content,
-    ...overrides,
-  };
+function preview(format: string, content: string, overrides: { truncated?: boolean } = {}) {
+  return { format, truncated: false, content, ...overrides };
 }
 
 
@@ -30,7 +16,6 @@ describe("EvidencePreviewViewer", () => {
         preview={preview(
           "table",
           "gene\tstatus\tscore\nA\tPASS\t0.97\nB\tWARN\t0.42\n",
-          { role: "audit_table", name: "audit.tsv" },
         )}
       />,
     );
@@ -49,7 +34,6 @@ describe("EvidencePreviewViewer", () => {
         preview={preview(
           "table",
           'gene,note,status\nA,"alpha, beta",PASS\n',
-          { role: "audit_table", name: "audit.csv" },
         )}
       />,
     );
@@ -71,7 +55,6 @@ describe("EvidencePreviewViewer", () => {
               counts: [2, 4],
             },
           }),
-          { role: "candidate_manifest", name: "manifest.json" },
         )}
       />,
     );
@@ -89,7 +72,6 @@ describe("EvidencePreviewViewer", () => {
         preview={preview(
           "fasta",
           ">seqA example\nMSTNPKPQRK\n>seqB\nACGTACGT\n",
-          { role: "alignment", name: "FamilyA_aln.fa" },
         )}
       />,
     );
@@ -107,7 +89,6 @@ describe("EvidencePreviewViewer", () => {
         preview={preview(
           "newick",
           "((Alpha:0.1,Beta:0.2):0.3,Gamma:0.4);",
-          { role: "tree", name: "FamilyA_tree.treefile" },
         )}
       />,
     );
@@ -134,7 +115,7 @@ describe("EvidencePreviewViewer", () => {
         preview={preview(
           "table",
           "a\tb\n1\t2\n…… 中间内容已省略 ……\n9\t10\n",
-          { truncated: true, role: "execution_trace", name: "trace.tsv" },
+          { truncated: true },
         )}
       />,
     );
