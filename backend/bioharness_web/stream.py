@@ -24,9 +24,41 @@ log = logging.getLogger(__name__)
 CORE_POLL_EVERY = 3  # Core views are read on every third governance poll
 
 
-def format_sse(event: str, data: dict) -> str:
+def format_sse(event: str, data: dict, event_id: int | None = None) -> str:
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return f"event: {event}\ndata: {payload}\n\n"
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}event: {event}\ndata: {payload}\n\n"
+
+
+async def conversation_stream(runtime, conversation_id: str, after: int,
+                              keepalive: float = 15.0) -> AsyncIterator[str]:
+    """Recorded events after `after`, then what happens next. Closing this stream changes
+    nothing: the run it shows continues in the backend, and a later reader starts from the
+    last sequence number it saw. Text still being written is sent live and is not recorded;
+    the finished text is."""
+    queue = runtime.subscribe(conversation_id)  # subscribe first so nothing falls between
+    try:
+        if after > runtime.ledger.last_seq(conversation_id):
+            after = 0  # the reader is ahead of this log (it was replaced): replay all of it
+        last = after
+        for event in runtime.ledger.events(conversation_id, after):
+            last = event["seq"]
+            yield format_sse(event["type"], event, event["seq"])
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), keepalive)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if event is None:
+                return  # this reader fell too far behind; it reconnects and replays
+            if event["seq"] is None:
+                yield format_sse(event["type"], event)
+            elif event["seq"] > last:
+                last = event["seq"]
+                yield format_sse(event["type"], event, event["seq"])
+    finally:
+        runtime.unsubscribe(conversation_id, queue)
 
 
 async def version_stream(

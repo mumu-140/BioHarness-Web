@@ -3,15 +3,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import __version__
-from .api import create_router
+from .api import create_router, create_runtime_router
 from .cli import CliRunner
+from .core import CoreHost
+from .ledger import Ledger
+from .provider import ModelClient
+from .runtime import Runtime
 from .settings import Settings
 from .sources import Sources
 
@@ -28,7 +33,7 @@ def _same(left: str, right: str) -> bool:
 
 
 class Login(BaseModel):
-    token: str
+    token: str = Field(max_length=1000)
 
 
 def _resolve_static_dir(value: str | Path | None) -> Path | None:
@@ -46,8 +51,16 @@ def create_app(
     static_dir: str | Path | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    runner = CliRunner(timeout_seconds=settings.tool_timeout_seconds,
+                       env_passthrough=settings.tool_env_passthrough)
     if sources is None:
-        sources = Sources(settings, CliRunner(timeout_seconds=settings.tool_timeout_seconds))
+        sources = Sources(settings, runner)
+    runtime: Runtime | None = None
+    if settings.runtime_enabled:
+        ledger = Ledger(settings.ledger_path)  # type: ignore[arg-type]
+        ledger.recover()  # nothing of a previous process is still in flight here
+        runtime = Runtime(settings, ledger, CoreHost(settings, runner),
+                          ModelClient(settings.model), sources)  # type: ignore[arg-type]
     session = _session_value(settings.access_token)
 
     def require_session(request: Request) -> None:
@@ -59,8 +72,16 @@ def create_app(
         raise HTTPException(401, {"origin": "web", "code": "UNAUTHENTICATED",
                                   "message": "sign in with the service access token"})
 
-    app = FastAPI(title="BioHarness Research Workspace", version=__version__,
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        if runtime is not None:
+            await runtime.close()
+            runtime.ledger.close()
+
+    app = FastAPI(title="BioHarness Research Workspace", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.runtime = runtime
 
     @app.get("/api/health")
     def health():
@@ -76,6 +97,9 @@ def create_app(
 
     app.include_router(create_router(sources, settings),
                        dependencies=[Depends(require_session)])
+    if runtime is not None:
+        app.include_router(create_runtime_router(runtime, settings),
+                           dependencies=[Depends(require_session)])
 
     @app.get("/api/{rest:path}", include_in_schema=False)
     def unknown_api_path(rest: str):

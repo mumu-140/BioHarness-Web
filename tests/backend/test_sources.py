@@ -252,3 +252,32 @@ async def test_concurrent_identical_reads_share_one_call(settings, fake_runner):
     results = await asyncio.gather(*tasks)
     assert Slow.calls == 1
     assert len({r["content_sha256"] for r in results}) == 1
+
+
+def test_labels_are_expanded_only_when_a_value_is_itself_a_labelled_path(settings):
+    from bioharness_web.sources import path_expander, path_redactor
+    workspace = settings.workspaces["pilot"]
+    expand, redact = path_expander(workspace), path_redactor(workspace)
+    proposed = {"evidence": [{"path": "$WORKSPACE/out/table.tsv"}, "$WORKSPACE"],
+                "summary": "see $WORKSPACE/out/table.tsv", "other": "$WORKSPACEX/a", "n": 3}
+    expanded = expand(proposed)
+    assert expanded["evidence"] == [{"path": f"{workspace.path}/out/table.tsv"}, str(workspace.path)]
+    assert expanded["summary"] == "see $WORKSPACE/out/table.tsv"  # prose is left as written
+    assert expanded["other"] == "$WORKSPACEX/a" and expanded["n"] == 3
+    assert redact(expanded)["evidence"][0]["path"] == "$WORKSPACE/out/table.tsv"
+
+
+def test_a_proposed_path_must_stay_inside_the_configured_directories(settings, workspace_dir, tmp_path):
+    from bioharness_web.evidence import path_permitted
+    workspace = settings.workspaces["pilot"]
+    (workspace_dir / "ok.txt").write_text("x")
+    assert path_permitted(workspace, str(workspace_dir / "ok.txt"))
+    assert path_permitted(workspace, "ok.txt")                       # relative to the workspace
+    assert path_permitted(workspace, str(workspace_dir / "new-output.tsv"))  # may not exist yet
+    assert not path_permitted(workspace, str(workspace_dir / ".." / "outside.txt"))
+    assert not path_permitted(workspace, "../outside.txt")
+    assert not path_permitted(workspace, str(workspace_dir / ".bioharness" / "requests" / "r.json"))
+    assert not path_permitted(workspace, "/etc/passwd")
+    assert not path_permitted(workspace, "a\x00b")
+    (workspace_dir / "link").symlink_to(tmp_path)
+    assert not path_permitted(workspace, str(workspace_dir / "link" / "file"))

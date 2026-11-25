@@ -1,8 +1,9 @@
 """Run one configured public CLI: fixed argv, JSON on stdin, JSON object on stdout.
 
 No shell is involved and nothing from a browser or a model becomes a command.
-Only read calls go through here: a timed-out call is killed, which is safe for a
-read and would not be for a mutating Core call.
+A call that does not answer in time is killed. For a read that is the end of it;
+for a mutating Core call the caller must treat the outcome as unknown and re-read
+Core, because the write may or may not have happened before the kill.
 """
 from __future__ import annotations
 
@@ -21,9 +22,9 @@ _CHILD_ENV = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TMPDIR", "
 _REAP_SECONDS = 5.0
 
 
-def _child_env() -> dict[str, str]:
+def _child_env(extra: Sequence[str] = ()) -> dict[str, str]:
     return {name: value for name, value in os.environ.items()
-            if name in _CHILD_ENV or name.startswith("LC_")}
+            if name in _CHILD_ENV or name in extra or name.startswith("LC_")}
 
 
 class ToolError(Exception):
@@ -87,41 +88,26 @@ class CliRunner:
         timeout_seconds: float = 60.0,
         max_output_bytes: int = 16 * 1024 * 1024,
         concurrency: int = 4,
+        env_passthrough: Sequence[str] = (),
     ):
         self.timeout_seconds = timeout_seconds
         self.max_output_bytes = max_output_bytes
+        self.env_passthrough = tuple(env_passthrough)
         self._slots = asyncio.Semaphore(concurrency)
 
-    async def run_json(self, argv: Sequence[str], stdin: dict | None = None) -> dict:
+    async def run_json(self, argv: Sequence[str], stdin: dict | None = None, *,
+                       timeout: float | None = None, empty_ok: bool = False) -> dict | None:
         """The JSON object the tool printed, whatever its exit status.
 
         These tools report a refusal as a JSON object with ok=false and a
         non-zero exit, so the object is the answer and the exit code is not.
+        With empty_ok, a tool that prints nothing (a Core hook with nothing to
+        say) yields None.
         """
-        payload = b"" if stdin is None else json.dumps(stdin, ensure_ascii=False).encode()
+        stdout, stderr, code = await self._run(argv, stdin, timeout)
         tool = os.path.basename(argv[0])
-        async with self._slots:
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    *argv,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=_child_env(),
-                )
-            except (OSError, ValueError):
-                raise ToolError("TOOL_UNAVAILABLE", f"{tool} could not be started") from None
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    self._exchange(process, payload), self.timeout_seconds
-                )
-            except asyncio.TimeoutError:
-                raise ToolError("TOOL_TIMEOUT", f"{tool} did not answer in time") from None
-            finally:
-                if process.returncode is None:
-                    await asyncio.shield(_reap(process, tool))
-        if stdout is None or stderr is None:
-            raise ToolError("TOOL_OUTPUT_TOO_LARGE", f"{tool} output exceeded the size limit")
+        if empty_ok and not stdout.strip() and code == 0:
+            return None
         try:
             answer = json.loads(stdout)
         except ValueError:
@@ -131,10 +117,45 @@ class CliRunner:
             # The child has no credentials in its environment to print.
             log.warning(
                 "%s exited %s without a JSON object; stderr tail: %s",
-                tool, process.returncode, stderr[-500:].decode("utf-8", "replace"),
+                tool, code, stderr[-500:].decode("utf-8", "replace"),
             )
             raise ToolError("TOOL_BAD_OUTPUT", f"{tool} did not return a JSON object")
         return answer
+
+    async def run_text(self, argv: Sequence[str], *, timeout: float | None = None) -> str:
+        """What a tool printed, for the few public commands that print text."""
+        stdout, _, code = await self._run(argv, None, timeout)
+        if code != 0:
+            raise ToolError("TOOL_FAILED", f"{os.path.basename(argv[0])} exited with status {code}")
+        return stdout.decode("utf-8", "replace")
+
+    async def _run(self, argv: Sequence[str], stdin: dict | None,
+                   timeout: float | None) -> tuple[bytes, bytes, int | None]:
+        payload = b"" if stdin is None else json.dumps(stdin, ensure_ascii=False).encode()
+        tool = os.path.basename(argv[0])
+        async with self._slots:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *argv,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=_child_env(self.env_passthrough),
+                )
+            except (OSError, ValueError):
+                raise ToolError("TOOL_UNAVAILABLE", f"{tool} could not be started") from None
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    self._exchange(process, payload), timeout or self.timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                raise ToolError("TOOL_TIMEOUT", f"{tool} did not answer in time") from None
+            finally:
+                if process.returncode is None:
+                    await asyncio.shield(_reap(process, tool))
+        if stdout is None or stderr is None:
+            raise ToolError("TOOL_OUTPUT_TOO_LARGE", f"{tool} output exceeded the size limit")
+        return stdout, stderr, process.returncode
 
     async def _exchange(
         self, process: asyncio.subprocess.Process, payload: bytes

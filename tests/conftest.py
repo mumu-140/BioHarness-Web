@@ -6,6 +6,7 @@ import pytest
 from bioharness_web.settings import Settings, Workspace
 
 sys.path.insert(0, str(Path(__file__).parent / "contract"))  # synthetic_workspace
+sys.path.insert(0, str(Path(__file__).parent))  # support
 
 TOKEN = "test-access-token-0123456789"
 
