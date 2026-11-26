@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
 import { type ApiError, getJson } from "./api/client";
@@ -10,12 +10,21 @@ import type {
   OpenData,
   TreeData,
 } from "./api/types";
+import ActivityRail, { type WorkbenchArea } from "./components/ActivityRail";
+import ArtifactsWorkbench from "./components/ArtifactsWorkbench";
+import AttentionStream, {
+  buildAttentionItems,
+  type AttentionItem,
+} from "./components/AttentionStream";
+import CommandPalette from "./components/CommandPalette";
 import ConnectionBadge from "./components/ConnectionBadge";
 import ConversationPanel from "./components/ConversationPanel";
+import DualTrackPanel from "./components/DualTrackPanel";
 import Inspector, { type InspectedTarget } from "./components/Inspector";
 import Navigator from "./components/Navigator";
 import NowPanel from "./components/NowPanel";
 import ResearchTreeGraph from "./components/ResearchTreeGraph";
+import SettingsCenter from "./components/SettingsCenter";
 import SignIn from "./components/SignIn";
 import SnapshotNotice from "./components/SnapshotNotice";
 import WorkflowGraph from "./components/WorkflowGraph";
@@ -25,12 +34,24 @@ import { formatTime } from "./labels";
 
 type Tab = "tree" | "workflow";
 
+function readCompactPref(): boolean {
+  try {
+    return window.localStorage.getItem("bioharness.ui.compact") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function App({ eventSourceFactory }: { eventSourceFactory?: EventSourceFactory }) {
   const { mutate } = useSWRConfig();
   const meta = useSWR<Meta, ApiError>("/api/meta", getJson, {
     revalidateOnFocus: false,
     shouldRetryOnError: false,
   });
+
+  const [area, setArea] = useState<WorkbenchArea>("research");
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [compactDensity, setCompactDensity] = useState<boolean>(readCompactPref);
 
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -44,20 +65,35 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [inspectedTarget, setInspectedTarget] = useState<InspectedTarget | null>(null);
   const [observedInvocations, setObservedInvocations] = useState<InvocationItem[]>([]);
 
+  function updateCompactDensity(next: boolean) {
+    setCompactDensity(next);
+    try {
+      window.localStorage.setItem("bioharness.ui.compact", next ? "1" : "0");
+    } catch {
+      // ignore storage errors in restricted environments
+    }
+  }
+
   // A service configured with a single workspace has nothing to choose between.
   const workspaces = meta.data?.workspaces;
   useEffect(() => {
     if (!workspace && workspaces?.length === 1) setWorkspace(workspaces[0]);
   }, [workspace, workspaces]);
 
-  // Without a project_id Project Governance answers with the single project or,
-  // when there are several, with the list to choose from. That list is kept
-  // available after a choice so the project can be changed again.
   const overview = useSnapshot<TreeData>(workspace, "tree", {});
   const tree = useSnapshot<TreeData>(workspace, "tree", { project_id: projectId ?? undefined });
   const open = useSnapshot<OpenData>(workspace, "open", {});
   const now = useSnapshot<NowData>(workspace, "now", requestId ? { request_id: requestId } : null);
   const stream = useVersionStream(workspace, projectId, requestId, eventSourceFactory);
+
+  const treeData = tree.data?.ok ? tree.data.data : null;
+  const nowData = now.data?.ok ? now.data.data : null;
+  const openData = open.data?.ok ? open.data.data : null;
+
+  const attentionItems = useMemo(
+    () => buildAttentionItems(nowData, treeData, openData, requestId),
+    [nowData, treeData, openData, requestId],
+  );
 
   // The session can also end after the page has loaded (token rotated, service restarted).
   const signedOut = [meta.error, overview.error, tree.error, open.error, now.error].some(
@@ -75,8 +111,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   }
   if (!meta.data) return <p className="notice">正在连接工作台服务…</p>;
 
-  const treeData = tree.data?.ok ? tree.data.data : null;
-  const nowData = now.data?.ok ? now.data.data : null;
   // The scope a request belongs to is what Core recorded, not what is selected on screen.
   const requestScope =
     typeof nowData?.scope_context?.scope_id === "string" ? nowData.scope_context.scope_id : null;
@@ -93,8 +127,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setTab("tree");
   }
 
-  // Choosing another project starts a new look at the tree: a request selected
-  // under the previous project is not carried along as if it belonged to this one.
   function selectProject(id: string | null) {
     setProjectId(id);
     setScopeId(null);
@@ -110,12 +142,30 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   }
 
   function selectRequest(id: string, scope: string | null, project: string | null) {
+    setArea("research");
     setRequestId(id);
     setStepId(null);
     setInspectedTarget(null);
     setTab("workflow");
     setScopeId(scope); // null for an unscoped request: no scope stays highlighted
     if (project) setProjectId(project);
+  }
+
+  function handleAttentionNavigate(item: AttentionItem) {
+    setArea("research");
+    if (item.requestId) {
+      selectRequest(item.requestId, item.scopeId ?? null, item.projectId ?? null);
+      if (item.kind === "amendment" || item.kind === "wait_for_user") {
+        setDockOpen(true);
+      } else if (item.kind === "evidence_changed") {
+        setInspectorOpen(true);
+      }
+    } else if (item.scopeId) {
+      setTab("tree");
+      selectScope(item.scopeId);
+    } else {
+      setNavOpen(true);
+    }
   }
 
   function handleInspectInvocation(item: InvocationItem, contextRequestId: string | null) {
@@ -135,16 +185,25 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   }
 
   const missingTools = Object.entries(meta.data.tools).filter(([, tool]) => !tool.found);
+  const showInspector = area === "research" && Boolean(workspace) && inspectorOpen;
   const appClasses = [
-    "app",
+    "app has-rail",
     !navOpen ? "is-nav-collapsed" : "",
-    !inspectorOpen || !workspace ? "is-inspector-collapsed" : "",
+    !showInspector ? "is-inspector-collapsed" : "",
+    compactDensity ? "is-compact" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <div className={appClasses}>
+      <ActivityRail
+        area={area}
+        onSelectArea={setArea}
+        onOpenCommand={() => setCommandOpen(true)}
+        attentionCount={attentionItems.length}
+      />
+
       {navOpen && (
         <Navigator
           workspaces={meta.data.workspaces}
@@ -156,7 +215,10 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           projectId={projectId ?? treeData?.project_id ?? null}
           onSelectProject={selectProject}
           scopeId={scopeId}
-          onSelectScope={selectScope}
+          onSelectScope={(id) => {
+            setArea("research");
+            selectScope(id);
+          }}
           requestId={requestId}
           onSelectRequest={selectRequest}
         />
@@ -205,7 +267,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             >
               {navOpen ? "收起导航" : "展开导航"}
             </button>
-            {workspace && (
+            {workspace && area === "research" && (
               <button
                 type="button"
                 className="ghost-btn"
@@ -219,123 +281,178 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           </div>
         </header>
 
+        <AttentionStream items={attentionItems} onNavigate={handleAttentionNavigate} />
+
         {missingTools.map(([name, tool]) => (
           <p className="notice is-warning" role="alert" key={name}>
             服务端未找到 {name} 的命令 {tool.command},相关视图不可用。
           </p>
         ))}
 
-        <nav className="tabs" aria-label="视图">
-          <button type="button" aria-pressed={tab === "tree"} onClick={() => setTab("tree")}>
-            科研树
-          </button>
-          <button type="button" aria-pressed={tab === "workflow"} onClick={() => setTab("workflow")}>
-            科研流程
-          </button>
-          {workspace && (
-            <button type="button" className="ghost-btn" onClick={refreshSnapshots}>
-              刷新视图
-            </button>
-          )}
-          <span className="tabs-observed">
-            {tab === "tree" && tree.data && "Project Governance 快照 " + formatTime(tree.data.observed_at)}
-            {tab === "workflow" && now.data && "Core 快照 " + formatTime(now.data.observed_at)}
-          </span>
-        </nav>
-
-        <section className="canvas">
-          {!workspace ? (
-            <p className="empty-state">请选择工作区。</p>
-          ) : tab === "tree" ? (
-            <>
-              <SnapshotNotice
-                name="科研树"
-                snapshot={tree.data}
-                error={tree.error}
-                loading={tree.isLoading}
-              />
-              {treeData && treeData.nodes.length > 0 ? (
-                <ResearchTreeGraph
-                  tree={treeData}
-                  selectedScopeId={scopeId}
-                  onSelectScope={selectScope}
-                />
-              ) : (
-                treeData && (
-                  <p className="empty-state">
-                    {treeData.projects?.length
-                      ? "此工作区有多个项目,请在左侧明确选择一个。"
-                      : "此工作区没有已声明的研究范围。"}
-                  </p>
-                )
-              )}
-            </>
-          ) : !requestId ? (
-            <p className="empty-state">请在左侧明确选择一个请求;工作台不会代为选定。</p>
-          ) : (
-            <>
-              <SnapshotNotice
-                name="请求状态"
-                snapshot={now.data}
-                error={now.error}
-                loading={now.isLoading}
-              />
-              {nowData && (
-                <>
-                  <NowPanel now={nowData} onSelectStep={(id) => setStepId(id)} />
-                  <WorkflowGraph now={nowData} selectedStepId={stepId} onSelectStep={setStepId} />
-                </>
-              )}
-            </>
-          )}
-        </section>
-
-        {workspace && (
-          runtimeEnabled ? (
-            <div className={"dock " + (dockOpen ? "is-open" : "")}>
+        {area === "artifacts" ? (
+          <div className="flex-1 overflow-hidden">
+            <ArtifactsWorkbench
+              workspace={workspace}
+              scopeId={scopeId}
+              requestId={requestId}
+              now={nowData}
+              tree={treeData}
+            />
+          </div>
+        ) : area === "memory" ? (
+          <div className="flex-1 overflow-hidden">
+            <SettingsCenter
+              key="memory"
+              meta={meta.data}
+              initialTab="memory"
+              compactDensity={compactDensity}
+              onCompactDensityChange={updateCompactDensity}
+            />
+          </div>
+        ) : area === "resources" ? (
+          <div className="flex-1 overflow-hidden">
+            <SettingsCenter
+              key="skills"
+              meta={meta.data}
+              initialTab="skills"
+              compactDensity={compactDensity}
+              onCompactDensityChange={updateCompactDensity}
+            />
+          </div>
+        ) : area === "settings" ? (
+          <div className="flex-1 overflow-hidden">
+            <SettingsCenter
+              key="general"
+              meta={meta.data}
+              initialTab="general"
+              compactDensity={compactDensity}
+              onCompactDensityChange={updateCompactDensity}
+            />
+          </div>
+        ) : (
+          <>
+            <nav className="tabs" aria-label="视图">
+              <button type="button" aria-pressed={tab === "tree"} onClick={() => setTab("tree")}>
+                科研树
+              </button>
               <button
                 type="button"
-                className="dock-toggle"
-                aria-expanded={dockOpen}
-                onClick={() => setDockOpen(!dockOpen)}
+                aria-pressed={tab === "workflow"}
+                onClick={() => setTab("workflow")}
               >
-                {dockOpen ? "收起对话与执行轨迹" : "展开对话与执行轨迹"}
+                科研流程
               </button>
-              {dockOpen && (
-                <ConversationPanel
-                  workspace={workspace}
-                  model={meta.data.runtime?.model ?? null}
-                  moduleToolServers={meta.data.runtime?.module_tool_servers ?? []}
-                  requestId={requestId}
-                  scopeId={scopeId}
-                  delivered={nowData?.phase === "DELIVERED"}
-                  onRequestKnown={(id, scope, project) => {
-                    if (id !== requestId) selectRequest(id, scope, project);
-                  }}
-                  onNewQuestion={() => {
-                    setRequestId(null);
-                    setStepId(null);
-                    setInspectedTarget(null);
-                    setTab("tree");
-                  }}
-                  onInspectInvocation={handleInspectInvocation}
-                  onInspectModule={handleInspectModule}
-                  onInvocationsChange={setObservedInvocations}
-                  eventSourceFactory={eventSourceFactory}
-                />
+              {workspace && (
+                <button type="button" className="ghost-btn" onClick={refreshSnapshots}>
+                  刷新视图
+                </button>
               )}
-            </div>
-          ) : (
-            <div className="dock is-disabled">
-              <p className="notice runtime-disabled-notice">
-                原生运行时未配置（当前为只读模式：可浏览科研树、当前计划与证据预览，不提供对话、运行与调用/Module 历史）。
-              </p>
-            </div>
-          )
+              <span className="tabs-observed">
+                {tab === "tree" && tree.data && "Project Governance 快照 " + formatTime(tree.data.observed_at)}
+                {tab === "workflow" && now.data && "Core 快照 " + formatTime(now.data.observed_at)}
+              </span>
+            </nav>
+
+            <section className="canvas">
+              {!workspace ? (
+                <p className="empty-state">请选择工作区。</p>
+              ) : tab === "tree" ? (
+                <>
+                  <SnapshotNotice
+                    name="科研树"
+                    snapshot={tree.data}
+                    error={tree.error}
+                    loading={tree.isLoading}
+                  />
+                  {treeData && treeData.nodes.length > 0 ? (
+                    <ResearchTreeGraph
+                      tree={treeData}
+                      selectedScopeId={scopeId}
+                      onSelectScope={selectScope}
+                    />
+                  ) : (
+                    treeData && (
+                      <p className="empty-state">
+                        {treeData.projects?.length
+                          ? "此工作区有多个项目,请在左侧明确选择一个。"
+                          : "此工作区没有已声明的研究范围。"}
+                      </p>
+                    )
+                  )}
+                </>
+              ) : !requestId ? (
+                <p className="empty-state">请在左侧明确选择一个请求;工作台不会代为选定。</p>
+              ) : (
+                <>
+                  <SnapshotNotice
+                    name="请求状态"
+                    snapshot={now.data}
+                    error={now.error}
+                    loading={now.isLoading}
+                  />
+                  {nowData && (
+                    <>
+                      <NowPanel now={nowData} onSelectStep={(id) => setStepId(id)} />
+                      <WorkflowGraph now={nowData} selectedStepId={stepId} onSelectStep={setStepId} />
+                      <DualTrackPanel
+                        now={nowData}
+                        selectedStepId={stepId}
+                        invocations={observedInvocations}
+                        onInspectInvocation={handleInspectInvocation}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </section>
+
+            {workspace &&
+              (runtimeEnabled ? (
+                <div className={"dock " + (dockOpen ? "is-open" : "")}>
+                  <button
+                    type="button"
+                    className="dock-toggle"
+                    aria-expanded={dockOpen}
+                    onClick={() => setDockOpen(!dockOpen)}
+                  >
+                    {dockOpen ? "收起对话与执行轨迹" : "展开对话与执行轨迹"}
+                  </button>
+                  {dockOpen && (
+                    <ConversationPanel
+                      workspace={workspace}
+                      model={meta.data.runtime?.model ?? null}
+                      moduleToolServers={meta.data.runtime?.module_tool_servers ?? []}
+                      requestId={requestId}
+                      scopeId={scopeId}
+                      delivered={nowData?.phase === "DELIVERED"}
+                      onRequestKnown={(id, scope, project) => {
+                        if (id !== requestId) selectRequest(id, scope, project);
+                      }}
+                      onNewQuestion={() => {
+                        setRequestId(null);
+                        setStepId(null);
+                        setInspectedTarget(null);
+                        setTab("tree");
+                      }}
+                      onInspectInvocation={handleInspectInvocation}
+                      onInspectModule={handleInspectModule}
+                      onInvocationsChange={setObservedInvocations}
+                      eventSourceFactory={eventSourceFactory}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="dock is-disabled">
+                  <p className="notice runtime-disabled-notice">
+                    原生运行时未配置（当前为只读模式：可浏览科研树、当前计划与证据预览，不提供对话、运行与调用/Module 历史）。
+                  </p>
+                </div>
+              ))}
+          </>
         )}
       </main>
 
-      {workspace && inspectorOpen && (
+      {showInspector && workspace && (
         <Inspector
           workspace={workspace}
           tree={treeData}
@@ -359,6 +476,19 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           onClearInspected={() => setInspectedTarget(null)}
         />
       )}
+
+      <CommandPalette
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        workspaces={meta.data.workspaces}
+        scopes={treeData?.nodes ?? []}
+        openRequests={openData?.open_requests ?? []}
+        projectId={projectId ?? treeData?.project_id ?? null}
+        onSelectWorkspace={selectWorkspace}
+        onSelectScope={selectScope}
+        onSelectRequest={selectRequest}
+        onSelectArea={setArea}
+      />
     </div>
   );
 }
