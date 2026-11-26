@@ -16,6 +16,7 @@ const TYPES = [
   "run.started",
   "run.finished",
   "run.cancel_requested",
+  "module.discovery",
 ];
 
 export interface ConversationLog {
@@ -23,9 +24,10 @@ export interface ConversationLog {
   /** Text the model is writing right now; replaced by the recorded text when it is complete. */
   draft: string;
   connected: boolean;
+  connectSeq: number;
 }
 
-const EMPTY: ConversationLog = { events: [], draft: "", connected: false };
+const EMPTY: ConversationLog = { events: [], draft: "", connected: false, connectSeq: 0 };
 
 /**
  * The recorded event log of one conversation, followed live. The log lives on
@@ -43,7 +45,13 @@ export default function useConversationEvents(
     setLog(EMPTY);
     if (!conversationId) return;
     const source = factory(conversationsUrl(workspace, "/" + encodeURIComponent(conversationId) + "/events"));
-    source.onopen = () => setLog((state) => ({ ...state, connected: true }));
+    source.onopen = () =>
+      setLog((state) => ({
+        ...state,
+        connected: true,
+        connectSeq: state.connectSeq + 1,
+        draft: !state.connected && state.events.length > 0 ? "" : state.draft,
+      }));
     source.onerror = () => setLog((state) => ({ ...state, connected: false }));
 
     for (const type of TYPES) {
@@ -64,7 +72,7 @@ export default function useConversationEvents(
             event.type === "assistant.text" ||
             event.type === "run.finished" ||
             (event.type === "operation.finished" && event.data.kind === "model");
-          return { events: [...state.events, event], connected: true, draft: done ? "" : state.draft };
+          return { ...state, events: [...state.events, event], connected: true, draft: done ? "" : state.draft };
         });
       });
     }

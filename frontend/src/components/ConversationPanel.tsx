@@ -11,14 +11,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
 import { type ApiError, conversationsUrl, getJson, sendJson } from "../api/client";
-import type { Conversation, ConversationEvent, ConversationState } from "../api/types";
+import type {
+  Conversation,
+  ConversationEvent,
+  ConversationState,
+  InvocationItem,
+  ModuleServerObservation,
+} from "../api/types";
 import useConversationEvents from "../hooks/useConversationEvents";
+import useInvocations from "../hooks/useInvocations";
+import useModules from "../hooks/useModules";
 import type { EventSourceFactory } from "../hooks/useVersionStream";
-import { formatTime, formatValue } from "../labels";
+import InvocationTimeline from "./InvocationTimeline";
 
 interface ConversationPanelProps {
   workspace: string;
   model: string | null;
+  moduleToolServers?: string[];
   /** The request selected in the workspace, if any. */
   requestId: string | null;
   /** The scope selected in the research tree, offered as the scope of a new question. */
@@ -27,6 +36,9 @@ interface ConversationPanelProps {
   delivered: boolean;
   onRequestKnown(requestId: string, scopeId: string | null, projectId: string | null): void;
   onNewQuestion(): void;
+  onInspectInvocation?: (item: InvocationItem, contextRequestId: string | null) => void;
+  onInspectModule?: (server: ModuleServerObservation) => void;
+  onInvocationsChange?: (items: InvocationItem[]) => void;
   eventSourceFactory?: EventSourceFactory;
 }
 
@@ -42,7 +54,6 @@ const STATE: Record<string, string> = {
   INTERRUPTED: "已中断",
   CANCELLED: "已取消",
 };
-const KIND: Record<string, string> = { core: "Core", hook: "Core hook", model: "模型", tool: "工具" };
 const SOURCE: Record<string, string> = { core: "Core", host: "工作台" };
 
 // Text is shown exactly as received, as soon as it is received.
@@ -89,6 +100,27 @@ function toItems(events: ConversationEvent[], draft: string): Item[] {
             ? `Core 拒绝了 ${String(event.data.name)}:${String(error?.message ?? "未说明原因")}`
             : `${String(event.data.name)} 没有收到 Core 的答复,结果未知;工作台没有重发。`,
       });
+    } else if (
+      event.type === "operation.finished" &&
+      event.data.kind === "model" &&
+      event.data.state === "SUCCEEDED" &&
+      event.data.finish_reason === "length"
+    ) {
+      items.push({
+        id: "e" + event.seq,
+        role: "system",
+        text: "模型响应因长度上限截断（finish_reason=length），未派发未完成的工具调用。",
+      });
+    } else if (
+      event.type === "operation.finished" &&
+      event.data.kind === "tool" &&
+      event.data.state === "UNKNOWN"
+    ) {
+      items.push({
+        id: "e" + event.seq,
+        role: "system",
+        text: `工具 ${String(event.data.name)} 未在时限内返回，结果未知；工作台未重发。`,
+      });
     } else if (event.type === "run.finished" && event.data.state !== "FINISHED") {
       items.push({
         id: "e" + event.seq,
@@ -101,75 +133,16 @@ function toItems(events: ConversationEvent[], draft: string): Item[] {
   return items;
 }
 
-interface Operation {
-  id: string;
-  kind: string;
-  name: string;
-  initiator?: string;
-  state: string;
-  startedAt?: string;
-  detail: Record<string, unknown>;
-}
-
-function toOperations(events: ConversationEvent[]): Operation[] {
-  const byId = new Map<string, Operation>();
-  for (const event of events) {
-    if (event.type !== "operation.started" && event.type !== "operation.finished") continue;
-    const { operation_id, kind, name, initiator, state, ...rest } = event.data as Record<string, unknown>;
-    const id = String(operation_id);
-    const held = byId.get(id);
-    if (event.type === "operation.started") {
-      byId.set(id, {
-        id, kind: String(kind), name: String(name), initiator: initiator ? String(initiator) : undefined,
-        state: "STARTED", startedAt: event.at, detail: rest,
-      });
-    } else if (held) {
-      byId.set(id, { ...held, state: String(state), detail: { ...held.detail, ...rest } });
-    }
-  }
-  return [...byId.values()];
-}
-
-function Trace({ operations }: { operations: Operation[] }) {
-  return (
-    <section className="trace" aria-label="执行轨迹">
-      <h3>执行轨迹</h3>
-      <p className="muted">
-        这里是工作台实际观察到的模型请求、Core 调用和工具调用。调用返回不代表科学结果成立。
-      </p>
-      {operations.length === 0 ? (
-        <p className="muted">尚无记录。</p>
-      ) : (
-        <ol>
-          {operations.map((operation) => (
-            <li key={operation.id}>
-              <details>
-                <summary>
-                  <span className="chip">{KIND[operation.kind] ?? operation.kind}</span>
-                  <code>{operation.name}</code>
-                  <span className={"trace-state is-" + operation.state.toLowerCase()}>
-                    {STATE[operation.state] ?? operation.state}
-                  </span>
-                  <span className="muted">
-                    {operation.initiator === "model" ? "模型提出" : operation.initiator === "host" ? "工作台发起" : ""}
-                    {" · " + formatTime(operation.startedAt)}
-                  </span>
-                </summary>
-                <pre>{formatValue(operation.detail)}</pre>
-              </details>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
-}
-
 export default function ConversationPanel(props: ConversationPanelProps) {
   const { workspace, requestId, scopeId, delivered, onRequestKnown } = props;
   const { mutate } = useSWRConfig();
   const listUrl = conversationsUrl(workspace);
-  const list = useSWR<Conversation[], ApiError>(listUrl, getJson, { revalidateOnFocus: false });
+  const list = useSWR<Conversation[], ApiError>(listUrl, getJson, {
+    revalidateOnFocus: false,
+    onError: (err) => {
+      if (err.status === 401) void mutate("/api/meta");
+    },
+  });
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [scopeChoice, setScopeChoice] = useState<"none" | "selected" | "new">("none");
   const [newScopeId, setNewScopeId] = useState("");
@@ -190,17 +163,32 @@ export default function ConversationPanel(props: ConversationPanelProps) {
   }, [scopeId, scopeChoice]);
 
   const stateUrl = conversationId ? conversationsUrl(workspace, "/" + conversationId) : null;
-  const state = useSWR<ConversationState, ApiError>(stateUrl, getJson, { revalidateOnFocus: false });
+  const state = useSWR<ConversationState, ApiError>(stateUrl, getJson, {
+    revalidateOnFocus: false,
+    onError: (err) => {
+      if (err.status === 401) void mutate("/api/meta");
+    },
+  });
   const log = useConversationEvents(workspace, conversationId, props.eventSourceFactory);
+  const invocations = useInvocations(workspace, conversationId, true, log);
+  const modules = useModules(workspace, conversationId, true, log);
+
+  useEffect(() => {
+    props.onInvocationsChange?.(invocations.items);
+  }, [invocations.items, props.onInvocationsChange]);
 
   // The request of the conversation on screen: what Core answered to its science_begin, or
   // what the service recorded for it. A conversation belongs to exactly one request.
   const begun = useMemo(() => {
     for (const event of log.events) {
       const output = event.data.output as { request_id?: unknown; resumed?: unknown } | undefined;
-      if (event.type === "operation.finished" && event.data.name === "science_begin"
-          && event.data.state === "SUCCEEDED" && output?.resumed !== true
-          && typeof output?.request_id === "string") {
+      if (
+        event.type === "operation.finished" &&
+        event.data.name === "science_begin" &&
+        event.data.state === "SUCCEEDED" &&
+        output?.resumed !== true &&
+        typeof output?.request_id === "string"
+      ) {
         return output.request_id;
       }
     }
@@ -252,8 +240,12 @@ export default function ConversationPanel(props: ConversationPanelProps) {
         const output = event.data.output as
           | { request_id?: unknown; resumed?: unknown; scope_context?: Record<string, unknown> }
           | undefined;
-        if (event.data.name === "science_begin" && event.data.state === "SUCCEEDED"
-            && output?.resumed !== true && typeof output?.request_id === "string") {
+        if (
+          event.data.name === "science_begin" &&
+          event.data.state === "SUCCEEDED" &&
+          output?.resumed !== true &&
+          typeof output?.request_id === "string"
+        ) {
           const scope = output.scope_context ?? {};
           resetScope(); // the choice was used for this request
           onRequestKnown(
@@ -349,6 +341,11 @@ export default function ConversationPanel(props: ConversationPanelProps) {
     },
   });
 
+  const lastRunState =
+    state.data?.conversation.last_run_state ??
+    list.data?.find((item) => item.id === conversationId)?.last_run_state ??
+    null;
+
   return (
     <section className="conversation" aria-label="对话">
       <div className="conversation-thread">
@@ -378,6 +375,12 @@ export default function ConversationPanel(props: ConversationPanelProps) {
         {activeRunId && requestId && conversationRequest && requestId !== conversationRequest && (
           <p className="notice">
             这里仍是请求 {conversationRequest} 的对话:它的运行还在进行。运行结束后才会切换到所选的请求 {requestId}。
+          </p>
+        )}
+
+        {!activeRunId && (lastRunState === "INTERRUPTED" || lastRunState === "FAILED") && conversationId && hasRequest && !delivered && (
+          <p className="notice">
+            上次运行状态为 {STATE[lastRunState] ?? lastRunState}。可在下方发送回复，或点击“从 Core 当前状态继续”恢复。
           </p>
         )}
 
@@ -496,10 +499,10 @@ export default function ConversationPanel(props: ConversationPanelProps) {
                   hasRequest && delivered
                     ? "此请求已交付;后续问题请点“新问题”"
                     : conversationId
-                    ? "回复,或发送 Core 要求的确认原文"
-                    : requestId
-                      ? "先为此请求开启对话"
-                      : "输入科研问题;原文会逐字交给 Core"
+                      ? "回复,或发送 Core 要求的确认原文"
+                      : requestId
+                        ? "先为此请求开启对话"
+                        : "输入科研问题;原文会逐字交给 Core"
                 }
               />
               {activeRunId ? (
@@ -522,7 +525,16 @@ export default function ConversationPanel(props: ConversationPanelProps) {
         </AssistantRuntimeProvider>
         <p className="muted">关闭页面或断开连接不会取消运行;取消需要明确点击,并以运行的结束事件为准。</p>
       </div>
-      <Trace operations={useMemo(() => toOperations(log.events), [log.events])} />
+      <InvocationTimeline
+        conversationId={conversationId}
+        requestId={conversationRequest}
+        events={log.events}
+        invocations={invocations}
+        modules={modules}
+        configuredServers={props.moduleToolServers ?? []}
+        onInspectInvocation={(item, ctxRid) => props.onInspectInvocation?.(item, ctxRid)}
+        onInspectModule={(srv) => props.onInspectModule?.(srv)}
+      />
     </section>
   );
 }

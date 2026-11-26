@@ -19,6 +19,7 @@ export default function WorkflowGraph({ now, selectedStepId, onSelectStep }: Wor
   const { nodes, edges } = useMemo(() => {
     const progress = new Map((now.progress?.steps ?? []).map((item) => [item.id, item]));
     const available = new Set(now.also_available ?? []);
+    const optionalExplore = new Set(now.optional_explore_steps ?? []);
     const nodes: CanvasNode[] = steps.map((step) => {
       const state = progress.get(step.id);
       const current = now.step?.id === step.id;
@@ -32,6 +33,7 @@ export default function WorkflowGraph({ now, selectedStepId, onSelectStep }: Wor
               <span className="node-kind">{kindLabel(step.kind)}</span>
               {current && <span className="badge">Core 当前步骤</span>}
               {available.has(step.id) && <span className="badge is-soft">Core:也可进行</span>}
+              {optionalExplore.has(step.id) && <span className="badge is-soft">可选探索</span>}
             </div>
             <strong>{step.id}</strong>
             <span className="node-text">{step.objective ?? "未提供"}</span>
@@ -48,7 +50,7 @@ export default function WorkflowGraph({ now, selectedStepId, onSelectStep }: Wor
       (step.depends_on ?? []).map((dependency) => ({ source: dependency, target: step.id })),
     );
     return { nodes, edges };
-  }, [steps, now.progress, now.step, now.also_available]);
+  }, [steps, now.progress, now.step, now.also_available, now.optional_explore_steps]);
 
   if (steps.length === 0) {
     return <p className="empty-state">Core 尚未持有此请求的计划。</p>;

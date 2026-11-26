@@ -384,4 +384,200 @@ describe("ConversationPanel", () => {
     expect(await screen.findByText("signed out")).toBeTruthy();
     expect(calls).toContain("GET /api/meta");
   });
+
+  it("loads paginated invocations, reconciles in-flight items across pages, and refreshes modules on module.discovery", async () => {
+    let page1Phase: "initial" | "updated" = "initial";
+    let page2Phase: "started" | "finished" = "started";
+    let modulesPhase: "initial" | "discovered" = "initial";
+
+    const opOld = {
+      cursor: 1,
+      id: "op-old",
+      run_id: "run-0",
+      kind: "tool",
+      name: "recall",
+      state: "STARTED",
+      started_at: "2026-11-26T00:00:00+00:00",
+      ended_at: null,
+      server: "memory",
+      input: { query: "motif" },
+      output: null,
+      error: null,
+      note: null,
+      initiator: "model",
+      details: {},
+    };
+
+    const { calls } = stubFetch({
+      [BASE]: { body: [conversation("conv-1", "sci-1")] },
+      [BASE + "/conv-1"]: { body: idle("conv-1", "sci-1") },
+      [BASE + "/conv-1/invocations?limit=50"]: () => ({
+        body: {
+          service: "s",
+          workspace: "pilot",
+          conversation_id: "conv-1",
+          request_id: "sci-1",
+          authority: "web-observation",
+          note: "Observed technical operations only.",
+          items: [
+            {
+              cursor: 2,
+              id: "op-new",
+              run_id: "run-1",
+              kind: "tool",
+              name: "structured_error",
+              state: page1Phase === "initial" ? "STARTED" : "FAILED",
+              started_at: "2026-11-26T01:00:00+00:00",
+              ended_at: page1Phase === "initial" ? null : "2026-11-26T01:00:02+00:00",
+              server: "memory",
+              input: {},
+              output:
+                page1Phase === "initial"
+                  ? null
+                  : { is_error: true, text: "tool failed", structured_content: { error: "bad input" } },
+              error: null,
+              note: null,
+              initiator: "model",
+              details: {},
+            },
+          ],
+          next_before: 2,
+        },
+      }),
+      [BASE + "/conv-1/invocations?before=2&limit=50"]: () => ({
+        body: {
+          service: "s",
+          workspace: "pilot",
+          conversation_id: "conv-1",
+          request_id: "sci-1",
+          authority: "web-observation",
+          note: "Observed technical operations only.",
+          items: [
+            {
+              ...opOld,
+              state: page2Phase === "started" ? "STARTED" : "UNKNOWN",
+              note: page2Phase === "started" ? null : "restarted before outcome recorded",
+            },
+          ],
+          next_before: null,
+        },
+      }),
+      [BASE + "/conv-1/modules"]: () => ({
+        body: {
+          service: "s",
+          workspace: "pilot",
+          conversation_id: "conv-1",
+          request_id: "sci-1",
+          authority: "web-observation",
+          note: "Last discovery observations.",
+          servers:
+            modulesPhase === "initial"
+              ? [
+                  { server: "memory", configured: true, state: "NOT_OBSERVED", run_id: null, observed_at: null },
+                  { server: "broken", configured: true, state: "NOT_OBSERVED", run_id: null, observed_at: null },
+                ]
+              : [
+                  {
+                    server: "memory",
+                    configured: true,
+                    state: "LISTED",
+                    run_id: "run-1",
+                    observed_at: "2026-11-26T01:00:00+00:00",
+                    tools: ["recall", "science_plan"],
+                    offered_tools: ["recall"],
+                  },
+                  {
+                    server: "broken",
+                    configured: true,
+                    state: "UNAVAILABLE",
+                    run_id: "run-1",
+                    observed_at: "2026-11-26T01:00:00+00:00",
+                    error: { code: "TOOL_UNAVAILABLE" },
+                  },
+                ],
+        },
+      }),
+    });
+
+    const onInspectInvocation = vi.fn();
+    const onInspectModule = vi.fn();
+    renderPanel({
+      requestId: "sci-1",
+      moduleToolServers: ["memory", "broken"],
+      onInspectInvocation,
+      onInspectModule,
+    });
+
+    await waitFor(() => expect(FakeEventSource.latest()?.url).toBe(BASE + "/conv-1/events"));
+    const trace = screen.getByRole("region", { name: "执行轨迹" });
+    expect(await within(trace).findByText("structured_error")).toBeTruthy();
+
+    // Load older page via cursor pagination
+    await userEvent.click(within(trace).getByRole("button", { name: "加载更早记录" }));
+    expect(await within(trace).findByText("recall")).toBeTruthy();
+
+    // Operation finish on both page 1 and page 2 reconciles STARTED items by id
+    page1Phase = "updated";
+    page2Phase = "finished";
+    emit("operation.finished", { operation_id: "op-new", kind: "tool", name: "structured_error", state: "FAILED" });
+    emit("operation.finished", { operation_id: "op-old", kind: "tool", name: "recall", state: "UNKNOWN" });
+
+    await waitFor(() => {
+      expect(within(trace).getByText("is_error")).toBeTruthy();
+      expect(within(trace).getByText("结果未知")).toBeTruthy();
+    });
+
+    // Clicking inspect forwards item & context request id
+    await userEvent.click(within(trace).getAllByRole("button", { name: "在检查器中查看完整详情" })[0]);
+    expect(onInspectInvocation).toHaveBeenCalled();
+
+    // Module tab shows NOT_OBSERVED first, then updates on module.discovery SSE event
+    await userEvent.click(within(trace).getByRole("tab", { name: /Module 状态/ }));
+    expect(within(trace).getAllByText("未观察")).toHaveLength(2);
+
+    modulesPhase = "discovered";
+    emit("module.discovery", { server: "memory", state: "LISTED", tools: ["recall", "science_plan"], offered_tools: ["recall"] });
+    await waitFor(() => {
+      expect(within(trace).getByText("已列出工具（上次观察）")).toBeTruthy();
+      expect(within(trace).getByText("1 个名称冲突")).toBeTruthy();
+      expect(within(trace).getByText("不可用")).toBeTruthy();
+    });
+    expect(calls).toContain("GET " + BASE + "/conv-1/modules");
+
+    await userEvent.click(within(trace).getAllByRole("button", { name: "在检查器中查看" })[0]);
+    expect(onInspectModule).toHaveBeenCalled();
+  });
+
+  it("discards partial assistant.delta draft when model fails or stream reconnects without promoting it", async () => {
+    stubFetch({
+      [BASE]: { body: [conversation("conv-1", "sci-1")] },
+      [BASE + "/conv-1"]: { body: idle("conv-1", "sci-1") },
+    });
+    renderPanel({ requestId: "sci-1" });
+    await waitFor(() => expect(FakeEventSource.latest()?.url).toBe(BASE + "/conv-1/events"));
+
+    emit("run.started", {});
+    emit("operation.started", { operation_id: "op-m", kind: "model", name: "m" });
+    emitDelta("Incomplete draft answer");
+    expect(screen.getByText("Incomplete draft answer")).toBeTruthy();
+
+    emit("operation.finished", {
+      operation_id: "op-m",
+      kind: "model",
+      name: "m",
+      state: "FAILED",
+      error: { code: "PROVIDER_ERROR", message: "upstream timeout" },
+    });
+    expect(screen.queryByText("Incomplete draft answer")).toBeNull();
+
+    // Truncated response notice
+    emit("operation.finished", {
+      operation_id: "op-m2",
+      kind: "model",
+      name: "m",
+      state: "SUCCEEDED",
+      finish_reason: "length",
+    });
+    expect(screen.getByText(/finish_reason=length/)).toBeTruthy();
+  });
 });

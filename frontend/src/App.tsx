@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
 import { type ApiError, getJson } from "./api/client";
-import type { Meta, NowData, OpenData, TreeData } from "./api/types";
+import type {
+  InvocationItem,
+  Meta,
+  ModuleServerObservation,
+  NowData,
+  OpenData,
+  TreeData,
+} from "./api/types";
 import ConnectionBadge from "./components/ConnectionBadge";
 import ConversationPanel from "./components/ConversationPanel";
-import Inspector from "./components/Inspector";
+import Inspector, { type InspectedTarget } from "./components/Inspector";
 import Navigator from "./components/Navigator";
 import NowPanel from "./components/NowPanel";
 import ResearchTreeGraph from "./components/ResearchTreeGraph";
@@ -31,7 +38,11 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [requestId, setRequestId] = useState<string | null>(null);
   const [stepId, setStepId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("tree");
+  const [navOpen, setNavOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dockOpen, setDockOpen] = useState(true);
+  const [inspectedTarget, setInspectedTarget] = useState<InspectedTarget | null>(null);
+  const [observedInvocations, setObservedInvocations] = useState<InvocationItem[]>([]);
 
   // A service configured with a single workspace has nothing to choose between.
   const workspaces = meta.data?.workspaces;
@@ -69,6 +80,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   // The scope a request belongs to is what Core recorded, not what is selected on screen.
   const requestScope =
     typeof nowData?.scope_context?.scope_id === "string" ? nowData.scope_context.scope_id : null;
+  const runtimeEnabled = Boolean(meta.data.runtime?.enabled);
 
   function selectWorkspace(id: string) {
     setWorkspace(id);
@@ -76,6 +88,8 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setScopeId(null);
     setRequestId(null);
     setStepId(null);
+    setInspectedTarget(null);
+    setObservedInvocations([]);
     setTab("tree");
   }
 
@@ -92,34 +106,61 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   function selectScope(id: string) {
     setScopeId(id);
     setStepId(null);
+    setInspectedTarget(null);
   }
 
   function selectRequest(id: string, scope: string | null, project: string | null) {
     setRequestId(id);
     setStepId(null);
+    setInspectedTarget(null);
     setTab("workflow");
     setScopeId(scope); // null for an unscoped request: no scope stays highlighted
     if (project) setProjectId(project);
   }
 
+  function handleInspectInvocation(item: InvocationItem, contextRequestId: string | null) {
+    setInspectedTarget({ kind: "invocation", item, contextRequestId });
+    setInspectorOpen(true);
+  }
+
+  function handleInspectModule(server: ModuleServerObservation) {
+    setInspectedTarget({ kind: "module", server });
+    setInspectorOpen(true);
+  }
+
+  function refreshSnapshots() {
+    if (!workspace) return;
+    const prefix = `/api/workspaces/${encodeURIComponent(workspace)}/views/`;
+    void mutate((key) => typeof key === "string" && key.startsWith(prefix));
+  }
+
   const missingTools = Object.entries(meta.data.tools).filter(([, tool]) => !tool.found);
+  const appClasses = [
+    "app",
+    !navOpen ? "is-nav-collapsed" : "",
+    !inspectorOpen || !workspace ? "is-inspector-collapsed" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className="app">
-      <Navigator
-        workspaces={meta.data.workspaces}
-        workspace={workspace}
-        onSelectWorkspace={selectWorkspace}
-        tree={tree.data}
-        projects={overview.data?.data?.projects ?? []}
-        open={open.data}
-        projectId={projectId ?? treeData?.project_id ?? null}
-        onSelectProject={selectProject}
-        scopeId={scopeId}
-        onSelectScope={selectScope}
-        requestId={requestId}
-        onSelectRequest={selectRequest}
-      />
+    <div className={appClasses}>
+      {navOpen && (
+        <Navigator
+          workspaces={meta.data.workspaces}
+          workspace={workspace}
+          onSelectWorkspace={selectWorkspace}
+          tree={tree.data}
+          projects={overview.data?.data?.projects ?? []}
+          open={open.data}
+          projectId={projectId ?? treeData?.project_id ?? null}
+          onSelectProject={selectProject}
+          scopeId={scopeId}
+          onSelectScope={selectScope}
+          requestId={requestId}
+          onSelectRequest={selectRequest}
+        />
+      )}
 
       <main className="workspace">
         <header className="context-bar">
@@ -146,8 +187,36 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                 <dd>{requestScope ?? "未归属"}</dd>
               </div>
             )}
+            <div>
+              <dt>原生运行时</dt>
+              <dd>
+                {runtimeEnabled
+                  ? `已启用 · 模型 ${meta.data.runtime?.model ?? "未提供"}`
+                  : "未配置（只读模式）"}
+              </dd>
+            </div>
           </dl>
-          <ConnectionBadge connected={stream.connected} staleViews={stream.staleViews} />
+          <div className="context-actions">
+            <button
+              type="button"
+              className="ghost-btn"
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              {navOpen ? "收起导航" : "展开导航"}
+            </button>
+            {workspace && (
+              <button
+                type="button"
+                className="ghost-btn"
+                aria-expanded={inspectorOpen}
+                onClick={() => setInspectorOpen((v) => !v)}
+              >
+                {inspectorOpen ? "收起检查器" : "展开检查器"}
+              </button>
+            )}
+            <ConnectionBadge connected={stream.connected} staleViews={stream.staleViews} />
+          </div>
         </header>
 
         {missingTools.map(([name, tool]) => (
@@ -163,6 +232,11 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           <button type="button" aria-pressed={tab === "workflow"} onClick={() => setTab("workflow")}>
             科研流程
           </button>
+          {workspace && (
+            <button type="button" className="ghost-btn" onClick={refreshSnapshots}>
+              刷新视图
+            </button>
+          )}
           <span className="tabs-observed">
             {tab === "tree" && tree.data && "Project Governance 快照 " + formatTime(tree.data.observed_at)}
             {tab === "workflow" && now.data && "Core 快照 " + formatTime(now.data.observed_at)}
@@ -208,7 +282,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
               />
               {nowData && (
                 <>
-                  <NowPanel now={nowData} />
+                  <NowPanel now={nowData} onSelectStep={(id) => setStepId(id)} />
                   <WorkflowGraph now={nowData} selectedStepId={stepId} onSelectStep={setStepId} />
                 </>
               )}
@@ -216,40 +290,73 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           )}
         </section>
 
-        {meta.data.runtime?.enabled && workspace && (
-          <div className={"dock " + (dockOpen ? "is-open" : "")}>
-            <button type="button" className="dock-toggle" aria-expanded={dockOpen} onClick={() => setDockOpen(!dockOpen)}>
-              {dockOpen ? "收起对话与执行轨迹" : "展开对话与执行轨迹"}
-            </button>
-            {dockOpen && (
-              <ConversationPanel
-                workspace={workspace}
-                model={meta.data.runtime.model}
-                requestId={requestId}
-                scopeId={scopeId}
-                delivered={nowData?.phase === "DELIVERED"}
-                onRequestKnown={(id, scope, project) => {
-                  if (id !== requestId) selectRequest(id, scope, project);
-                }}
-                onNewQuestion={() => {
-                  setRequestId(null);
-                  setStepId(null);
-                  setTab("tree");
-                }}
-                eventSourceFactory={eventSourceFactory}
-              />
-            )}
-          </div>
+        {workspace && (
+          runtimeEnabled ? (
+            <div className={"dock " + (dockOpen ? "is-open" : "")}>
+              <button
+                type="button"
+                className="dock-toggle"
+                aria-expanded={dockOpen}
+                onClick={() => setDockOpen(!dockOpen)}
+              >
+                {dockOpen ? "收起对话与执行轨迹" : "展开对话与执行轨迹"}
+              </button>
+              {dockOpen && (
+                <ConversationPanel
+                  workspace={workspace}
+                  model={meta.data.runtime?.model ?? null}
+                  moduleToolServers={meta.data.runtime?.module_tool_servers ?? []}
+                  requestId={requestId}
+                  scopeId={scopeId}
+                  delivered={nowData?.phase === "DELIVERED"}
+                  onRequestKnown={(id, scope, project) => {
+                    if (id !== requestId) selectRequest(id, scope, project);
+                  }}
+                  onNewQuestion={() => {
+                    setRequestId(null);
+                    setStepId(null);
+                    setInspectedTarget(null);
+                    setTab("tree");
+                  }}
+                  onInspectInvocation={handleInspectInvocation}
+                  onInspectModule={handleInspectModule}
+                  onInvocationsChange={setObservedInvocations}
+                  eventSourceFactory={eventSourceFactory}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="dock is-disabled">
+              <p className="notice runtime-disabled-notice">
+                原生运行时未配置（当前为只读模式：可浏览科研树、当前计划与证据预览，不提供对话、运行与调用/Module 历史）。
+              </p>
+            </div>
+          )
         )}
       </main>
 
-      {workspace && (
+      {workspace && inspectorOpen && (
         <Inspector
           workspace={workspace}
           tree={treeData}
           now={tab === "workflow" ? nowData : null}
           scopeId={tab === "workflow" && nowData ? requestScope : scopeId}
+          requestId={requestId}
           stepId={tab === "workflow" ? stepId : null}
+          runtimeEnabled={runtimeEnabled}
+          inspectedTarget={inspectedTarget}
+          invocations={observedInvocations}
+          onSelectScope={(id) => {
+            setTab("tree");
+            selectScope(id);
+          }}
+          onSelectRequest={selectRequest}
+          onSelectStep={(id) => {
+            setTab("workflow");
+            setStepId(id);
+          }}
+          onInspectInvocation={handleInspectInvocation}
+          onClearInspected={() => setInspectedTarget(null)}
         />
       )}
     </div>

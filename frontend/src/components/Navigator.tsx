@@ -1,7 +1,7 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
 import type { OpenData, RecordRef, ScopeNode, Snapshot, TreeData } from "../api/types";
-import { statusLabel } from "../labels";
+import { formatTime, statusLabel } from "../labels";
 
 interface NavigatorProps {
   workspaces: string[];
@@ -28,10 +28,23 @@ function requestState(ref: RecordRef): string {
 function ScopeRow({
   node,
   props,
+  goalChangedScopes,
+  query,
 }: {
   node: ScopeNode;
   props: NavigatorProps;
+  goalChangedScopes: Set<string>;
+  query: string;
 }) {
+  const requests = (node.requests ?? []).filter((ref) => {
+    if (!query) return true;
+    return (
+      ref.request_id.toLowerCase().includes(query) ||
+      node.scope_id.toLowerCase().includes(query) ||
+      node.objective.toLowerCase().includes(query)
+    );
+  });
+
   return (
     <li style={{ paddingLeft: (node.path.length - 1) * 14 }}>
       <button
@@ -41,11 +54,21 @@ function ScopeRow({
         onClick={() => props.onSelectScope(node.scope_id)}
         title={node.objective}
       >
-        <strong>{node.scope_id}</strong>
-        <span>{node.request_count} 个请求</span>
+        <div className="nav-scope-main">
+          <strong>{node.scope_id}</strong>
+          <small className="nav-scope-objective">{node.objective}</small>
+        </div>
+        <div className="nav-scope-meta">
+          <span>{node.request_count} 个请求</span>
+          {goalChangedScopes.has(node.scope_id) && (
+            <span className="nav-change-mark" title="存在目标版本差异">
+              版本差异
+            </span>
+          )}
+        </div>
       </button>
       <ul className="nav-requests">
-        {(node.requests ?? []).map((ref) => (
+        {requests.map((ref) => (
           <li key={ref.request_id}>
             <button
               type="button"
@@ -65,9 +88,43 @@ function ScopeRow({
 
 export default function Navigator(props: NavigatorProps) {
   const [manualId, setManualId] = useState("");
+  const [filterText, setFilterText] = useState("");
   const tree = props.tree?.data;
   const projects = props.projects;
   const open = props.open?.data;
+  const query = filterText.trim().toLowerCase();
+
+  const goalChangedScopes = useMemo(
+    () =>
+      new Set(
+        (tree?.goal_version_changes ?? [])
+          .map((item) => item.scope_id)
+          .filter((id): id is string => typeof id === "string"),
+      ),
+    [tree?.goal_version_changes],
+  );
+
+  const visibleScopes = useMemo(() => {
+    if (!tree?.nodes) return [];
+    if (!query) return tree.nodes;
+    return tree.nodes.filter(
+      (node) =>
+        node.scope_id.toLowerCase().includes(query) ||
+        node.objective.toLowerCase().includes(query) ||
+        (node.requests ?? []).some((r) => r.request_id.toLowerCase().includes(query)),
+    );
+  }, [tree?.nodes, query]);
+
+  const visibleOpen = useMemo(() => {
+    const items = open?.open_requests ?? [];
+    if (!query) return items;
+    return items.filter(
+      (item) =>
+        item.request_id.toLowerCase().includes(query) ||
+        (item.question ?? "").toLowerCase().includes(query) ||
+        (item.scope_id ?? "").toLowerCase().includes(query),
+    );
+  }, [open?.open_requests, query]);
 
   function openManual(event: FormEvent) {
     event.preventDefault();
@@ -97,7 +154,7 @@ export default function Navigator(props: NavigatorProps) {
         </select>
       </label>
 
-      {projects.length > 0 && (
+      {projects.length > 0 ? (
         <label className="nav-field">
           科研项目
           <select
@@ -112,16 +169,44 @@ export default function Navigator(props: NavigatorProps) {
             ))}
           </select>
         </label>
+      ) : (
+        tree?.project_id && (
+          <div className="nav-field">
+            <span>科研项目</span>
+            <strong className="nav-project-fixed">{tree.project_id}</strong>
+          </div>
+        )
       )}
+
+      <label className="nav-field">
+        筛选范围与请求
+        <input
+          type="search"
+          aria-label="筛选范围与请求"
+          value={filterText}
+          placeholder="输入范围、请求 ID 或问题关键词…"
+          onChange={(event) => setFilterText(event.target.value)}
+        />
+      </label>
 
       <section aria-label="科研树">
         <h2>科研树{tree?.project_id ? " · " + tree.project_id : ""}</h2>
         {tree && tree.nodes.length > 0 ? (
-          <ul className="nav-tree">
-            {tree.nodes.map((node) => (
-              <ScopeRow key={node.scope_id} node={node} props={props} />
-            ))}
-          </ul>
+          visibleScopes.length > 0 ? (
+            <ul className="nav-tree">
+              {visibleScopes.map((node) => (
+                <ScopeRow
+                  key={node.scope_id}
+                  node={node}
+                  props={props}
+                  goalChangedScopes={goalChangedScopes}
+                  query={query}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="nav-empty">没有匹配“{filterText.trim()}”的研究范围。</p>
+          )
         ) : (
           <p className="nav-empty">
             {props.tree?.ok === false
@@ -146,29 +231,42 @@ export default function Navigator(props: NavigatorProps) {
                   " Core 一次最多列出这么多,可能还有未列出的,请按 ID 打开。"}
                 {open.may_be_incomplete && open.source_message && " Core 原文:" + open.source_message}
               </p>
-              <ul className="nav-requests">
-                {open.open_requests.map((item) => (
-                  <li key={item.request_id}>
-                    <button
-                      type="button"
-                      className={
-                        "nav-request " + (props.requestId === item.request_id ? "is-selected" : "")
-                      }
-                      title={item.question}
-                      onClick={() =>
-                        props.onSelectRequest(
-                          item.request_id,
-                          item.scope_id ?? null,
-                          item.project_id ?? null,
-                        )
-                      }
-                    >
-                      <code>{item.request_id}</code>
-                      <span>{item.scope_id ?? "未归属研究范围"}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {visibleOpen.length > 0 ? (
+                <ul className="nav-requests nav-open-list">
+                  {visibleOpen.map((item) => (
+                    <li key={item.request_id}>
+                      <button
+                        type="button"
+                        className={
+                          "nav-request nav-open-item " +
+                          (props.requestId === item.request_id ? "is-selected" : "")
+                        }
+                        title={item.question}
+                        onClick={() =>
+                          props.onSelectRequest(
+                            item.request_id,
+                            item.scope_id ?? null,
+                            item.project_id ?? null,
+                          )
+                        }
+                      >
+                        <div className="nav-open-top">
+                          <code>{item.request_id}</code>
+                          <span>{item.scope_id ?? "未归属研究范围"}</span>
+                        </div>
+                        {item.question && (
+                          <small className="nav-open-question">{item.question}</small>
+                        )}
+                        {item.updated_at && (
+                          <small className="nav-open-time">更新 {formatTime(item.updated_at)}</small>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="nav-empty">没有匹配“{filterText.trim()}”的开放请求。</p>
+              )}
             </>
           ) : (
             <p className="nav-empty">
