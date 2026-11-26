@@ -42,6 +42,16 @@ function readCompactPref(): boolean {
   }
 }
 
+function readWidthPref(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = Number(window.localStorage.getItem(key));
+    if (Number.isFinite(raw) && raw >= min && raw <= max) return raw;
+  } catch {
+    // ignore storage errors
+  }
+  return fallback;
+}
+
 export default function App({ eventSourceFactory }: { eventSourceFactory?: EventSourceFactory }) {
   const { mutate } = useSWRConfig();
   const meta = useSWR<Meta, ApiError>("/api/meta", getJson, {
@@ -52,6 +62,37 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [area, setArea] = useState<WorkbenchArea>("research");
   const [commandOpen, setCommandOpen] = useState(false);
   const [compactDensity, setCompactDensity] = useState<boolean>(readCompactPref);
+  const [navWidth, setNavWidth] = useState<number>(() =>
+    readWidthPref("bioharness.ui.navWidth", 290, 220, 480),
+  );
+  const [inspectorWidth, setInspectorWidth] = useState<number>(() =>
+    readWidthPref("bioharness.ui.inspectorWidth", 400, 300, 640),
+  );
+
+  function startResize(which: "nav" | "inspector", startX: number) {
+    const initial = which === "nav" ? navWidth : inspectorWidth;
+    const min = which === "nav" ? 220 : 300;
+    const max = which === "nav" ? 480 : 640;
+    const key = which === "nav" ? "bioharness.ui.navWidth" : "bioharness.ui.inspectorWidth";
+
+    function onMove(ev: MouseEvent) {
+      const delta = which === "nav" ? ev.clientX - startX : startX - ev.clientX;
+      const next = Math.min(max, Math.max(min, Math.round(initial + delta)));
+      if (which === "nav") setNavWidth(next);
+      else setInspectorWidth(next);
+      try {
+        window.localStorage.setItem(key, String(next));
+      } catch {
+        // ignore storage errors
+      }
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -196,7 +237,15 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     .join(" ");
 
   return (
-    <div className={appClasses}>
+    <div
+      className={appClasses}
+      style={
+        {
+          "--nav-w": `${navWidth}px`,
+          "--insp-w": `${inspectorWidth}px`,
+        } as React.CSSProperties
+      }
+    >
       <ActivityRail
         area={area}
         onSelectArea={setArea}
@@ -205,23 +254,37 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
       />
 
       {navOpen && (
-        <Navigator
-          workspaces={meta.data.workspaces}
-          workspace={workspace}
-          onSelectWorkspace={selectWorkspace}
-          tree={tree.data}
-          projects={overview.data?.data?.projects ?? []}
-          open={open.data}
-          projectId={projectId ?? treeData?.project_id ?? null}
-          onSelectProject={selectProject}
-          scopeId={scopeId}
-          onSelectScope={(id) => {
-            setArea("research");
-            selectScope(id);
-          }}
-          requestId={requestId}
-          onSelectRequest={selectRequest}
-        />
+        <div className="pane-wrap is-nav">
+          <Navigator
+            workspaces={meta.data.workspaces}
+            workspace={workspace}
+            onSelectWorkspace={selectWorkspace}
+            tree={tree.data}
+            projects={overview.data?.data?.projects ?? []}
+            open={open.data}
+            projectId={projectId ?? treeData?.project_id ?? null}
+            onSelectProject={selectProject}
+            scopeId={scopeId}
+            onSelectScope={(id) => {
+              setArea("research");
+              selectScope(id);
+            }}
+            requestId={requestId}
+            onSelectRequest={selectRequest}
+          />
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整左侧导航宽度"
+            className="resize-handle is-right"
+            title="拖拽调整导航宽度（双击重置）"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              startResize("nav", e.clientX);
+            }}
+            onDoubleClick={() => setNavWidth(290)}
+          />
+        </div>
       )}
 
       <main className="workspace">
@@ -453,28 +516,42 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
       </main>
 
       {showInspector && workspace && (
-        <Inspector
-          workspace={workspace}
-          tree={treeData}
-          now={tab === "workflow" ? nowData : null}
-          scopeId={tab === "workflow" && nowData ? requestScope : scopeId}
-          requestId={requestId}
-          stepId={tab === "workflow" ? stepId : null}
-          runtimeEnabled={runtimeEnabled}
-          inspectedTarget={inspectedTarget}
-          invocations={observedInvocations}
-          onSelectScope={(id) => {
-            setTab("tree");
-            selectScope(id);
-          }}
-          onSelectRequest={selectRequest}
-          onSelectStep={(id) => {
-            setTab("workflow");
-            setStepId(id);
-          }}
-          onInspectInvocation={handleInspectInvocation}
-          onClearInspected={() => setInspectedTarget(null)}
-        />
+        <div className="pane-wrap is-inspector">
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整右侧检查器宽度"
+            className="resize-handle is-left"
+            title="拖拽调整检查器宽度（双击重置）"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              startResize("inspector", e.clientX);
+            }}
+            onDoubleClick={() => setInspectorWidth(400)}
+          />
+          <Inspector
+            workspace={workspace}
+            tree={treeData}
+            now={tab === "workflow" ? nowData : null}
+            scopeId={tab === "workflow" && nowData ? requestScope : scopeId}
+            requestId={requestId}
+            stepId={tab === "workflow" ? stepId : null}
+            runtimeEnabled={runtimeEnabled}
+            inspectedTarget={inspectedTarget}
+            invocations={observedInvocations}
+            onSelectScope={(id) => {
+              setTab("tree");
+              selectScope(id);
+            }}
+            onSelectRequest={selectRequest}
+            onSelectStep={(id) => {
+              setTab("workflow");
+              setStepId(id);
+            }}
+            onInspectInvocation={handleInspectInvocation}
+            onClearInspected={() => setInspectedTarget(null)}
+          />
+        </div>
       )}
 
       <CommandPalette
