@@ -511,8 +511,10 @@ class Runtime:
                                                and item["result"].get("omitted_by_host")):
                 item["result"] = {"omitted_by_host": True,
                                   "note": "This earlier tool result was dropped to keep the request "
-                                          "within its size limit. Core's current state is given above; "
-                                          "call the tool again if its content is needed."}
+                                          "within its size limit. Do not replay calls with side effects "
+                                          "to recover omitted content. Use Core's current state or a "
+                                          "configured read-only result/status query; if the outcome "
+                                          "cannot be reconciled, report it as unknown."}
 
     @staticmethod
     def _path_outside(workspace: Workspace, tool: str, arguments: dict) -> str | None:
@@ -725,7 +727,9 @@ class Runtime:
                 # sees Core's refusal, and Core's state is read again so the next turn is not stale.
                 now = await self._core_op(conversation, workspace, run_id, "science_now",
                                           {"request_id": own}, "host")
-                return answer, (now if now is not None and now.get("ok") is True else None), False
+                if now is None or now.get("ok") is not True:
+                    raise _Stop("INTERRUPTED", f"Core refused {call.name} and its state could not be refreshed")
+                return answer, now, False
             # No answer to a call that may have changed Core: read Core instead of repeating it.
             now = await self._core_op(conversation, workspace, run_id, "science_now",
                                       {"request_id": own}, "host")

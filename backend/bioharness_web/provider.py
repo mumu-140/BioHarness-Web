@@ -135,6 +135,15 @@ class ModelClient:
         except Exception as error:  # connection, timeout, malformed stream: the type says enough
             raise ProviderError("PROVIDER_UNREACHABLE", f"provider request failed ({type(error).__name__})") from None
 
+        # The SDK can infer "stop"/"tool_call" after a quiet EOF. Its public
+        # provider_details retains whether the provider actually supplied a reason.
+        raw_finish_reason = (response.provider_details or {}).get("finish_reason")
+        if not raw_finish_reason or finish_reason not in ("stop", "tool_call"):
+            # Valid JSON in an early call does not make a truncated/filtered turn complete.
+            # In particular, a quiet HTTP EOF is not confirmation to execute its calls.
+            raise ProviderError("PROVIDER_INCOMPLETE",
+                                "provider response did not finish normally; no tool calls were executed")
+
         text = "".join(part.content for part in response.parts if isinstance(part, TextPart))
         calls: list[ToolCall] = []
         for part in response.parts:

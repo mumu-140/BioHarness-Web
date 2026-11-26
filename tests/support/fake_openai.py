@@ -64,7 +64,9 @@ class FakeOpenAI:
                                                   "function": {"name": call["name"], "arguments": ""}}]})
                     for piece in _pieces(text, 40):
                         yield _chunk({"tool_calls": [{"index": index, "function": {"arguments": piece}}]})
-                yield _chunk({}, "tool_calls" if calls else "stop")
+                if answer.get("disconnect_before_finish"):
+                    return  # HTTP EOF after partial content, no terminal reason or DONE frame
+                yield _chunk({}, answer.get("finish_reason", "tool_calls" if calls else "stop"))
                 usage = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
                 yield "data: " + json.dumps({"id": "chatcmpl-fake", "object": "chat.completion.chunk", "created": 0,
                                              "model": "fake-model", "choices": [], "usage": usage}) + "\n\n"

@@ -1,6 +1,6 @@
 # BioHarness Research Workspace
 
-**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；运行时只用脚本化的模型端点跑过，尚未接入真实模型提供商，也未做真实项目验收；W3 的后端调用投影已开始实现；前端、UI 和专用 Module 检查器暂缓。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；运行时只用脚本化的模型端点跑过，尚未接入真实模型提供商，也未做真实项目验收；W3 的后端调用投影已开始实现；前端与 UI 按现有接口在独立分支并行开发；专用 Module 检查器仍待集成验收。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
 
 ## 产品目的
 

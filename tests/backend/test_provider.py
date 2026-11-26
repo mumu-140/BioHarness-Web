@@ -100,3 +100,17 @@ async def test_provider_reasoning_is_neither_streamed_nor_returned():
     with FakeOpenAI(script) as server:
         turn, pieces = await collect(client(server), [{"role": "user", "text": "q"}])
     assert turn.text == "The answer." == "".join(pieces)
+
+
+@pytest.mark.parametrize("ending", [
+    {"finish_reason": "length"}, {"finish_reason": "content_filter"},
+    {"finish_reason": None}, {"disconnect_before_finish": True},
+])
+async def test_incomplete_turn_never_returns_even_a_complete_tool_call(ending):
+    answer = {"text": "Unfinished response.", "tool_calls": [
+        {"name": "science_plan", "arguments": {"plan": {"objective": "fixture"}}}], **ending}
+    with FakeOpenAI(lambda messages, tools: answer) as server:
+        with pytest.raises(ProviderError) as caught:
+            await collect(client(server), [{"role": "user", "text": "q"}])
+    assert caught.value.code == "PROVIDER_INCOMPLETE"
+    assert KEY not in caught.value.message
