@@ -54,6 +54,13 @@ export default function useConversationEvents(
       }));
     source.onerror = () => setLog((state) => ({ ...state, connected: false }));
 
+    // The server explicitly invalidates a cursor ahead of a replaced log.
+    // Clear before replay; ordinary duplicate sequence numbers still dedupe.
+    source.addEventListener("stream.reset", () =>
+      setLog((state) => ({
+        ...EMPTY, connected: true, connectSeq: state.connectSeq + 1,
+      })),
+    );
     for (const type of TYPES) {
       source.addEventListener(type, (message) => {
         let event: ConversationEvent;

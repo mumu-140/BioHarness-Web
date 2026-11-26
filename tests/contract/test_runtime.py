@@ -746,7 +746,8 @@ def test_the_event_stream_replays_recorded_events_and_gives_ids_only_to_them(tmp
         assert [int(b["id"]) for b in rest] == [e["seq"] for e in recorded if e["seq"] > middle]
         # a reader that is ahead of this log (the log was replaced) gets all of it again
         ahead = read_stream(h, conversation_id, after=recorded[-1]["seq"] + 1000)
-        assert [int(b["id"]) for b in ahead] == [e["seq"] for e in recorded]
+        assert ahead[0]["event"] == "stream.reset" and ahead[0]["id"] == "0"
+        assert [int(b["id"]) for b in ahead[1:]] == [e["seq"] for e in recorded]
 
 
 def test_the_stream_route_resumes_after_the_last_event_the_browser_saw(tmp_path, monkeypatch):

@@ -40,6 +40,7 @@ async def conversation_stream(runtime, conversation_id: str, after: int,
     try:
         if after > runtime.ledger.last_seq(conversation_id):
             after = 0  # the reader is ahead of this log (it was replaced): replay all of it
+            yield format_sse("stream.reset", {"conversation_id": conversation_id}, 0)
         last = after
         for event in runtime.ledger.events(conversation_id, after):
             last = event["seq"]

@@ -52,11 +52,16 @@ export default function useInvocations(
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
+  // A changed first-page boundary starts a new contiguous cursor chain. Old
+  // pages cannot bridge a shifted boundary, even if their replies arrive late.
+  const chain = key + ":" + (first.data?.next_before ?? "end") + ":" + log.connectSeq;
+  const activeChain = useRef(chain);
+  activeChain.current = chain;
   useEffect(() => {
     setExtraPages([]);
     setLoadingMore(false);
     setLoadMoreError(null);
-  }, [workspace, conversationId, enabled]);
+  }, [chain]);
 
   const extraPagesRef = useRef(extraPages);
   extraPagesRef.current = extraPages;
@@ -64,6 +69,7 @@ export default function useInvocations(
   const reconcileOlderStartedPages = useCallback(
     async (finishedIds?: Set<string>) => {
       if (!enabled || !conversationId) return;
+      const requestedChain = activeChain.current;
       const targets = extraPagesRef.current.filter((page) =>
         page.response.items.some(
           (item) =>
@@ -89,6 +95,7 @@ export default function useInvocations(
           }
         }),
       );
+      if (activeChain.current !== requestedChain) return;
       setExtraPages((prev) =>
         prev.map(
           (page) => refreshed.find((entry) => entry.before === page.before) ?? page,
@@ -161,6 +168,7 @@ export default function useInvocations(
 
   const loadMore = useCallback(async () => {
     if (!enabled || !conversationId || nextBefore === null || loadingMore) return;
+    const requestedChain = activeChain.current;
     setLoadingMore(true);
     setLoadMoreError(null);
     try {
@@ -170,11 +178,13 @@ export default function useInvocations(
           before: nextBefore,
         }),
       );
+      if (activeChain.current !== requestedChain) return;
       setExtraPages((prev) => {
         if (prev.some((p) => p.before === nextBefore)) return prev;
         return [...prev, { before: nextBefore, response }];
       });
     } catch (err) {
+      if (activeChain.current !== requestedChain) return;
       const apiErr = err as ApiError;
       if (apiErr?.status === 401) void mutate("/api/meta");
       setLoadMoreError(
@@ -182,7 +192,7 @@ export default function useInvocations(
           (apiErr?.message ?? "加载更早调用记录失败"),
       );
     } finally {
-      setLoadingMore(false);
+      if (activeChain.current === requestedChain) setLoadingMore(false);
     }
   }, [enabled, conversationId, nextBefore, loadingMore, workspace, mutate]);
 
