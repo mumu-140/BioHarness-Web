@@ -6,15 +6,17 @@ the native runtime's ModelClient for subsequent turns.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Literal
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -340,7 +342,7 @@ class ModelConfigStore:
         self._state = self._default_state()
 
 
-async def fetch_remote_models(base_url: str, api_key: str) -> dict[str, Any]:
+def _fetch_remote_models_sync(base_url: str, api_key: str) -> dict[str, Any]:
     url = base_url.strip().rstrip("/")
     if not (url.startswith("http://") or url.startswith("https://")):
         return {"ok": False, "models": [], "latency_ms": 0, "error": "Base URL 必须以 http:// 或 https:// 开头"}
@@ -348,19 +350,21 @@ async def fetch_remote_models(base_url: str, api_key: str) -> dict[str, Any]:
     headers = {"Accept": "application/json"}
     if api_key.strip():
         headers["Authorization"] = f"Bearer {api_key.strip()}"
+    req = urllib.request.Request(target, headers=headers, method="GET")
     started = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(target, headers=headers)
+        with urllib.request.urlopen(req, timeout=15.0) as resp:
+            status_code = getattr(resp, "status", 200)
+            raw_body = resp.read().decode("utf-8", errors="replace")
         latency_ms = int((time.monotonic() - started) * 1000)
-        if resp.status_code >= 400:
+        if status_code >= 400:
             return {
                 "ok": False,
                 "models": [],
                 "latency_ms": latency_ms,
-                "error": f"远端返回 HTTP {resp.status_code}",
+                "error": f"远端返回 HTTP {status_code}",
             }
-        data = resp.json()
+        data = json.loads(raw_body)
         raw_items = data.get("data") if isinstance(data, dict) else data
         models: list[str] = []
         if isinstance(raw_items, list):
@@ -371,6 +375,14 @@ async def fetch_remote_models(base_url: str, api_key: str) -> dict[str, Any]:
                     models.append(entry)
         models = sorted(dict.fromkeys(models))
         return {"ok": True, "models": models, "latency_ms": latency_ms, "error": None}
+    except urllib.error.HTTPError as exc:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "ok": False,
+            "models": [],
+            "latency_ms": latency_ms,
+            "error": f"远端返回 HTTP {exc.code}",
+        }
     except Exception as exc:
         latency_ms = int((time.monotonic() - started) * 1000)
         return {
@@ -379,6 +391,10 @@ async def fetch_remote_models(base_url: str, api_key: str) -> dict[str, Any]:
             "latency_ms": latency_ms,
             "error": f"连接失败（{type(exc).__name__}）",
         }
+
+
+async def fetch_remote_models(base_url: str, api_key: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_fetch_remote_models_sync, base_url, api_key)
 
 
 def create_model_settings_router(store: ModelConfigStore, runtime: Runtime | None) -> APIRouter:
