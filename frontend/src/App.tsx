@@ -19,7 +19,9 @@ import AttentionStream, {
   buildAttentionItems,
   type AttentionItem,
 } from "./components/AttentionStream";
+import BackgroundRunIndicator, { type ActiveRunSummary } from "./components/BackgroundRunIndicator";
 import CommandPalette from "./components/CommandPalette";
+import type { ComposerEvidenceOption } from "./components/ComposerQuickBar";
 import ConnectionBadge from "./components/ConnectionBadge";
 import ConversationPanel from "./components/ConversationPanel";
 import DualTrackPanel from "./components/DualTrackPanel";
@@ -84,6 +86,11 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dockOpen, setDockOpen] = useState(true);
   const [inspectedTarget, setInspectedTarget] = useState<InspectedTarget | null>(null);
+  const [activeRun, setActiveRun] = useState<ActiveRunSummary | null>(null);
+  const [branchSource, setBranchSource] = useState<{
+    requestId: string;
+    scopeId: string | null;
+  } | null>(null);
 
   function updateCompactDensity(next: boolean) {
     setCompactDensity(next);
@@ -144,6 +151,29 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     [nowData, treeData, openData, requestId],
   );
 
+  const composerEvidenceOptions = useMemo<ComposerEvidenceOption[]>(() => {
+    const seen = new Set<string>();
+    const list: ComposerEvidenceOption[] = [];
+    for (const id of nowData?.evidence_changed_since_submission ?? []) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      list.push({ id, label: id, detail: "提交后变更" });
+    }
+    for (const group of treeData?.shared_evidence ?? []) {
+      for (const ref of group.references ?? []) {
+        if (requestId && ref.request_id !== requestId) continue;
+        if (!ref.evidence_id || seen.has(ref.evidence_id)) continue;
+        seen.add(ref.evidence_id);
+        list.push({
+          id: ref.evidence_id,
+          label: ref.evidence_id,
+          detail: ref.sha256 ? `sha256:${ref.sha256.slice(0, 8)}` : undefined,
+        });
+      }
+    }
+    return list;
+  }, [nowData, treeData, requestId]);
+
   // The session can also end after the page has loaded (token rotated, service restarted).
   const signedOut = [meta.error, overview.error, tree.error, open.error, now.error].some(
     (error) => error?.status === 401,
@@ -171,6 +201,8 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setRequestId(null);
     setStepId(null);
     setInspectedTarget(null);
+    setActiveRun(null);
+    setBranchSource(null);
     setTab("tree");
   }
 
@@ -195,9 +227,34 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setRequestId(id);
     setStepId(null);
     setInspectedTarget(null);
+    setBranchSource(null);
     setTab("workflow");
     setScopeId(scope); // null for an unscoped request: no scope stays highlighted
     setProjectId(project);
+  }
+
+  function handleBranchFromRequest(fromRequestId: string, fromScopeId: string | null) {
+    setArea("research");
+    setRequestId(null);
+    setStepId(null);
+    setInspectedTarget(null);
+    if (fromScopeId) setScopeId(fromScopeId);
+    setTab("tree");
+    setDockOpen(true);
+    setBranchSource({ requestId: fromRequestId, scopeId: fromScopeId });
+  }
+
+  function handleJumpToActiveRun(run: ActiveRunSummary) {
+    setArea("research");
+    setDockOpen(true);
+    if (run.requestId) {
+      const openMatch = openData?.open_requests.find((r) => r.request_id === run.requestId);
+      selectRequest(
+        run.requestId,
+        openMatch?.scope_id ?? scopeId ?? null,
+        openMatch?.project_id ?? projectId ?? null,
+      );
+    }
   }
 
   function handleAttentionNavigate(item: AttentionItem) {
@@ -319,6 +376,11 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             </div>
           </dl>
           <div className="context-actions">
+            <BackgroundRunIndicator
+              activeRun={activeRun}
+              currentRequestId={requestId}
+              onJumpToRun={handleJumpToActiveRun}
+            />
             <button
               type="button"
               className="ghost-btn"
@@ -494,6 +556,12 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                       requestId={requestId}
                       scopeId={scopeId}
                       delivered={nowData?.phase === "DELIVERED"}
+                      now={nowData}
+                      evidenceOptions={composerEvidenceOptions}
+                      branchSource={branchSource}
+                      onClearBranchSource={() => setBranchSource(null)}
+                      onBranchFromRequest={handleBranchFromRequest}
+                      onActiveRunChange={setActiveRun}
                       onRequestKnown={(id, scope, project) => {
                         if (!requestId) selectRequest(id, scope, project);
                       }}
@@ -501,6 +569,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                         setRequestId(null);
                         setStepId(null);
                         setInspectedTarget(null);
+                        setBranchSource(null);
                         setTab("tree");
                       }}
                       onInspectInvocation={handleInspectInvocation}

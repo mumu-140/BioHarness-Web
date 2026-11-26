@@ -17,12 +17,17 @@ import type {
   ConversationState,
   InvocationItem,
   ModuleServerObservation,
+  NowData,
 } from "../api/types";
 import useConversationEvents from "../hooks/useConversationEvents";
 import useInvocations from "../hooks/useInvocations";
 import useModules from "../hooks/useModules";
 import type { EventSourceFactory } from "../hooks/useVersionStream";
+import type { ActiveRunSummary } from "./BackgroundRunIndicator";
+import ComposerQuickBar, { type ComposerEvidenceOption } from "./ComposerQuickBar";
+import HitlBanner from "./HitlBanner";
 import InvocationTimeline from "./InvocationTimeline";
+import MarkdownMessage from "./MarkdownMessage";
 
 interface ConversationPanelProps {
   workspace: string;
@@ -34,6 +39,15 @@ interface ConversationPanelProps {
   scopeId: string | null;
   /** Core reports the selected request as delivered. */
   delivered: boolean;
+  /** Latest Core snapshot for the selected request, used for HITL prompts. */
+  now?: NowData | null;
+  /** Allowlisted workspace-relative evidence options for `@evidence` quick insertion. */
+  evidenceOptions?: ComposerEvidenceOption[];
+  /** Historical request the user explicitly chose to branch a new question from. */
+  branchSource?: { requestId: string; scopeId: string | null } | null;
+  onClearBranchSource?: () => void;
+  onBranchFromRequest?: (requestId: string, scopeId: string | null) => void;
+  onActiveRunChange?: (run: ActiveRunSummary | null) => void;
   onRequestKnown(requestId: string, scopeId: string | null, projectId: string | null): void;
   onNewQuestion(): void;
   onInspectInvocation?: (item: InvocationItem, contextRequestId: string | null) => void;
@@ -60,11 +74,12 @@ function PlainText({ text }: { text: string }) {
   return <p>{text}</p>;
 }
 
-function message(role: string) {
+function message(role: "user" | "assistant" | "system") {
+  const TextComponent = role === "assistant" ? MarkdownMessage : PlainText;
   return function Message() {
     return (
       <MessagePrimitive.Root className={"chat-message is-" + role}>
-        <MessagePrimitive.Parts components={{ Text: PlainText }} />
+        <MessagePrimitive.Parts components={{ Text: TextComponent }} />
       </MessagePrimitive.Root>
     );
   };
@@ -161,6 +176,13 @@ export default function ConversationPanel(props: ConversationPanelProps) {
     if (!scopeId && scopeChoice === "selected") setScopeChoice("none");
   }, [scopeId, scopeChoice]);
 
+  // When explicitly branching from a delivered request in a scope, pre-select that scope.
+  useEffect(() => {
+    if (!conversationId && !requestId && props.branchSource?.scopeId && props.branchSource.scopeId === scopeId) {
+      setScopeChoice("selected");
+    }
+  }, [conversationId, requestId, props.branchSource, scopeId]);
+
   const stateUrl = conversationId ? conversationsUrl(workspace, "/" + conversationId) : null;
   const state = useSWR<ConversationState, ApiError>(stateUrl, getJson, {
     revalidateOnFocus: false,
@@ -209,6 +231,20 @@ export default function ConversationPanel(props: ConversationPanelProps) {
     }
     return { activeRunId: active, cancelRequested: active !== null && requested };
   }, [log.events]);
+
+  const onActiveRunChange = props.onActiveRunChange;
+  useEffect(() => {
+    if (!onActiveRunChange) return;
+    if (activeRunId && conversationId) {
+      onActiveRunChange({
+        conversationId,
+        runId: activeRunId,
+        requestId: conversationRequest,
+      });
+    } else {
+      onActiveRunChange(null);
+    }
+  }, [activeRunId, conversationId, conversationRequest, onActiveRunChange]);
 
   // When another request is selected in the workspace, show its conversation if this
   // service has one. A conversation whose run is in progress stays on screen, with its
@@ -338,6 +374,26 @@ export default function ConversationPanel(props: ConversationPanelProps) {
     },
   });
 
+  function insertIntoComposer(snippet: string) {
+    const composer = runtime.thread.composer;
+    const current = composer.getState().text;
+    const next = current.trim() ? `${current.trimEnd()} ${snippet}` : snippet;
+    composer.setText(next);
+  }
+
+  const composerDisabled =
+    unknownBegin ||
+    scopeProblem !== null ||
+    conversationDelivered ||
+    differentRequest ||
+    (!conversationId && Boolean(requestId)) ||
+    activeRunId !== null;
+
+  const alignedNow =
+    props.now && (!conversationRequest || props.now.request_id === conversationRequest)
+      ? props.now
+      : null;
+
   const lastRunState =
     state.data?.conversation.last_run_state ??
     list.data?.find((item) => item.id === conversationId)?.last_run_state ??
@@ -361,6 +417,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
                 setConversationId(null);
                 setProblem(null);
                 resetScope();
+                props.onClearBranchSource?.();
                 props.onNewQuestion();
               }}
             >
@@ -483,11 +540,47 @@ export default function ConversationPanel(props: ConversationPanelProps) {
           </fieldset>
         )}
 
+        {!conversationId && !requestId && props.branchSource && (
+          <div className="notice flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span>
+              正基于已交付请求 <code>{props.branchSource.requestId}</code> 发起后续新问题
+              {props.branchSource.scopeId ? `（范围 ${props.branchSource.scopeId}）` : ""}。
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  insertIntoComposer(`参考历史请求 ${props.branchSource!.requestId}：`)
+                }
+              >
+                插入历史请求引用
+              </button>
+              {props.onClearBranchSource && (
+                <button type="button" onClick={props.onClearBranchSource}>
+                  取消关联提示
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <HitlBanner
+          now={alignedNow}
+          disabled={activeRunId !== null}
+          onBranchFromRequest={props.onBranchFromRequest}
+        />
+
         <AssistantRuntimeProvider runtime={runtime}>
           <ThreadPrimitive.Root className="chat">
             <ThreadPrimitive.Viewport className="chat-viewport">
               <ThreadPrimitive.Messages components={MESSAGES} />
             </ThreadPrimitive.Viewport>
+            <ComposerQuickBar
+              evidenceOptions={props.evidenceOptions ?? []}
+              moduleToolServers={props.moduleToolServers ?? []}
+              disabled={composerDisabled}
+              onInsert={insertIntoComposer}
+            />
             <ComposerPrimitive.Root className="chat-composer">
               <ComposerPrimitive.Input
                 aria-label="消息"
