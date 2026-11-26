@@ -147,6 +147,24 @@ def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
         except RuntimeRefusal as error:
             raise _refusal(error) from None
 
+    @router.get("/{conversation_id}/invocations")
+    def invocations(workspace_id: str, conversation_id: str,
+                    before: int | None = Query(None, ge=1, le=2**63 - 1),
+                    limit: int = Query(50, ge=1, le=100)):
+        workspace_exists(workspace_id)
+        try:
+            return runtime.invocations(workspace_id, conversation_id, before, limit)
+        except RuntimeRefusal as error:
+            raise _refusal(error) from None
+
+    @router.get("/{conversation_id}/modules")
+    def modules(workspace_id: str, conversation_id: str):
+        workspace_exists(workspace_id)
+        try:
+            return runtime.modules(workspace_id, conversation_id)
+        except RuntimeRefusal as error:
+            raise _refusal(error) from None
+
     @router.post("/{conversation_id}/runs", status_code=202)
     async def new_run(workspace_id: str, conversation_id: str, body: NewRun):
         workspace_exists(workspace_id)

@@ -108,7 +108,7 @@ def path_redactor(workspace: Workspace):
         if isinstance(value, list):
             return [redact(item) for item in value]
         if isinstance(value, dict):
-            clean = {key: redact(item) for key, item in value.items()}
+            clean = {redact(key): redact(item) for key, item in value.items()}
             # The two structured fields in which Core and Governance return file paths.
             if clean.get("kind") == "file" and isinstance(clean.get("source"), str):
                 clean["source"] = outside(clean["source"])

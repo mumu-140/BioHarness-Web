@@ -209,6 +209,49 @@ class Ledger:
         return self._all("SELECT * FROM operations WHERE run_id = ? ORDER BY started_at, id", run_id)
 
     # ---- events ----------------------------------------------------------
+    def invocation_page(self, conversation_id: str, before: int | None, limit: int) -> dict:
+        """Newest operations first, with only their own observed start/end payloads.
+
+        Read rows and events in one SQLite snapshot. Rowid is a stable pagination
+        cursor, not a scientific revision. Refetch the first page for live changes.
+        """
+        rows = self._all(
+            "SELECT o.rowid AS cursor, o.*, "
+            "(SELECT e.data FROM events e WHERE e.conversation_id = r.conversation_id "
+            " AND e.run_id = o.run_id AND e.type = 'operation.started' "
+            " AND json_extract(e.data, '$.operation_id') = o.id ORDER BY e.seq LIMIT 1) AS started, "
+            "(SELECT e.data FROM events e WHERE e.conversation_id = r.conversation_id "
+            " AND e.run_id = o.run_id AND e.type = 'operation.finished' "
+            " AND json_extract(e.data, '$.operation_id') = o.id ORDER BY e.seq DESC LIMIT 1) AS finished "
+            "FROM operations o JOIN runs r ON r.id = o.run_id "
+            "WHERE r.conversation_id = ? AND (? IS NULL OR o.rowid < ?) "
+            "ORDER BY o.rowid DESC LIMIT ?",
+            conversation_id, before, before, limit + 1)
+        more = len(rows) > limit
+        items = []
+        for row in rows[:limit]:
+            started = json.loads(row.pop("started") or "{}")
+            finished = json.loads(row.pop("finished") or "{}")
+            items.append({
+                **row, "server": started.get("server") or finished.get("server"),
+                "input": started.get("input"), "output": finished.get("output"),
+                "error": finished.get("error"), "note": finished.get("note"),
+                "initiator": started.get("initiator"),
+                "details": {key: value for key, value in finished.items() if key not in {
+                    "operation_id", "kind", "name", "server", "state", "output", "error", "note"}},
+            })
+        return {"items": items, "next_before": items[-1]["cursor"] if more else None}
+
+    def module_observation(self, conversation_id: str, server: str) -> dict | None:
+        """Last recorded discovery, not a current reachability or installation check."""
+        row = self._one(
+            "SELECT run_id, data, at FROM events WHERE conversation_id = ? "
+            "AND type = 'module.discovery' AND json_extract(data, '$.server') = ? "
+            "ORDER BY seq DESC LIMIT 1", conversation_id, server)
+        if row:
+            row["data"] = json.loads(row["data"])
+        return row
+
     def append(self, conversation_id: str, run_id: str | None, type_: str, data: dict) -> dict:
         at = _now()
         stored = {key: bounded(value) for key, value in data.items()}

@@ -101,7 +101,7 @@ class Runtime:
         if isinstance(value, list):
             return [self._scrub(item) for item in value]
         if isinstance(value, dict):
-            return {key: self._scrub(item) for key, item in value.items()}
+            return {self._scrub(key): self._scrub(item) for key, item in value.items()}
         return value
 
     def _cleaner(self, workspace: Workspace):
@@ -145,6 +145,38 @@ class Runtime:
 
     def create(self, workspace_id: str) -> dict:
         return self.ledger.create_conversation(workspace_id)
+
+    def invocations(self, workspace_id: str, conversation_id: str,
+                    before: int | None, limit: int) -> dict:
+        conversation = self._conversation(workspace_id, conversation_id)
+        page = self.ledger.invocation_page(conversation_id, before, limit)
+        return self._cleaner(self._workspace(conversation))({
+            "service": self.settings.service_id, "workspace": workspace_id,
+            "conversation_id": conversation_id, "request_id": conversation["request_id"],
+            "authority": "web-observation",
+            "note": "Observed technical operations only; not scientific validation. "
+                    "Missing or omitted payloads remain unknown. Refetch for live changes.",
+            **page})
+
+    def modules(self, workspace_id: str, conversation_id: str) -> dict:
+        conversation = self._conversation(workspace_id, conversation_id)
+        servers = []
+        for server in sorted(self.settings.mcp_servers):
+            observation = self.ledger.module_observation(conversation_id, server)
+            servers.append({
+                "server": server, "configured": True,
+                **(observation["data"] if observation else {"state": "NOT_OBSERVED"}),
+                "run_id": observation["run_id"] if observation else None,
+                "observed_at": observation["at"] if observation else None,
+            })
+        return self._cleaner(self._workspace(conversation))({
+            "service": self.settings.service_id, "workspace": workspace_id,
+            "conversation_id": conversation_id, "request_id": conversation["request_id"],
+            "authority": "web-observation",
+            "note": "Last discovery observations for currently configured server names, not "
+                    "current reachability or proof of invocation, consumption or scientific validity. "
+                    "A changed command requires a new run's discovery.",
+            "servers": servers})
 
     async def attach(self, workspace_id: str, conversation_id: str, request_id: str) -> dict:
         """Tie a conversation to an existing Core request named explicitly by the user."""
@@ -446,7 +478,11 @@ class Runtime:
                     "source": "host", "code": "MODULE_SERVER_UNAVAILABLE",
                     "text": f"Configured tool server '{server}' did not answer ({error.code}); "
                             "its tools are not available in this run."})
+                self._emit(conversation_id, run_id, "module.discovery", {
+                    "server": server, "state": "UNAVAILABLE",
+                    "error": {"code": error.code}})
                 continue
+            offered = []
             for spec in listed:
                 if spec.name in MODEL_TOOLS or spec.name == "science_begin" or spec.name in found:
                     self._emit(conversation_id, run_id, "notice", {
@@ -455,6 +491,10 @@ class Runtime:
                                 "and is not offered."})
                     continue
                 found[spec.name] = (server, spec)
+                offered.append(spec.name)
+            self._emit(conversation_id, run_id, "module.discovery", {
+                "server": server, "state": "LISTED", "tools": [spec.name for spec in listed],
+                "offered_tools": offered})
         self._module_tools[run_id] = found
         return [spec for _, spec in found.values()]
 

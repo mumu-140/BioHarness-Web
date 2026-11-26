@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-25  
 **Status:** W1 read side and the W2 native runtime are implemented and tested on synthetic fixtures with a scripted model endpoint, including in a real browser; live provider activation and real-project acceptance open  
-**Implementation status:** W1 and W2 in progress (see their checklists); W3–W5 not started  
+**Implementation status:** W1 and W2 acceptance remains open (see their checklists); W3 backend observation foundation implemented, frontend/UI deferred; W4–W5 not started
 **Repository:** mumu-140/BioHarness-Web
 
 ## 1. Purpose
@@ -54,7 +54,7 @@ The current main baseline reviewed for this plan is fa87344508df95b4a869e51999d7
 
 The repository contains React 19, TypeScript, Vite and @xyflow/react; a FastAPI backend; a PostgreSQL read-only Observatory service and projection models; SSE invalidation and a task-stage graph; archived September 2026 Observatory design and implementation documents; and V1-specific validation records.
 
-That baseline was a read-only observer over the former managed-record/PostgreSQL model. W1 removed its PostgreSQL projection, task-stage graph and container files and replaced them with the public-CLI read side described under W1. The repository still does not run direct model APIs, mutate Core or execute configured Modules as a first-party host.
+That baseline was a read-only observer over the former managed-record/PostgreSQL model. W1 removed its PostgreSQL projection, task-stage graph and container files and replaced them with the public-CLI read side described under W1. W2 subsequently implemented the direct-API transport, public Core mutations and configured MCP tool execution as a first-party host; this has been exercised with a scripted endpoint, not a live model provider.
 
 Existing code is not automatically reusable merely because it is present. The implementation review classifies each component as retain, adapt, replace or remove. No V1 database/API/page compatibility is required.
 
@@ -284,15 +284,15 @@ Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-int
 
 **Goal:** show the actual work of Core and each configured scientific Module.
 
-- [ ] Reuse the W0 common invocation projection and fallback inspector; attach optional domain renderers only for actual supported outputs.
+- [ ] Reuse the W0 common invocation projection and fallback inspector; attach optional domain renderers only for actual supported outputs. **Backend foundation implemented:** paginated existing-ledger operations and bounded MCP structured results, without a new scientific store; fallback inspector/UI and domain renderers remain deferred.
 - [ ] Project Governance inspector: tree, context, routes and evidence.
 - [ ] Memory inspector: T1/T2/T3, retrieval mode (FAST/STANDARD), condition gaps, conflicts and explicit use feedback as returned by the public MCP tools. TaskMemoryGraph, DEEP recall and relation paths are shown only once the Memory module exposes them publicly.
 - [ ] Literature inspector: query, sources, papers, abstracts, identifiers and fetch/validation records. Passage-level views wait for a public interface that returns passages.
 - [ ] Scientific Review inspector: intake/plan/work/delivery advice, concerns and unreviewed status.
 - [ ] Statistics inspector: unit, grain, grouping dimensions, combinations, numerator/denominator, background, methods, effect sizes and correction; invoke/display the existing deterministic report-binding renderer/verifier with evidence references, never duplicate its checks.
 - [ ] Analysis/workflow inspector: inputs, versions, parameters, tool calls, outputs, errors and recovery.
-- [ ] Add real invocation timeline with request, module, tool, time, status and evidence references.
-- [ ] Add explicit unavailable-module state; do not render a planned module as installed.
+- [ ] Add real invocation timeline with request, module, tool, time, status and evidence references. **Backend implemented:** conversation/request identity, operation/server/tool identity, timestamps, observed states, recorded inputs/outputs/errors and provider metadata; evidence fields remain exactly as the owner returned them, not inferred edges. UI remains deferred.
+- [ ] Add explicit unavailable-module state; do not render a planned module as installed. **Backend implemented:** recorded per-run MCP discovery (LISTED/UNAVAILABLE, listed versus offered tools) and NOT_OBSERVED when there is no record. Discovery is not installation, current reachability, invocation or Memory consumption; historical data is labelled by run/time. UI remains deferred.
 
 **Acceptance:** each inspector uses actual module output or observed runtime events; no module algorithm is duplicated; Memory candidate/retrieved/consumed/outcome are distinct; Literature claims link to the source records the module returns (passages only if the module provides them); Statistics exposes denominator/background and analysis unit when supplied.
 

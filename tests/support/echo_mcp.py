@@ -9,6 +9,9 @@ from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 TOOLS = [
+    *[Tool(name=name, description="Structured fixture result.",
+           inputSchema={"type": "object", "properties": {}})
+      for name in ("structured", "big_structured", "structured_error")],
     Tool(name="echo_path", description="Report a path argument and the working directory.",
          inputSchema={"type": "object", "properties": {"path": {"type": "string"}, "note": {"type": "string"}}}),
     Tool(name="big", description="Return a very long text.", inputSchema={"type": "object", "properties": {}}),
@@ -20,6 +23,16 @@ async def list_tools(_context, _params):
 
 
 async def call_tool(_context, params):
+    if params.name in {"structured", "big_structured", "structured_error"}:
+        data = {"candidate": {"id": "m1", "tier": "T2"}, "use": "not recorded",
+                "execution_verified": False,
+                "evidence": [{"source": "fixture", "text": "synthetic only"}]}
+        if params.name == "big_structured":
+            data = {"blob": "x" * 200_000}
+        elif params.name == "structured_error":
+            data = {"error": "fixture failure"}
+        return CallToolResult(content=[TextContent(type="text", text="Fixture summary, not a scientific verdict.")],
+                              structuredContent=data, isError=params.name == "structured_error")
     if params.name == "big":
         text = "x" * 200_000
     else:

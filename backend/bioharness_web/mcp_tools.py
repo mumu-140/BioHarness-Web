@@ -13,6 +13,7 @@ from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
 
 from .cli import ToolError, _child_env
+from .ledger import bounded
 from .provider import ToolSpec
 
 MAX_RESULT_CHARS = 60_000
@@ -56,6 +57,9 @@ async def call_tool(argv: Sequence[str], name: str, arguments: dict[str, Any], *
                 answer["truncated_characters"] = len(text) - MAX_RESULT_CHARS
             if other:
                 answer["non_text_content_not_shown"] = other
+            if result.structured_content is not None:
+                # Keep the owner's shape, including errors/evidence, not a Web verdict.
+                answer["structured_content"] = bounded(result.structured_content)
             return answer
     try:
         return await asyncio.wait_for(ask(), timeout)

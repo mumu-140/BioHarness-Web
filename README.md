@@ -1,6 +1,6 @@
 # BioHarness Research Workspace
 
-**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；运行时只用脚本化的模型端点跑过，尚未接入真实模型提供商，也未做真实项目验收；W3 起尚未实施。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；运行时只用脚本化的模型端点跑过，尚未接入真实模型提供商，也未做真实项目验收；W3 的后端调用投影已开始实现；前端、UI 和专用 Module 检查器暂缓。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
 
 ## 产品目的
 
@@ -49,7 +49,9 @@ W1 读侧已替换旧的 PostgreSQL Observatory：FastAPI 后端只通过公开 
 
 W2 原生运行时：配置模型端点后，后端直接调用模型 API，由宿主以用户原文调用 `science_begin`，把 Core 的答复交给模型，执行模型提出的 Core 调用和已配置的 MCP 工具，并由 Core 的 hook 决定一轮是否可以结束；对话、执行轨迹与取消见[架构 10.4 节](docs/architecture.md)。
 
-尚未实现：真实模型提供商的启用与验收、Scientific Review 的直连适配（归该模块）、长时外部作业、Modules 检查器和 Desktop。尚未验证：真实科研项目上的验收、较大规模图的渲染、Chromium 以外的浏览器。
+W3 后端提供已记录调用的分页查询与工具服务器发现状态，保留 MCP 的有界结构化返回；它们是 Web 运行观察，不是科研状态或独立验证，接口见[架构 10.5 节](docs/architecture.md)。
+
+尚未实现：真实模型提供商的启用与验收、Scientific Review 的直连适配（归该模块）、长时外部作业、Modules 专用检查器与 UI 和 Desktop。尚未验证：真实科研项目上的验收、较大规模图的渲染、Chromium 以外的浏览器。
 
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
