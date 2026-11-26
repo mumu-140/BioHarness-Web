@@ -8,6 +8,10 @@ interface DualTrackPanelProps {
   now: NowData;
   selectedStepId: string | null;
   invocations: InvocationItem[];
+  loading?: boolean;
+  unavailable?: boolean;
+  enabled?: boolean;
+  hasMore?: boolean;
   onInspectInvocation: (item: InvocationItem, contextRequestId: string | null) => void;
 }
 
@@ -21,17 +25,18 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 /**
- * Extracts an explicit recorded step_id from an observed invocation.
- * Never guesses step ownership from timestamps or model text.
+ * Only a host-recorded, versioned association can link an operation to a plan.
+ * The current public Core now response does not expose a plan version and the
+ * runtime does not yet emit that association. Do not infer it from tool input,
+ * successful tool output, timestamps, or the step label alone.
  */
-export function recordedStepIdOf(item: InvocationItem): string | null {
-  const fromDetails = item.details?.step_id;
-  if (typeof fromDetails === "string" && fromDetails.trim()) return fromDetails.trim();
-  if (item.input && typeof item.input === "object" && !Array.isArray(item.input)) {
-    const raw = (item.input as Record<string, unknown>).step_id;
-    if (typeof raw === "string" && raw.trim()) return raw.trim();
-  }
-  return null;
+export function recordedStepIdOf(item: InvocationItem, now: NowData): string | null {
+  const stepId = item.details?.step_id;
+  const version = item.details?.plan_version;
+  if (typeof now.plan_version !== "number" || typeof version !== "number" ||
+      version !== now.plan_version || typeof stepId !== "string" ||
+      !now.plan?.steps.some((step) => step.id === stepId)) return null;
+  return stepId;
 }
 
 function isAbnormalState(state: string): boolean {
@@ -125,12 +130,16 @@ export default function DualTrackPanel({
   now,
   selectedStepId,
   invocations,
+  loading = false,
+  unavailable = false,
+  enabled = true,
+  hasMore = false,
   onInspectInvocation,
 }: DualTrackPanelProps) {
   const stepBound = selectedStepId
-    ? invocations.filter((item) => recordedStepIdOf(item) === selectedStepId)
+    ? invocations.filter((item) => recordedStepIdOf(item, now) === selectedStepId)
     : [];
-  const requestLevel = invocations.filter((item) => recordedStepIdOf(item) === null);
+  const requestLevel = invocations.filter((item) => recordedStepIdOf(item, now) === null);
   const otherStepsCount = invocations.length - stepBound.length - requestLevel.length;
 
   return (
@@ -144,15 +153,19 @@ export default function DualTrackPanel({
           实际执行轨（Observed Execution）
         </div>
         <span className="text-[11px] text-slate-500">
-          仅按真实记录的 step_id 挂载；无显式关联的事件保留在请求层，不按时间猜测归属
+          仅按宿主记录的计划版本和步骤关联挂载；未核实的事件保留在请求层
         </span>
       </div>
 
-      {invocations.length === 0 ? (
+      {!enabled && <p className="notice">只读模式：执行观测不可用。</p>}
+      {enabled && unavailable && <p role="alert" className="notice is-warning">执行记录读取不可用{invocations.length ? "；以下为上次取得的记录，可能已过期。" : "。不能判断是否存在执行记录。"}</p>}
+      {enabled && hasMore && <p className="notice">仅展示最近一页执行记录；更早记录可在该请求的对话执行历史中查看。</p>}
+      {enabled && loading && !invocations.length && <p className="notice">正在读取此请求的执行记录…</p>}
+      {enabled && !loading && !unavailable && invocations.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-          当前会话尚未观测到模块或工具调用记录（展开下方对话运行后，真实调用会按步/请求层级动态出现）。
+          当前请求尚无可展示的执行记录。
         </p>
-      ) : (
+      ) : enabled && invocations.length > 0 ? (
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-medium text-slate-700">
@@ -195,7 +208,7 @@ export default function DualTrackPanel({
               请求层执行记录（未绑定具体步骤 · {requestLevel.length}）
             </div>
             {requestLevel.length > 0 ? (
-              requestLevel.slice(0, 8).map((item) => (
+              requestLevel.map((item) => (
                 <InvocationRow
                   key={item.id}
                   item={item}
@@ -210,7 +223,7 @@ export default function DualTrackPanel({
             )}
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

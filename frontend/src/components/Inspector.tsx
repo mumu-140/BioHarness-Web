@@ -29,7 +29,7 @@ const ROUTE_LIMIT = 100; // the most Project Governance returns in one call
 
 export type InspectedTarget =
   | { kind: "invocation"; item: InvocationItem; contextRequestId: string | null }
-  | { kind: "module"; server: ModuleServerObservation };
+  | { kind: "module"; server: ModuleServerObservation; contextRequestId?: string | null };
 
 interface InspectorProps {
   workspace: string;
@@ -41,6 +41,7 @@ interface InspectorProps {
   runtimeEnabled?: boolean;
   inspectedTarget?: InspectedTarget | null;
   invocations?: InvocationItem[];
+  invocationsAvailable?: boolean;
   onSelectScope?: (id: string) => void;
   onSelectRequest?: (requestId: string, scopeId: string | null, projectId: string | null) => void;
   onSelectStep?: (stepId: string) => void;
@@ -651,6 +652,7 @@ export default function Inspector({
   runtimeEnabled = false,
   inspectedTarget = null,
   invocations = [],
+  invocationsAvailable = true,
   onSelectScope,
   onSelectRequest,
   onSelectStep,
@@ -712,9 +714,11 @@ export default function Inspector({
         ) : inspectedTarget?.kind === "module" ? (
           <ModuleInspector
             server={inspectedTarget.server}
-            invocations={invocations}
+            contextRequestId={inspectedTarget.contextRequestId}
+            callsAvailable={invocationsAvailable && Boolean(requestId) && inspectedTarget.contextRequestId === requestId}
+            invocations={inspectedTarget.contextRequestId === requestId ? invocations : []}
             onInspectInvocation={(item) =>
-              onInspectInvocation?.(item, now?.request_id ?? requestId ?? null)
+              onInspectInvocation?.(item, inspectedTarget.contextRequestId ?? null)
             }
             onBack={() => {
               onClearInspected?.();

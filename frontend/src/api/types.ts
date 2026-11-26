@@ -176,6 +176,7 @@ export interface NowData {
   anchor?: string;
   call?: { tool: string; arguments?: Record<string, unknown> };
   plan?: Plan;
+  plan_version?: number; // only when explicitly exposed by the owner
   progress?: { done: number; total: number; steps: StepProgress[] };
   step?: PlanStep & { attempt?: number; last_review?: Record<string, unknown> };
   also_available?: string[];

@@ -39,60 +39,30 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 
 .app {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 400px;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.app.has-rail {
-  grid-template-columns: 52px var(--nav-w, 290px) minmax(0, 1fr) var(--insp-w, 400px);
-}
-
-.app.has-rail.is-nav-collapsed {
-  grid-template-columns: 52px minmax(0, 1fr) var(--insp-w, 400px);
-}
-
-.app.has-rail.is-inspector-collapsed {
-  grid-template-columns: 52px var(--nav-w, 290px) minmax(0, 1fr);
-}
-
-.app.has-rail.is-nav-collapsed.is-inspector-collapsed {
   grid-template-columns: 52px minmax(0, 1fr);
-}
-
-.pane-wrap {
-  position: relative;
-  min-width: 0;
   height: 100vh;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-.pane-wrap > * {
-  flex: 1;
+.workbench-panels, .workspace-panel, .pane-wrap {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.workspace-panel > *, .pane-wrap > * {
+  height: 100%;
   min-height: 0;
 }
 
 .resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
   width: 6px;
-  cursor: col-resize;
-  z-index: 20;
+  background: transparent;
   transition: background-color 0.15s ease;
 }
 
-.resize-handle.is-right {
-  right: -3px;
-}
-
-.resize-handle.is-left {
-  left: -3px;
-}
-
 .resize-handle:hover,
+.resize-handle:focus-visible,
 .resize-handle:active {
   background: rgba(15, 118, 110, 0.35);
 }

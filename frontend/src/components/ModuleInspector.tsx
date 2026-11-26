@@ -5,6 +5,8 @@ import StructuredDataView from "./StructuredDataView";
 interface ModuleInspectorProps {
   server: ModuleServerObservation;
   invocations: InvocationItem[];
+  contextRequestId?: string | null;
+  callsAvailable?: boolean;
   onInspectInvocation(item: InvocationItem): void;
   onBack?: () => void;
 }
@@ -12,6 +14,8 @@ interface ModuleInspectorProps {
 export default function ModuleInspector({
   server,
   invocations,
+  contextRequestId,
+  callsAvailable = true,
   onInspectInvocation,
   onBack,
 }: ModuleInspectorProps) {
@@ -31,6 +35,7 @@ export default function ModuleInspector({
         <div>
           <p className="eyebrow">Module 工具服务器检查（观察投影）</p>
           <h2>{server.server}</h2>
+          <p className="muted">所属请求：{contextRequestId ?? "未绑定"}</p>
         </div>
         {onBack && (
           <button type="button" className="ghost-btn" onClick={onBack}>
@@ -131,8 +136,10 @@ export default function ModuleInspector({
       )}
 
       <section>
-        <h3>本对话中该服务器的实际调用 ({serverCalls.length})</h3>
-        {serverCalls.length === 0 ? (
+        <h3>本对话中该服务器的实际调用{callsAvailable ? ` (${serverCalls.length})` : "（未取得）"}</h3>
+        {!callsAvailable ? (
+          <p className="notice is-warning">未取得此请求的调用记录，不能判定该服务器没有被调用。</p>
+        ) : serverCalls.length === 0 ? (
           <p className="muted">在已加载的调用记录中，尚未观察到该服务器的工具调用。</p>
         ) : (
           <ol className="server-calls">

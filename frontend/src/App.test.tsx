@@ -82,6 +82,59 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("keeps the selected request's observed operations independent of the conversation dock", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    const conversations = [
+      { id: "conv-a", workspace: "pilot", request_id: "sci-1", created_at: "" },
+      { id: "conv-b", workspace: "pilot", request_id: "sci-2", created_at: "" },
+    ];
+    const observed = (id: string, request: string, name: string) => ({
+      service: META.service, workspace: "pilot", conversation_id: id, request_id: request,
+      authority: "runtime", note: "", next_before: null,
+      items: [{ cursor: 1, id: name, run_id: "run", kind: "tool", name,
+        state: "SUCCEEDED", started_at: "2026-11-26T01:00:00Z", ended_at: null,
+        server: null, input: {}, output: null, error: null, note: null, initiator: "model", details: {} }],
+    });
+    const base = "/api/workspaces/pilot/conversations";
+    const otherNow = { ...NOW, request_id: "sci-2", scope_context: { scope_id: "dap-branch", path: ["dap", "dap-branch"] } };
+    const entries = routes({
+      "/api/meta": { body: { ...META, runtime: { enabled: true, model: "test", module_tool_servers: [] } } },
+      [base]: { body: conversations },
+      [base + "/conv-a/invocations?limit=50"]: { body: observed("conv-a", "sci-1", "operation-A-only") },
+      [base + "/conv-b/invocations?limit=50"]: { body: observed("conv-b", "sci-2", "operation-B-only") },
+      [VIEWS + "/now?request_id=sci-2"]: { body: snapshot("now", { request_id: "sci-2" }, otherNow) },
+    });
+    stubFetch(entries);
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: "收起对话与执行轨迹" }));
+    await openRequest("sci-1");
+    expect(await within(await screen.findByRole("region", { name: "双轨执行观测" })).findByText("operation-A-only")).toBeTruthy();
+    await openRequest("sci-2");
+    const track = await screen.findByRole("region", { name: "双轨执行观测" });
+    expect(await within(track).findByText("operation-B-only")).toBeTruthy();
+    expect(within(track).queryByText("operation-A-only")).toBeNull();
+    expect(screen.queryByRole("button", { name: "收起对话与执行轨迹" })).toBeNull();
+  });
+
+  it("rejects an invocation response whose recorded request does not match the selected request", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    const base = "/api/workspaces/pilot/conversations";
+    stubFetch(routes({
+      "/api/meta": { body: { ...META, runtime: { enabled: true, model: "test", module_tool_servers: [] } } },
+      [base]: { body: [{ id: "conv-a", workspace: "pilot", request_id: "sci-1", created_at: "" }] },
+      [base + "/conv-a/invocations?limit=50"]: { body: {
+        service: META.service, workspace: "pilot", conversation_id: "conv-a", request_id: "sci-2",
+        authority: "runtime", note: "", next_before: null, items: [],
+      } },
+    }));
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: "收起对话与执行轨迹" }));
+    await openRequest("sci-1");
+    const track = await screen.findByRole("region", { name: "双轨执行观测" });
+    expect(await within(track).findByText(/执行记录读取不可用/)).toBeTruthy();
+    expect(within(track).queryByText(/当前请求尚无可展示/)).toBeNull();
+  });
+
   it("asks for the access token when the service answers 401, then loads", async () => {
     const user = userEvent.setup();
     let signedIn = false;

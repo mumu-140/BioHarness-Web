@@ -10,7 +10,6 @@ interface CommandPaletteProps {
   workspaces: string[];
   scopes: ScopeNode[];
   openRequests: OpenRequest[];
-  projectId: string | null;
   onSelectWorkspace: (id: string) => void;
   onSelectScope: (id: string) => void;
   onSelectRequest: (id: string, scope: string | null, project: string | null) => void;
@@ -23,7 +22,6 @@ export default function CommandPalette({
   workspaces,
   scopes,
   openRequests,
-  projectId,
   onSelectWorkspace,
   onSelectScope,
   onSelectRequest,
@@ -102,7 +100,7 @@ export default function CommandPalette({
                       onSelectRequest(
                         req.request_id,
                         req.scope_id ?? null,
-                        req.project_id ?? projectId,
+                        req.project_id ?? null,
                       );
                       onOpenChange(false);
                     }}

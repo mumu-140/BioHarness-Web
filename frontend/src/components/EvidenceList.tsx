@@ -12,16 +12,23 @@ interface EvidenceListProps {
 
 type Loaded = { response?: EvidencePreviewResponse; error?: string; loading?: boolean; collapsed?: boolean };
 
-function anchorKey(ref: EvidenceRef): string {
-  return [ref.request_id, ref.submission_index, ref.evidence_id, ref.sha256].join("/");
+export function evidenceAnchorKey(workspace: string, ref: EvidenceRef): string {
+  return JSON.stringify([workspace, ref.request_id, ref.submission_index, ref.evidence_id, ref.sha256]);
 }
 
 /** Recorded evidence of one submission; a preview is fetched by its exact recorded anchor. */
-export default function EvidenceList({ workspace, evidence }: EvidenceListProps) {
+export default function EvidenceList(props: EvidenceListProps) {
+  // A new set of anchors starts a fresh preview session. An async response for
+  // the previous workspace/selection can only update its unmounted instance.
+  return <EvidencePreviews key={JSON.stringify([props.workspace, props.evidence.map((ref) =>
+    evidenceAnchorKey(props.workspace, ref))])} {...props} />;
+}
+
+function EvidencePreviews({ workspace, evidence }: EvidenceListProps) {
   const [opened, setOpened] = useState<Record<string, Loaded>>({});
 
   async function open(ref: EvidenceRef) {
-    const key = anchorKey(ref);
+    const key = evidenceAnchorKey(workspace, ref);
     setOpened((state) => ({ ...state, [key]: { loading: true, collapsed: false } }));
     try {
       const response = await getEvidencePreview(workspace, ref);
@@ -44,7 +51,7 @@ export default function EvidenceList({ workspace, evidence }: EvidenceListProps)
   return (
     <ul className="evidence-list">
       {evidence.map((ref) => {
-        const key = anchorKey(ref);
+        const key = evidenceAnchorKey(workspace, ref);
         const state = opened[key];
         const preview = state?.response?.preview;
         const hasResult = Boolean(state?.response || state?.error);

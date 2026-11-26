@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
+import { Group, Panel, Separator } from "react-resizable-panels";
 
-import { type ApiError, getJson } from "./api/client";
+import { type ApiError, conversationsUrl, getJson, invocationsUrl } from "./api/client";
 import type {
+  Conversation,
   InvocationItem,
+  InvocationsResponse,
   Meta,
   ModuleServerObservation,
   NowData,
@@ -52,6 +55,15 @@ function readWidthPref(key: string, fallback: number, min: number, max: number):
   return fallback;
 }
 
+function saveWidthPref(key: string, pixels: number, min: number, max: number) {
+  if (!Number.isFinite(pixels) || pixels < min || pixels > max) return;
+  try {
+    window.localStorage.setItem(key, String(Math.round(pixels)));
+  } catch {
+    // Layout is usable even if preferences cannot be saved.
+  }
+}
+
 export default function App({ eventSourceFactory }: { eventSourceFactory?: EventSourceFactory }) {
   const { mutate } = useSWRConfig();
   const meta = useSWR<Meta, ApiError>("/api/meta", getJson, {
@@ -62,38 +74,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [area, setArea] = useState<WorkbenchArea>("research");
   const [commandOpen, setCommandOpen] = useState(false);
   const [compactDensity, setCompactDensity] = useState<boolean>(readCompactPref);
-  const [navWidth, setNavWidth] = useState<number>(() =>
-    readWidthPref("bioharness.ui.navWidth", 290, 220, 480),
-  );
-  const [inspectorWidth, setInspectorWidth] = useState<number>(() =>
-    readWidthPref("bioharness.ui.inspectorWidth", 400, 300, 640),
-  );
-
-  function startResize(which: "nav" | "inspector", startX: number) {
-    const initial = which === "nav" ? navWidth : inspectorWidth;
-    const min = which === "nav" ? 220 : 300;
-    const max = which === "nav" ? 480 : 640;
-    const key = which === "nav" ? "bioharness.ui.navWidth" : "bioharness.ui.inspectorWidth";
-
-    function onMove(ev: MouseEvent) {
-      const delta = which === "nav" ? ev.clientX - startX : startX - ev.clientX;
-      const next = Math.min(max, Math.max(min, Math.round(initial + delta)));
-      if (which === "nav") setNavWidth(next);
-      else setInspectorWidth(next);
-      try {
-        window.localStorage.setItem(key, String(next));
-      } catch {
-        // ignore storage errors
-      }
-    }
-    function onUp() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [scopeId, setScopeId] = useState<string | null>(null);
@@ -104,7 +84,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dockOpen, setDockOpen] = useState(true);
   const [inspectedTarget, setInspectedTarget] = useState<InspectedTarget | null>(null);
-  const [observedInvocations, setObservedInvocations] = useState<InvocationItem[]>([]);
 
   function updateCompactDensity(next: boolean) {
     setCompactDensity(next);
@@ -128,7 +107,36 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   const stream = useVersionStream(workspace, projectId, requestId, eventSourceFactory);
 
   const treeData = tree.data?.ok ? tree.data.data : null;
-  const nowData = now.data?.ok ? now.data.data : null;
+  const nowData = now.data?.ok && now.data.data?.request_id === requestId ? now.data.data : null;
+  // Read the selected request's own conversation, independent of the mounted chat dock.
+  // The chat may deliberately remain on another active run. Reuse its existing SWR keys;
+  // polling keeps this bounded observation page current when no chat stream is mounted.
+  const runtimeEnabled = Boolean(meta.data?.runtime?.enabled);
+  const observationInterval = Math.max(1000, (meta.data?.poll_interval_seconds ?? 5) * 1000);
+  const conversations = useSWR<Conversation[], ApiError>(
+    runtimeEnabled && workspace && requestId ? conversationsUrl(workspace) : null,
+    getJson, { refreshInterval: observationInterval, shouldRetryOnError: false,
+      onError: (err) => { if (err.status === 401) void mutate("/api/meta"); } },
+  );
+  const matches = conversations.data?.filter(
+    (c) => c.workspace === workspace && c.request_id === requestId,
+  ) ?? [];
+  const observationConversation = matches.length === 1 ? matches[0] : null;
+  const observations = useSWR<InvocationsResponse, ApiError>(
+    workspace && observationConversation ? invocationsUrl(workspace, observationConversation.id, { limit: 50 }) : null,
+    getJson, { refreshInterval: observationInterval, shouldRetryOnError: false,
+      onError: (err) => { if (err.status === 401) void mutate("/api/meta"); } },
+  );
+  const observed = observations.data?.service === meta.data?.service &&
+    observations.data?.workspace === workspace &&
+    observations.data?.conversation_id === observationConversation?.id &&
+    observations.data?.request_id === requestId && observationConversation
+    ? observations.data : undefined;
+  const observedInvocations = observed?.items ?? [];
+  const observationUnavailable = Boolean(conversations.error || observations.error ||
+    matches.length > 1 || (observationConversation && observations.data && !observed));
+  const observationLoading = Boolean(runtimeEnabled && requestId &&
+    (conversations.isLoading || (observationConversation && observations.isLoading)));
   const openData = open.data?.ok ? open.data.data : null;
 
   const attentionItems = useMemo(
@@ -155,7 +163,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   // The scope a request belongs to is what Core recorded, not what is selected on screen.
   const requestScope =
     typeof nowData?.scope_context?.scope_id === "string" ? nowData.scope_context.scope_id : null;
-  const runtimeEnabled = Boolean(meta.data.runtime?.enabled);
 
   function selectWorkspace(id: string) {
     setWorkspace(id);
@@ -164,7 +171,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setRequestId(null);
     setStepId(null);
     setInspectedTarget(null);
-    setObservedInvocations([]);
     setTab("tree");
   }
 
@@ -173,11 +179,13 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setScopeId(null);
     setRequestId(null);
     setStepId(null);
+    setInspectedTarget(null);
     setTab("tree");
   }
 
   function selectScope(id: string) {
     setScopeId(id);
+    setTab("tree");
     setStepId(null);
     setInspectedTarget(null);
   }
@@ -189,7 +197,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setInspectedTarget(null);
     setTab("workflow");
     setScopeId(scope); // null for an unscoped request: no scope stays highlighted
-    if (project) setProjectId(project);
+    setProjectId(project);
   }
 
   function handleAttentionNavigate(item: AttentionItem) {
@@ -214,8 +222,8 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
     setInspectorOpen(true);
   }
 
-  function handleInspectModule(server: ModuleServerObservation) {
-    setInspectedTarget({ kind: "module", server });
+  function handleInspectModule(server: ModuleServerObservation, contextRequestId: string | null) {
+    setInspectedTarget({ kind: "module", server, contextRequestId });
     setInspectorOpen(true);
   }
 
@@ -239,12 +247,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
   return (
     <div
       className={appClasses}
-      style={
-        {
-          "--nav-w": `${navWidth}px`,
-          "--insp-w": `${inspectorWidth}px`,
-        } as React.CSSProperties
-      }
     >
       <ActivityRail
         area={area}
@@ -253,8 +255,12 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
         attentionCount={attentionItems.length}
       />
 
+      <Group orientation="horizontal" className="workbench-panels">
       {navOpen && (
-        <div className="pane-wrap is-nav">
+        <Panel id="navigation" className="pane-wrap is-nav"
+          defaultSize={readWidthPref("bioharness.ui.navWidth", 290, 220, 480)}
+          minSize={220} maxSize={480} groupResizeBehavior="preserve-pixel-size"
+          onResize={(size) => saveWidthPref("bioharness.ui.navWidth", size.inPixels, 220, 480)}>
           <Navigator
             workspaces={meta.data.workspaces}
             workspace={workspace}
@@ -272,21 +278,12 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             requestId={requestId}
             onSelectRequest={selectRequest}
           />
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="调整左侧导航宽度"
-            className="resize-handle is-right"
-            title="拖拽调整导航宽度（双击重置）"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              startResize("nav", e.clientX);
-            }}
-            onDoubleClick={() => setNavWidth(290)}
-          />
-        </div>
+        </Panel>
       )}
+      {navOpen && <Separator id="navigation-resize" className="resize-handle"
+        aria-label="调整左侧导航宽度" title="拖拽或方向键调整导航宽度" />}
 
+      <Panel id="research-workspace" className="workspace-panel" minSize={220}>
       <main className="workspace">
         <header className="context-bar">
           <dl>
@@ -355,10 +352,14 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
         {area === "artifacts" ? (
           <div className="flex-1 overflow-hidden">
             <ArtifactsWorkbench
+              key={JSON.stringify([workspace, scopeId, requestId])}
               workspace={workspace}
               scopeId={scopeId}
               requestId={requestId}
               now={nowData}
+              nowSnapshot={now.data}
+              nowError={now.error}
+              nowLoading={now.isLoading}
               tree={treeData}
             />
           </div>
@@ -461,6 +462,10 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                         now={nowData}
                         selectedStepId={stepId}
                         invocations={observedInvocations}
+                        unavailable={observationUnavailable}
+                        loading={observationLoading}
+                        enabled={runtimeEnabled}
+                        hasMore={observed?.next_before != null}
                         onInspectInvocation={handleInspectInvocation}
                       />
                     </>
@@ -482,6 +487,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                   </button>
                   {dockOpen && (
                     <ConversationPanel
+                      key={workspace}
                       workspace={workspace}
                       model={meta.data.runtime?.model ?? null}
                       moduleToolServers={meta.data.runtime?.module_tool_servers ?? []}
@@ -489,7 +495,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                       scopeId={scopeId}
                       delivered={nowData?.phase === "DELIVERED"}
                       onRequestKnown={(id, scope, project) => {
-                        if (id !== requestId) selectRequest(id, scope, project);
+                        if (!requestId) selectRequest(id, scope, project);
                       }}
                       onNewQuestion={() => {
                         setRequestId(null);
@@ -499,7 +505,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                       }}
                       onInspectInvocation={handleInspectInvocation}
                       onInspectModule={handleInspectModule}
-                      onInvocationsChange={setObservedInvocations}
                       eventSourceFactory={eventSourceFactory}
                     />
                   )}
@@ -514,21 +519,15 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
           </>
         )}
       </main>
+      </Panel>
 
+      {showInspector && <Separator id="inspector-resize" className="resize-handle"
+        aria-label="调整右侧检查器宽度" title="拖拽或方向键调整检查器宽度" />}
       {showInspector && workspace && (
-        <div className="pane-wrap is-inspector">
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="调整右侧检查器宽度"
-            className="resize-handle is-left"
-            title="拖拽调整检查器宽度（双击重置）"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              startResize("inspector", e.clientX);
-            }}
-            onDoubleClick={() => setInspectorWidth(400)}
-          />
+        <Panel id="inspector" className="pane-wrap is-inspector"
+          defaultSize={readWidthPref("bioharness.ui.inspectorWidth", 400, 300, 640)}
+          minSize={300} maxSize={640} groupResizeBehavior="preserve-pixel-size"
+          onResize={(size) => saveWidthPref("bioharness.ui.inspectorWidth", size.inPixels, 300, 640)}>
           <Inspector
             workspace={workspace}
             tree={treeData}
@@ -539,6 +538,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             runtimeEnabled={runtimeEnabled}
             inspectedTarget={inspectedTarget}
             invocations={observedInvocations}
+            invocationsAvailable={Boolean(observed) && !observationUnavailable}
             onSelectScope={(id) => {
               setTab("tree");
               selectScope(id);
@@ -551,8 +551,9 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             onInspectInvocation={handleInspectInvocation}
             onClearInspected={() => setInspectedTarget(null)}
           />
-        </div>
+        </Panel>
       )}
+      </Group>
 
       <CommandPalette
         open={commandOpen}
@@ -560,7 +561,6 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
         workspaces={meta.data.workspaces}
         scopes={treeData?.nodes ?? []}
         openRequests={openData?.open_requests ?? []}
-        projectId={projectId ?? treeData?.project_id ?? null}
         onSelectWorkspace={selectWorkspace}
         onSelectScope={selectScope}
         onSelectRequest={selectRequest}

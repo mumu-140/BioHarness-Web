@@ -37,8 +37,7 @@ interface ConversationPanelProps {
   onRequestKnown(requestId: string, scopeId: string | null, projectId: string | null): void;
   onNewQuestion(): void;
   onInspectInvocation?: (item: InvocationItem, contextRequestId: string | null) => void;
-  onInspectModule?: (server: ModuleServerObservation) => void;
-  onInvocationsChange?: (items: InvocationItem[]) => void;
+  onInspectModule?: (server: ModuleServerObservation, contextRequestId: string | null) => void;
   eventSourceFactory?: EventSourceFactory;
 }
 
@@ -173,10 +172,6 @@ export default function ConversationPanel(props: ConversationPanelProps) {
   const invocations = useInvocations(workspace, conversationId, true, log);
   const modules = useModules(workspace, conversationId, true, log);
 
-  useEffect(() => {
-    props.onInvocationsChange?.(invocations.items);
-  }, [invocations.items, props.onInvocationsChange]);
-
   // The request of the conversation on screen: what Core answered to its science_begin, or
   // what the service recorded for it. A conversation belongs to exactly one request.
   const begun = useMemo(() => {
@@ -276,6 +271,8 @@ export default function ConversationPanel(props: ConversationPanelProps) {
   const reconcile = state.data?.begin_reconcile ?? null;
   const unknownBegin = reconcile !== null;
   const hasRequest = conversationRequest !== null;
+  const conversationDelivered = hasRequest && conversationRequest === requestId && delivered;
+  const differentRequest = conversationId !== null && conversationRequest !== requestId && requestId !== null;
 
   const busy = useRef(false);
   async function act<T>(work: () => Promise<T>): Promise<T | null> {
@@ -323,7 +320,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
     messages: useMemo(() => toItems(log.events, log.draft), [log.events, log.draft]),
     isRunning: activeRunId !== null,
     isDisabled:
-      unknownBegin || scopeProblem !== null || (hasRequest && delivered) || (!conversationId && Boolean(requestId)),
+      unknownBegin || scopeProblem !== null || conversationDelivered || differentRequest || (!conversationId && Boolean(requestId)),
     convertMessage: (item): ThreadMessageLike => ({
       id: item.id,
       role: item.role,
@@ -378,7 +375,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
           </p>
         )}
 
-        {!activeRunId && (lastRunState === "INTERRUPTED" || lastRunState === "FAILED") && conversationId && hasRequest && !delivered && (
+        {!activeRunId && (lastRunState === "INTERRUPTED" || lastRunState === "FAILED") && conversationId && hasRequest && !conversationDelivered && !differentRequest && (
           <p className="notice">
             上次运行状态为 {STATE[lastRunState] ?? lastRunState}。可在下方发送回复，或点击“从 Core 当前状态继续”恢复。
           </p>
@@ -496,7 +493,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
                 aria-label="消息"
                 rows={2}
                 placeholder={
-                  hasRequest && delivered
+                  conversationDelivered
                     ? "此请求已交付;后续问题请点“新问题”"
                     : conversationId
                       ? "回复,或发送 Core 要求的确认原文"
@@ -512,7 +509,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
               ) : (
                 <ComposerPrimitive.Send>发送</ComposerPrimitive.Send>
               )}
-              {conversationId && hasRequest && !delivered && !activeRunId && (
+              {conversationId && hasRequest && !conversationDelivered && !differentRequest && !activeRunId && (
                 <button
                   type="button"
                   onClick={() => act(() => sendJson("POST", conversationsUrl(workspace, `/${conversationId}/runs`), {}))}
@@ -533,7 +530,7 @@ export default function ConversationPanel(props: ConversationPanelProps) {
         modules={modules}
         configuredServers={props.moduleToolServers ?? []}
         onInspectInvocation={(item, ctxRid) => props.onInspectInvocation?.(item, ctxRid)}
-        onInspectModule={(srv) => props.onInspectModule?.(srv)}
+        onInspectModule={(srv) => props.onInspectModule?.(srv, conversationRequest)}
       />
     </section>
   );

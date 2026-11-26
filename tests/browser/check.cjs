@@ -23,6 +23,24 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
     errors.length = 0; // the 401 answers before signing in are the expected ones
     const dock = page.locator('.dock-toggle');
     await dock.click(); // the read-side checks look at the canvas alone
+    // Exercise the real resizable-panels implementation, not the jsdom substitute.
+    const resize = page.getByRole('separator', { name: '调整左侧导航宽度' });
+    const navPanel = page.locator('#navigation');
+    const beforeWidth = (await navPanel.boundingBox()).width;
+    const handle = await resize.boundingBox();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2 + 40, handle.y + handle.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForFunction(w => document.getElementById('navigation').getBoundingClientRect().width > w + 15, beforeWidth);
+    const dragged = (await navPanel.boundingBox()).width;
+    check('navigation separator supports pointer resize', dragged > beforeWidth + 15);
+    await resize.focus();
+    await resize.press('ArrowRight');
+    await page.waitForFunction(w => document.getElementById('navigation').getBoundingClientRect().width > w + 1, dragged);
+    check('navigation separator supports keyboard resize', (await navPanel.boundingBox()).width > dragged + 1);
+    // Re-fit after changing panel width so the following graph checks use a stable viewport.
+    await page.waitForTimeout(400);
 
     // ---- research tree ----
     const treeNodes = await page.locator('.react-flow__node').allInnerTexts();

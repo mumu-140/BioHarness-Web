@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { InvocationItem } from "../api/types";
 import AttentionStream, { buildAttentionItems } from "./AttentionStream";
-import DualTrackPanel from "./DualTrackPanel";
+import DualTrackPanel, { recordedStepIdOf } from "./DualTrackPanel";
 import SettingsCenter from "./SettingsCenter";
 import { META, NOW, OPEN, TREE } from "../test/fixtures";
 
@@ -54,7 +54,7 @@ describe("V3 R1 Workbench components", () => {
         error: null,
         note: "Recalled 2 items",
         initiator: "model",
-        details: { step_id: "inputs" },
+        details: { step_id: "inputs", plan_version: 2 },
       },
       {
         cursor: 2,
@@ -75,9 +75,16 @@ describe("V3 R1 Workbench components", () => {
       },
     ];
 
+    // The explicit current plan version is required, and model tool input is not an owner binding.
+    expect(recordedStepIdOf(invocations[0], NOW)).toBeNull();
+    expect(recordedStepIdOf(invocations[0], { ...NOW, plan_version: 3 })).toBeNull();
+    expect(recordedStepIdOf({ ...invocations[0], details: {} }, { ...NOW, plan_version: 2 })).toBeNull();
+    expect(recordedStepIdOf({ ...invocations[0], details: { step_id: "missing", plan_version: 2 } }, { ...NOW, plan_version: 2 })).toBeNull();
+    expect(recordedStepIdOf(invocations[0], { ...NOW, plan_version: 2 })).toBe("inputs");
+
     render(
       <DualTrackPanel
-        now={NOW}
+        now={{ ...NOW, plan_version: 2 }}
         selectedStepId="inputs"
         invocations={invocations}
         onInspectInvocation={vi.fn()}
