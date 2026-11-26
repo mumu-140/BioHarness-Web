@@ -8,6 +8,29 @@ import { FakeEventSource, META, NOW, OPEN, ROUTES, SHA, snapshot, stubFetch, TRE
 
 const VIEWS = "/api/workspaces/pilot/views";
 const NOW_URL = VIEWS + "/now?request_id=sci-1";
+const CONTEXT_DAP = {
+  ok: true,
+  scope_guidance: "Scope selection does not bind a Core request.",
+  shared: {
+    scope: TREE.nodes[0],
+    ancestors: [],
+    children: [TREE.nodes[1]],
+    child_count: 1,
+    requests: TREE.nodes[0].requests,
+    request_count: 1,
+    submission_count: 1,
+  },
+  shared_sha256: "ctx-sha-1",
+  selected_request: {
+    request_id: "sci-1",
+    scope_id: "dap",
+    request_status: "OPEN",
+    mainline_version: 1,
+    goal_source: { kind: "LOCKED_MAINLINE", request_id: "sci-1", mainline_version: 1 },
+    changed_scope_goals: [],
+  },
+  view_semantics: "Current read-only projection.",
+};
 
 function routes(overrides: Record<string, { status?: number; body: unknown }> = {}) {
   return {
@@ -17,6 +40,22 @@ function routes(overrides: Record<string, { status?: number; body: unknown }> = 
     [VIEWS + "/open"]: { body: snapshot("open", {}, OPEN) },
     [NOW_URL]: { body: snapshot("now", { request_id: "sci-1" }, NOW) },
     [VIEWS + "/routes?limit=100&scope_id=dap"]: { body: snapshot("routes", { scope_id: "dap", limit: 100 }, ROUTES) },
+    [VIEWS + "/routes?limit=100&scope_id=dap-branch"]: {
+      body: snapshot("routes", { scope_id: "dap-branch", limit: 100 }, { ...ROUTES, scope_id: "dap-branch", attempt_count: 0, attempts: [] }),
+    },
+    [VIEWS + "/context?request_id=sci-1&scope_id=dap"]: {
+      body: snapshot("context", { scope_id: "dap", request_id: "sci-1" }, CONTEXT_DAP),
+    },
+    [VIEWS + "/context?scope_id=dap"]: {
+      body: snapshot("context", { scope_id: "dap" }, { ...CONTEXT_DAP, selected_request: null }),
+    },
+    [VIEWS + "/context?scope_id=dap-branch"]: {
+      body: snapshot("context", { scope_id: "dap-branch" }, {
+        ...CONTEXT_DAP,
+        shared: { ...CONTEXT_DAP.shared, scope: TREE.nodes[1], ancestors: [TREE.nodes[0]], children: [] },
+        selected_request: null,
+      }),
+    },
     ...overrides,
   };
 }
@@ -328,5 +367,66 @@ describe("App", () => {
     renderApp();
     const open = await screen.findByRole("region", { name: "开放请求" });
     expect(await within(open).findByText(/可能还有未列出的.*25 requests are open/)).toBeTruthy();
+  });
+
+  it("keeps read-only views functional when runtime is disabled and never requests runtime routes", async () => {
+    const { calls } = stubFetch(
+      routes({
+        "/api/meta": { body: { ...META, runtime: { enabled: false, model: null, module_tool_servers: [] } } },
+      }),
+    );
+    renderApp();
+    expect(await screen.findByText(/原生运行时未配置（当前为只读模式/)).toBeTruthy();
+    await openRequest("sci-1");
+    expect(await screen.findByRole("region", { name: "Core 当前状态" })).toBeTruthy();
+    expect(calls.some((c) => c.includes("/conversations") || c.includes("/invocations") || c.includes("/modules"))).toBe(false);
+  });
+
+  it("displays Governance context details, collapsible panels, and navigator search filtering", async () => {
+    stubFetch(routes());
+    renderApp();
+    await userEvent.click(within(await screen.findByLabelText("科研树", { selector: ".graph-fallback" })).getByText("dap-branch"));
+    const inspector = screen.getByRole("complementary", { name: "检查器" });
+    const ctxRegion = await within(inspector).findByRole("region", { name: "范围上下文" });
+    expect(await within(ctxRegion).findByText("上级范围:")).toBeTruthy();
+    expect(within(ctxRegion).getByRole("button", { name: "dap" })).toBeTruthy();
+
+    // Navigator search filters scopes and open requests locally without altering authority
+    const filter = screen.getByLabelText("筛选范围与请求");
+    await userEvent.type(filter, "unscoped");
+    const open = screen.getByRole("region", { name: "开放请求" });
+    expect(within(open).getByText("sci-9")).toBeTruthy();
+    expect(within(open).queryByText("sci-1")).toBeNull();
+
+    // Panels can be collapsed and re-expanded
+    await userEvent.click(screen.getByRole("button", { name: "收起导航" }));
+    expect(screen.queryByRole("complementary", { name: "科研项目导航" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "展开导航" }));
+    expect(screen.getByRole("complementary", { name: "科研项目导航" })).toBeTruthy();
+  });
+
+  it("surfaces Governance context refusal and Core evidence changes without claiming success", async () => {
+    const changedNow = {
+      ...NOW,
+      must_not_stop: true,
+      evidence_changed_since_submission: ["$WORKSPACE/inputs.tsv (modified after submission)"],
+    };
+    stubFetch(
+      routes({
+        [NOW_URL]: { body: snapshot("now", { request_id: "sci-1" }, changedNow) },
+        [VIEWS + "/context?request_id=sci-1&scope_id=dap"]: {
+          body: snapshot("context", { scope_id: "dap", request_id: "sci-1" }, null, {
+            error: { origin: "project-governance", code: null, message: "request_id does not belong to selected scope" },
+          }),
+        },
+      }),
+    );
+    renderApp();
+    await openRequest("sci-1");
+    const nowPanel = await screen.findByRole("region", { name: "Core 当前状态" });
+    expect(within(nowPanel).getByText("must_not_stop")).toBeTruthy();
+    expect(within(nowPanel).getByText(/inputs\.tsv \(modified after submission\)/)).toBeTruthy();
+    const inspector = screen.getByRole("complementary", { name: "检查器" });
+    expect(await within(inspector).findByText(/request_id does not belong to selected scope/)).toBeTruthy();
   });
 });

@@ -1,3 +1,5 @@
+import type { OmittedValue } from "./api/types";
+
 // Display labels for values the owners return. An unknown value is shown as it
 // is; nothing here maps one scientific state onto another.
 
@@ -57,6 +59,30 @@ const UNAVAILABLE: Record<string, string> = {
   BINARY_PREVIEW_NOT_SUPPORTED: "二进制文件不支持预览",
 };
 
+const OP_STATE: Record<string, string> = {
+  STARTED: "进行中",
+  SUCCEEDED: "已返回",
+  REFUSED: "被拒绝",
+  FAILED: "失败",
+  UNKNOWN: "结果未知",
+  CANCELLED: "已取消",
+  FINISHED: "已结束",
+  INTERRUPTED: "已中断",
+};
+
+const OP_KIND: Record<string, string> = {
+  core: "Core",
+  hook: "Core hook",
+  model: "模型",
+  tool: "工具",
+};
+
+const MODULE_STATE: Record<string, string> = {
+  NOT_OBSERVED: "未观察",
+  LISTED: "已列出工具（上次观察）",
+  UNAVAILABLE: "不可用",
+};
+
 function label(map: Record<string, string>, value: unknown): string {
   if (value === null || value === undefined || value === "") return "未提供";
   const text = String(value);
@@ -74,6 +100,9 @@ export function reviewLabel(value: unknown): string {
 }
 export const identityLabel = (value: unknown) => label(IDENTITY, value);
 export const unavailableLabel = (value: unknown) => label(UNAVAILABLE, value);
+export const operationStateLabel = (value: unknown) => label(OP_STATE, value);
+export const operationKindLabel = (value: unknown) => label(OP_KIND, value);
+export const moduleStateLabel = (value: unknown) => label(MODULE_STATE, value);
 
 export function formatTime(value: unknown): string {
   if (typeof value !== "string" || !value) return "未提供";
@@ -86,4 +115,43 @@ export function formatValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value, null, 2);
+}
+
+export function formatBytes(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "未提供";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatDuration(startedAt: unknown, endedAt: unknown): string {
+  if (typeof startedAt !== "string" || typeof endedAt !== "string" || !startedAt || !endedAt) {
+    return "未提供";
+  }
+  const start = new Date(startedAt).getTime();
+  const end = new Date(endedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "未提供";
+  const ms = end - start;
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+export function isOmittedValue(value: unknown): value is OmittedValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<string, unknown>).omitted === true &&
+    typeof (value as Record<string, unknown>).characters === "number" &&
+    typeof (value as Record<string, unknown>).head === "string"
+  );
+}
+
+export function safeExternalUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
 }

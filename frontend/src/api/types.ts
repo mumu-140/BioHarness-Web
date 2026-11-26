@@ -56,10 +56,78 @@ export interface ConversationState {
 
 export interface ConversationEvent {
   seq: number | null; // null: text still being written, not a recorded event
+  conversation_id?: string;
   run_id: string | null;
   type: string;
   data: Record<string, unknown>;
   at?: string;
+}
+
+// ---- W3: observed invocations & configured module discovery ----------------
+export interface OmittedValue {
+  omitted: true;
+  characters: number;
+  head: string;
+}
+
+export interface McpToolOutput {
+  is_error?: boolean;
+  text?: string;
+  structured_content?: unknown;
+  non_text_content_not_shown?: string[];
+  truncated_characters?: number;
+  host_error?: string;
+  [key: string]: unknown;
+}
+
+export interface InvocationItem {
+  cursor: number;
+  id: string;
+  run_id: string;
+  kind: "core" | "hook" | "model" | "tool" | string;
+  name: string;
+  state: "STARTED" | "SUCCEEDED" | "REFUSED" | "FAILED" | "UNKNOWN" | "CANCELLED" | string;
+  started_at: string;
+  ended_at: string | null;
+  server: string | null;
+  input: unknown;
+  output: unknown;
+  error: { code?: string | null; message?: string; [key: string]: unknown } | string | null;
+  note: string | null;
+  initiator: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface InvocationsResponse {
+  service: string;
+  workspace: string;
+  conversation_id: string;
+  request_id: string | null;
+  authority: string;
+  note: string;
+  items: InvocationItem[];
+  next_before: number | null;
+}
+
+export interface ModuleServerObservation {
+  server: string;
+  configured: boolean;
+  state: "NOT_OBSERVED" | "LISTED" | "UNAVAILABLE" | string;
+  run_id: string | null;
+  observed_at: string | null;
+  tools?: string[];
+  offered_tools?: string[];
+  error?: { code?: string | null; message?: string; [key: string]: unknown } | null;
+}
+
+export interface ModulesResponse {
+  service: string;
+  workspace: string;
+  conversation_id: string;
+  request_id: string | null;
+  authority: string;
+  note: string;
+  servers: ModuleServerObservation[];
 }
 
 // ---- Core: science_now ------------------------------------------------------
@@ -227,6 +295,60 @@ export interface RoutesData {
   offset: number;
   attempts: Attempt[];
   note?: string;
+}
+
+export interface GoalSource {
+  request_id?: string;
+  scope_id?: string | null;
+  revision?: number;
+  request_status?: string;
+  delivery_kind?: string | null;
+  source?: string;
+  mainline_version?: number;
+  kind?: string;
+  objective_sha256?: string;
+}
+
+export interface ContextSubmission {
+  request_id: string;
+  submission_index: number;
+  step_id: string;
+  submission_status: string;
+  summary?: string;
+  evidence?: EvidenceRef[];
+  evidence_count?: number;
+}
+
+export interface ContextData {
+  ok?: boolean;
+  scope_guidance?: string;
+  shared?: {
+    scope?: ScopeNode & { goal_source?: GoalSource };
+    ancestors?: (ScopeNode & { goal_source?: GoalSource })[];
+    children?: (ScopeNode & { goal_source?: GoalSource })[];
+    child_count?: number;
+    requests?: (RecordRef & { source?: string })[];
+    request_count?: number;
+    related_requests?: RelatedRequest[];
+    related_count?: number;
+    unavailable_related_ids?: string[];
+    recent_submissions?: ContextSubmission[];
+    submission_count?: number;
+    documents?: Record<string, unknown>;
+    goal_version_changes?: GoalChange[];
+    goal_version_change_count?: number;
+  };
+  shared_sha256?: string;
+  selected_request?: (RecordRef & {
+    source?: string;
+    objective?: string;
+    mainline_version?: number;
+    goal_source?: GoalSource;
+    changed_scope_goals?: { scope_id: string; bound_version: number; current_version: number }[];
+  }) | null;
+  note?: string;
+  warnings?: string[];
+  view_semantics?: string;
 }
 
 export interface EvidencePreview {

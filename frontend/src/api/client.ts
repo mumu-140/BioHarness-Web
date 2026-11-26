@@ -77,6 +77,19 @@ export function conversationsUrl(workspace: string, rest = ""): string {
   return `/api/workspaces/${encodeURIComponent(workspace)}/conversations${rest}`;
 }
 
+export function invocationsUrl(
+  workspace: string,
+  conversationId: string,
+  params: { limit?: number; before?: number | null } = {},
+): string {
+  const qs = query({ limit: params.limit, before: params.before ?? undefined });
+  return conversationsUrl(workspace, `/${encodeURIComponent(conversationId)}/invocations${qs}`);
+}
+
+export function modulesUrl(workspace: string, conversationId: string): string {
+  return conversationsUrl(workspace, `/${encodeURIComponent(conversationId)}/modules`);
+}
+
 export async function signIn(token: string): Promise<boolean> {
   const response = await fetch("/api/session", {
     method: "POST",

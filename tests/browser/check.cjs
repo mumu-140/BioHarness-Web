@@ -44,10 +44,15 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
     check('minimap draws both scope nodes', mm.length === 2 && mm.every(m => Number(m.w) > 0 && Number(m.h) > 0), JSON.stringify({ mm, svg }));
     const navUnscoped = await page.locator('.navigator section[aria-label="科研树"]').innerText();
     check('unscoped request is not placed under any scope', !navUnscoped.includes('未归属'));
-    check('open list marks the unscoped request', (await page.locator('.navigator section[aria-label="开放请求"]').innerText()).includes('未归属研究范围'));
+    await page.locator('.navigator section[aria-label="开放请求"] .nav-request').first().waitFor({ timeout: 15000 });
+    const openListText = await page.locator('.navigator section[aria-label="开放请求"]').innerText();
+    check('open list marks the unscoped request', openListText.includes('未归属研究范围'), openListText.slice(0, 200));
     await page.locator('.react-flow__node', { hasText: 'fixture-project' }).first().click();
     await page.locator('.inspector').getByText('提交 #1').waitFor({ timeout: 10000 });
     check('scope inspector shows recorded submission', true);
+    await page.locator('.inspector section[aria-label="范围上下文"]').getByText('fixture-branch').waitFor({ timeout: 10000 });
+    const ctxText = await page.locator('.inspector section[aria-label="范围上下文"]').innerText();
+    check('scope inspector shows Governance context view', ctxText.includes('Project Governance 上下文') && ctxText.includes('fixture-branch'), ctxText.slice(0, 200));
     await page.screenshot({ path: '/qa/out/tree.png' });
 
     // ---- no request chosen by the application ----
@@ -105,6 +110,13 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
     const order = ['science_begin', 'science_plan', 'science_submit', 'science_deliver'].map(n => trace.indexOf(n));
     check('execution trace lists the Core calls in order', order.every(i => i >= 0) && order.join() === [...order].sort((a, b) => a - b).join(), JSON.stringify(order));
     check('trace says a returned call is not scientific validity', trace.includes('调用返回不代表科学结果成立'));
+    await page.locator('.trace details summary').first().click();
+    await page.locator('.trace').getByRole('button', { name: '在检查器中查看完整详情' }).first().click();
+    await page.locator('.inspector').getByText('Web 运行观察（非科学裁决）').waitFor({ timeout: 8000 });
+    check('invocation inspector opens from timeline without raw JSON as sole UI', (await page.locator('.inspector').innerText()).includes('身份与来源信息'));
+    await page.locator('.inspector').getByRole('button', { name: '返回科研详情' }).click();
+    await page.locator('.trace').getByRole('tab', { name: /Module 状态/ }).click();
+    check('module status tab renders honest configured state', (await page.locator('.trace').innerText()).includes('Module'));
     await page.locator('.now-panel', { hasText: '已交付' }).waitFor({ timeout: 30000 });
     const delivered = await page.locator('.now-panel').innerText();
     check('workspace follows the new request to Core\'s delivered state', delivered.includes(QUESTION) && delivered.includes('fixture answer') && delivered.includes('未评审'), delivered.slice(0, 300));
