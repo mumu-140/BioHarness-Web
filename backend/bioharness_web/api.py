@@ -203,7 +203,11 @@ def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
     return router
 
 
-def create_router(sources: Sources, settings: Settings) -> APIRouter:
+def create_router(
+    sources: Sources,
+    settings: Settings,
+    runtime: Runtime | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api", dependencies=[Depends(_no_store)])
 
     @router.get("/meta")
@@ -213,6 +217,11 @@ def create_router(sources: Sources, settings: Settings) -> APIRouter:
             return {"command": os.path.basename(command),
                     "found": shutil.which(command) is not None}
 
+        active_model = (
+            runtime.model.settings.name
+            if runtime is not None
+            else (settings.model.name if settings.model else None)
+        )
         return {
             "service": settings.service_id,
             "workspaces": sorted(settings.workspaces),
@@ -221,7 +230,7 @@ def create_router(sources: Sources, settings: Settings) -> APIRouter:
                       "project-governance": tool(settings.governance_cli)},
             # Whether this service can conduct work itself; the read side works either way.
             "runtime": {"enabled": settings.runtime_enabled,
-                        "model": settings.model.name if settings.model else None,
+                        "model": active_model,
                         "module_tool_servers": sorted(settings.mcp_servers)},
         }
 

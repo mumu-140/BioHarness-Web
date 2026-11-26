@@ -13,6 +13,7 @@ import { useState } from "react";
 
 import type { Meta } from "../api/types";
 import { cn } from "../lib/utils";
+import ModelSettingsPanel from "./ModelSettingsPanel";
 
 type SettingsTab =
   | "general"
@@ -60,9 +61,9 @@ export default function SettingsCenter({
       aria-label="设置与能力中心"
     >
       <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-3">
-        <h2 className="text-sm font-semibold text-slate-900">设置与能力中心（R1 骨架）</h2>
+        <h2 className="text-sm font-semibold text-slate-900">设置与能力中心</h2>
         <p className="text-xs text-slate-500">
-          服务端受托配置（工作区路径、模型密钥、工具白名单）严格只读展示；尚未接入的 R3/R4 能力明确标为不可用。
+          按类别原子化管理模型与工作台偏好；API 密钥仅保存在服务端受托目录（0600），尚未接入的扩展能力如实标注。
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5" role="tablist" aria-label="设置分页">
           {TABS.map((t) => {
@@ -143,29 +144,7 @@ export default function SettingsCenter({
           </div>
         )}
 
-        {tab === "models" && (
-          <div className="max-w-2xl space-y-3">
-            <div className="rounded-lg border border-slate-200 p-4">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-900">原生运行时模型配置</span>
-                <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
-                  <Lock className="h-3 w-3" aria-hidden="true" />
-                  由服务端受托配置锁定
-                </span>
-              </div>
-              <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <dt className="text-slate-500">运行模式</dt>
-                <dd className="font-mono text-slate-900">
-                  {meta.runtime?.enabled ? "已启用原生运行时" : "只读模式（未配置模型）"}
-                </dd>
-                <dt className="text-slate-500">当前模型</dt>
-                <dd className="font-mono text-slate-900">{meta.runtime?.model ?? "未配置"}</dd>
-                <dt className="text-slate-500">密钥来源</dt>
-                <dd className="text-slate-700">仅保存在服务端环境变量，永不下发浏览器</dd>
-              </dl>
-            </div>
-          </div>
-        )}
+        {tab === "models" && <ModelSettingsPanel />}
 
         {tab === "skills" && (
           <div className="max-w-2xl space-y-3">

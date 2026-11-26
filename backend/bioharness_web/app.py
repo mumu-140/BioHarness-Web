@@ -15,6 +15,7 @@ from .api import create_router, create_runtime_router
 from .cli import CliRunner
 from .core import CoreHost
 from .ledger import Ledger
+from .model_config import ModelConfigStore, create_model_settings_router
 from .provider import ModelClient
 from .runtime import Runtime
 from .settings import Settings
@@ -55,12 +56,14 @@ def create_app(
                        env_passthrough=settings.tool_env_passthrough)
     if sources is None:
         sources = Sources(settings, runner)
+    model_store = ModelConfigStore(settings)
     runtime: Runtime | None = None
     if settings.runtime_enabled:
         ledger = Ledger(settings.ledger_path)  # type: ignore[arg-type]
         ledger.recover()  # nothing of a previous process is still in flight here
+        effective_model = model_store.resolve_chat_settings() or settings.model
         runtime = Runtime(settings, ledger, CoreHost(settings, runner),
-                          ModelClient(settings.model), sources)  # type: ignore[arg-type]
+                          ModelClient(effective_model), sources)  # type: ignore[arg-type]
     session = _session_value(settings.access_token)
 
     def require_session(request: Request) -> None:
@@ -95,7 +98,9 @@ def create_app(
         response.set_cookie(SESSION_COOKIE, session, httponly=True, samesite="strict",
                             secure=request.url.scheme == "https", path="/")
 
-    app.include_router(create_router(sources, settings),
+    app.include_router(create_router(sources, settings, runtime),
+                       dependencies=[Depends(require_session)])
+    app.include_router(create_model_settings_router(model_store, runtime),
                        dependencies=[Depends(require_session)])
     if runtime is not None:
         app.include_router(create_runtime_router(runtime, settings),

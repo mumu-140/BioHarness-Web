@@ -99,6 +99,14 @@ class ModelClient:
             provider=OpenAIProvider(base_url=settings.base_url, api_key=settings.api_key),
         )
 
+    def reconfigure(self, settings: ModelSettings) -> None:
+        """Hot-swap the active OpenAI-compatible chat model for subsequent turns."""
+        self.settings = settings
+        self._model = OpenAIChatModel(
+            settings.name,
+            provider=OpenAIProvider(base_url=settings.base_url, api_key=settings.api_key),
+        )
+
     async def turn(
         self,
         *,
@@ -113,11 +121,16 @@ class ModelClient:
             for tool in tools
         ])
         started = time.monotonic()
+        req_settings: dict[str, Any] = {"timeout": self.settings.request_timeout_seconds}
+        if self.settings.temperature is not None:
+            req_settings["temperature"] = self.settings.temperature
+        if self.settings.max_tokens is not None:
+            req_settings["max_tokens"] = self.settings.max_tokens
         try:
             async with model_request_stream(
                 self._model, _messages(history, instructions),
                 model_request_parameters=parameters,
-                model_settings={"timeout": self.settings.request_timeout_seconds},
+                model_settings=req_settings,
             ) as stream:
                 async for event in stream:
                     # Only answer text is forwarded; provider "thinking" parts are never shown or kept.

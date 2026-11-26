@@ -31,6 +31,8 @@ class ModelSettings:
     api_key: str
     name: str
     request_timeout_seconds: float = 300.0
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True)

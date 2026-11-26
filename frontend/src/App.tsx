@@ -1,3 +1,15 @@
+import {
+  ArrowRight,
+  ChevronRight,
+  Cpu,
+  FolderOpen,
+  Microscope,
+  PanelLeft,
+  PanelRight,
+  RefreshCw,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -343,38 +355,54 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
       <Panel id="research-workspace" className="workspace-panel" minSize={220}>
       <main className="workspace">
         <header className="context-bar">
-          <dl>
-            <div>
-              <dt>服务</dt>
-              <dd>{meta.data.service}</dd>
-            </div>
-            <div>
-              <dt>工作区</dt>
-              <dd>{workspace ?? "未选择"}</dd>
-            </div>
-            <div>
-              <dt>项目</dt>
-              <dd>{projectId ?? treeData?.project_id ?? "未选择"}</dd>
-            </div>
-            <div>
-              <dt>请求</dt>
-              <dd>{requestId ?? "未选择"}</dd>
-            </div>
-            {requestId && nowData && (
-              <div>
-                <dt>请求所属范围</dt>
-                <dd>{requestScope ?? "未归属"}</dd>
-              </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700">
+              <Microscope className="h-3.5 w-3.5 text-teal-700" aria-hidden="true" />
+              <span>{meta.data.service}</span>
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
+            <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-slate-700">
+              <span className="text-[10px] text-slate-400">工作区</span>
+              <strong className="font-semibold text-slate-900">{workspace ?? "未选择"}</strong>
+            </span>
+            {(projectId ?? treeData?.project_id) && (
+              <>
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
+                <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-slate-700">
+                  <span className="text-[10px] text-slate-400">项目</span>
+                  <strong className="font-semibold text-slate-900">
+                    {projectId ?? treeData?.project_id}
+                  </strong>
+                </span>
+              </>
             )}
-            <div>
-              <dt>原生运行时</dt>
-              <dd>
-                {runtimeEnabled
-                  ? `已启用 · 模型 ${meta.data.runtime?.model ?? "未提供"}`
-                  : "未配置（只读模式）"}
-              </dd>
-            </div>
-          </dl>
+            {requestId && (
+              <>
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300" aria-hidden="true" />
+                <span className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50/70 px-2 py-0.5 text-teal-900">
+                  <span className="text-[10px] text-teal-700">请求</span>
+                  <code className="font-semibold">{requestId}</code>
+                </span>
+              </>
+            )}
+            {requestId && nowData && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                <span className="text-slate-400">范围</span>
+                <span>{requestScope ?? "未归属"}</span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setArea("settings")}
+              title="前往模型与运行时设置"
+              className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-900"
+            >
+              <Sparkles className="h-3 w-3 text-teal-600" aria-hidden="true" />
+              {runtimeEnabled
+                ? `模型 ${meta.data.runtime?.model ?? "未提供"}`
+                : "只读模式（未配置模型）"}
+            </button>
+          </div>
           <div className="context-actions">
             <BackgroundRunIndicator
               activeRun={activeRun}
@@ -387,6 +415,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
               aria-expanded={navOpen}
               onClick={() => setNavOpen((v) => !v)}
             >
+              <PanelLeft className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
               {navOpen ? "收起导航" : "展开导航"}
             </button>
             {workspace && area === "research" && (
@@ -396,6 +425,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
                 aria-expanded={inspectorOpen}
                 onClick={() => setInspectorOpen((v) => !v)}
               >
+                <PanelRight className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                 {inspectorOpen ? "收起检查器" : "展开检查器"}
               </button>
             )}
@@ -450,7 +480,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
             <SettingsCenter
               key="general"
               meta={meta.data}
-              initialTab="general"
+              initialTab="models"
               compactDensity={compactDensity}
               onCompactDensityChange={updateCompactDensity}
             />
@@ -470,6 +500,7 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
               </button>
               {workspace && (
                 <button type="button" className="ghost-btn" onClick={refreshSnapshots}>
+                  <RefreshCw className="h-3 w-3 text-slate-500" aria-hidden="true" />
                   刷新视图
                 </button>
               )}
@@ -481,7 +512,69 @@ export default function App({ eventSourceFactory }: { eventSourceFactory?: Event
 
             <section className="canvas">
               {!workspace ? (
-                <p className="empty-state">请选择工作区。</p>
+                <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-8">
+                  <div className="rounded-2xl border border-slate-200/90 bg-white p-7 shadow-sm">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-800">
+                          <Microscope className="h-3.5 w-3.5" aria-hidden="true" />
+                          BioHarness 科研工作台 V3
+                        </span>
+                        <h2 className="mt-2.5 text-xl font-semibold tracking-tight text-slate-900">
+                          选择一个科研工作区开始工作
+                        </h2>
+                        <p className="mt-1 text-xs text-slate-500">
+                          请选择工作区。每个工作区对应独立的 Core 科学状态与 Project Governance 科研树。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setArea("settings")}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-900"
+                      >
+                        <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+                        模型与设置
+                      </button>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {meta.data.workspaces.map((ws) => (
+                        <button
+                          key={ws}
+                          type="button"
+                          onClick={() => selectWorkspace(ws)}
+                          className="group flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-left transition hover:border-teal-500 hover:bg-white hover:shadow-md"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-700/10 text-teal-700 transition group-hover:bg-teal-700 group-hover:text-white">
+                              <FolderOpen className="h-4 w-4" aria-hidden="true" />
+                            </span>
+                            <ArrowRight
+                              className="h-4 w-4 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-teal-700"
+                              aria-hidden="true"
+                            />
+                          </div>
+                          <div className="mt-3">
+                            <div className="text-sm font-semibold text-slate-900">{ws}</div>
+                            <div className="mt-0.5 text-[11px] text-slate-500">
+                              点击进入工作区与科研树
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-500">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Cpu className="h-3.5 w-3.5 text-teal-600" aria-hidden="true" />
+                        {runtimeEnabled
+                          ? `原生运行时已就绪 · 当前主模型 ${meta.data.runtime?.model ?? "未提供"}`
+                          : "当前为只读模式（未配置模型运行时）"}
+                      </span>
+                      <span>提示：按 ⌘K / Ctrl+K 可随时全局跳转</span>
+                    </div>
+                  </div>
+                </div>
               ) : tab === "tree" ? (
                 <>
                   <SnapshotNotice

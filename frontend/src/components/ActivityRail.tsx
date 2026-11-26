@@ -34,12 +34,12 @@ export default function ActivityRail({
 }: ActivityRailProps) {
   return (
     <nav
-      className="activity-rail flex flex-col items-center justify-between border-r border-slate-200 bg-slate-50/90 py-2.5 select-none"
+      className="activity-rail flex flex-col items-center justify-between border-r border-slate-800/80 bg-slate-900 py-3 select-none"
       aria-label="主功能区"
     >
-      <div className="flex flex-col items-center gap-1.5">
+      <div className="flex flex-col items-center gap-2">
         <div
-          className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-teal-700 text-xs font-bold tracking-tight text-white shadow-xs"
+          className="mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-xs font-bold tracking-tight text-white shadow-md shadow-teal-950/40"
           title="BioHarness Research Workspace V3"
         >
           BH
@@ -55,17 +55,23 @@ export default function ActivityRail({
               title={item.label}
               onClick={() => onSelectArea(item.id)}
               className={cn(
-                "relative flex h-10 w-10 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium transition-colors",
+                "group relative flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-medium transition-all",
                 active
-                  ? "bg-teal-50 text-teal-800 ring-1 ring-teal-200"
-                  : "text-slate-600 hover:bg-slate-200/70 hover:text-slate-900",
+                  ? "bg-teal-500/20 text-teal-200 ring-1 ring-teal-400/40"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-slate-100",
               )}
             >
+              {active && (
+                <span
+                  className="absolute top-2 bottom-2 -left-1.5 w-1 rounded-r-full bg-teal-400"
+                  aria-hidden="true"
+                />
+              )}
               <Icon className="h-4 w-4" aria-hidden="true" />
               <span>{item.label}</span>
               {item.id === "research" && attentionCount > 0 && (
                 <span
-                  className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-600 px-1 text-[9px] font-semibold text-white"
+                  className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-slate-950 shadow-xs"
                   aria-label={`待关注事项 ${attentionCount} 项`}
                 >
                   {attentionCount}
@@ -81,7 +87,7 @@ export default function ActivityRail({
         onClick={onOpenCommand}
         title="快捷跳转 (⌘K / Ctrl+K)"
         aria-label="打开快捷命令面板"
-        className="flex h-9 w-9 flex-col items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+        className="flex h-10 w-10 flex-col items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/80 text-slate-300 transition hover:border-teal-500/60 hover:bg-slate-800 hover:text-white"
       >
         <Command className="h-3.5 w-3.5" aria-hidden="true" />
         <span className="text-[9px] leading-none">⌘K</span>
