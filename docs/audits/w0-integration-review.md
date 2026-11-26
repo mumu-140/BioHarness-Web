@@ -1,6 +1,6 @@
 # W0 — integration and reuse audit
 
-Date: 2026-11-25. Disposition: **W1 read-side design exit satisfied; native provider activation remains open.** This is the evidence/decision record referenced by the single V2 plan, not another roadmap. No V2 production runtime is implemented by this audit.
+Date: 2026-11-25. Historical disposition at W0: **W1 read-side design exit satisfied; native provider activation was then open.** This is an evidence/decision record, not the current implementation/deployment status or another roadmap. Subsequent W1–W3 implementation, limited live-provider verification and private deployment supersede the open-status statements below; current authority is the [single V2 plan](../plans/2026-11-25-research-workspace-v2.md).
 
 ## Scope and identity
 
@@ -133,7 +133,7 @@ This confirms the pilot information architecture: scope tree and request selecti
 
 W1 scope: read-only vertical slice over actual public Core/Governance queries, shared snapshots/SSE refresh, real project tree + selected workflow + evidence inspection, with private real-case acceptance and synthetic dependency/error tests. Do not start model/provider runtime or broad module UI in W1. No raw project or benchmark inputs are committed to the public repository.
 
-## Disposition
+## Historical disposition at W0 (not current status)
 
 A: verified public read, confirmation and concurrent-conflict paths; projection and module envelope selected. B: direct SDK/lifecycle/remote-service design selected, trusted hook verified; owner-configured live provider and Scientific Review API transport not implemented or live-tested. C: bounded source/license reuse decisions made; packages not yet installed/built. D: real source-backed static walkthrough and report verification complete; browser QA remains W1.
 
@@ -150,4 +150,4 @@ Checked against Core 69f2fbf (0.2.0) and Modules 3acc891 (Governance 0.1.2) sour
 - Shortened Core answers and recorded evidence sources contain absolute server paths. The Web adapter replaces configured workspace and evidence-root directories by labels before anything reaches a browser.
 - Memory: the public MCP tools implement FAST and STANDARD recall; DEEP and TaskMemoryGraph are module-internal at this revision. Literature: search and fetch return paper records and download/validation entries, not passages.
 
-Under the existing W0 exit definition, W1's public read path, shared refresh, real pilot and remote topology are settled. Remaining W2 provider activation is explicitly open, and its review adapter belongs to the existing module; do not call W0 a completed live API or production acceptance. No Core/Modules/Eval source, production service, scientific result or dataset changed. Update implementation status and remaining checks in the single V2 plan.
+Under the existing W0 exit definition, W1's public read path, shared refresh, real pilot and remote topology are settled. At that build point W2 provider activation was open, and the review adapter belonged to the existing module; do not treat this historical W0 record as live API or production acceptance. Subsequent limited live checks and private deployment are recorded only in the active plan and deployment guide. No Core/Modules/Eval source, production service, scientific result or dataset changed. Update implementation status and remaining checks in the single V2 plan.

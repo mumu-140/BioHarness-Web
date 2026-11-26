@@ -1,6 +1,6 @@
 # BioHarness Research Workspace
 
-**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；真实模型已在 Linux 隔离环境完成一个合成 EXPLAIN 闭环，实际调用 Core 和 Project Governance，并在两次提供商响应失败后显式恢复到交付；真实科研项目与三类任务完整验收仍开放；W3 的通用调用检查器、分页时间线和 Module 发现状态已与最新后端集成，并通过 Linux 合成工作区联合测试；真实专业 Module 与科研项目验收仍开放。** 本仓库正在从原有只读 Observatory 重构为 BioHarness 的第一方 Web 科研工作台。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；真实模型已在 Linux 隔离环境完成一个合成 EXPLAIN 闭环，实际调用 Core 和 Project Governance，并在两次提供商响应失败后显式恢复到交付；真实科研项目与三类任务完整验收仍开放；W3 的通用调用检查器、分页时间线和 Module 发现状态已与最新后端集成，并通过 Linux 合成工作区联合测试；真实专业 Module 与科研项目验收仍开放。** Web 已作为独立常驻组件接入正式安装的 Core/Governance 公开 CLI，并完成私有 Linux 的读侧与重启冒烟；这不是完整科研或公开服务验收。部署与回退见[部署说明](docs/deployment.md)。本仓库提供 BioHarness 的第一方 Web 科研工作台，原 Observatory 已退役为历史资料。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
 
 ## 产品目的
 

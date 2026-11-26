@@ -254,7 +254,7 @@ The integrated UI provides the invocation timeline, common invocation/Module ins
 | Conversation UI | assistant-ui primitives | External-store runtime over the server's recorded event log; no upstream Agent runtime, no client-owned transcript; AG-UI frames not adopted |
 | Artifact/evidence view | Existing safe preview components; selective Vercel/Aivory patterns; Orrery candidate for W4 | Exact evidence anchors and bounded previews; no second W1 canvas |
 | Backend | Python 3.12+ + FastAPI | Core public CLI read first; documented MCP/CLI/API tools |
-| Model API | Pydantic AI direct API (official SDK fallback for demonstrated gap) | First owner-configured OpenAI-compatible transport candidate; actual provider/model activation remains open |
+| Model API | Pydantic AI direct API (official SDK fallback for demonstrated gap) | Owner-configured compatible endpoint activated for synthetic transport/runtime/browser checks; real-project and wider-provider acceptance remain open |
 | Streaming | HTTP snapshots + shared SSE invalidation; SSE conversation event log | Connection independent of operation lifetime; refetch authoritative state |
 | Persistence | Existing Core/Module stores; no W1 database; W2 local SQLite technical ledger | Durable operation/conversation association only, not scientific state |
 | Desktop | Tauri client connecting to remote service | Deferred until Web acceptance |

@@ -1,6 +1,6 @@
 # Historical BioHarness-Web records
 
-The documents in this directory preserve the former read-only Observatory design and implementation history.
+The documents in this directory preserve the former read-only Observatory design, implementation and [V1 validation records](validation/README.md). All V1 validation reports have been retired from the active documentation tree; they remain here as historical evidence, not current deployment or acceptance instructions.
 
 They are useful for understanding earlier UI decisions, graph readability, evidence previews and the V1 implementation. They are not the active V2 product specification.
 

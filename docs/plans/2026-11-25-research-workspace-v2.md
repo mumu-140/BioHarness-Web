@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-25  
 **Status:** W1 read side and the W2 native runtime are implemented and tested on synthetic fixtures with a scripted model endpoint, including in a real browser; short live-provider transport and synthetic EXPLAIN passed with explicit recovery; the integrated live-provider browser cycle also passed in one run with reload and offline readback; real-project acceptance open
-**Implementation status:** W1 and W2 acceptance remains open (see their checklists); W3 common invocation/Module inspectors, timeline and discovery states integrated and jointly checked on synthetic Linux workspaces; real domain-Module acceptance open; W4–W5 not started
+**Implementation status:** W1 and W2 acceptance remains open (see their checklists); W3 common invocation/Module inspectors, timeline and discovery states integrated and jointly checked on synthetic Linux workspaces; real domain-Module acceptance open; W4 private deployment smoke verified, evidence/provenance and real-project pilot open; W5 not started
 **Repository:** mumu-140/BioHarness-Web
 
 ## 1. Purpose
@@ -54,7 +54,7 @@ The current main baseline reviewed for this plan is fa87344508df95b4a869e51999d7
 
 The repository contains React 19, TypeScript, Vite and @xyflow/react; a FastAPI backend; a PostgreSQL read-only Observatory service and projection models; SSE invalidation and a task-stage graph; archived September 2026 Observatory design and implementation documents; and V1-specific validation records.
 
-That baseline was a read-only observer over the former managed-record/PostgreSQL model. W1 removed its PostgreSQL projection, task-stage graph and container files and replaced them with the public-CLI read side described under W1. W2 subsequently implemented the direct-API transport, public Core mutations and configured MCP tool execution as a first-party host; this has been exercised with a scripted endpoint, not a live model provider.
+That baseline was a read-only observer over the former managed-record/PostgreSQL model. W1 removed its PostgreSQL projection, task-stage graph and container files and replaced them with the public-CLI read side described under W1. W2 subsequently implemented the direct-API transport, public Core mutations and configured MCP tool execution as a first-party host; the initial check used a scripted endpoint. Later synthetic live-provider and integrated browser checks are recorded under W2; real scientific acceptance remains open.
 
 Existing code is not automatically reusable merely because it is present. The implementation review classifies each component as retain, adapt, replace or remove. No V1 database/API/page compatibility is required.
 
@@ -307,7 +307,7 @@ Decisions and source evidence: [W0 integration and reuse audit](../audits/w0-int
 - [ ] Show contradictory findings and negative results without erasing historical attempts.
 - [ ] Show which downstream steps were affected by a plan/input/method revision, based on recorded dependencies.
 - [ ] Add research-wide search over scopes, requests, methods, sources and outputs.
-- [ ] Conduct the integrated real-project pilot and authorized private deployment smoke checks: exact build/config identity, authentication, service/workspace mapping, evidence/output isolation, SSE/reconnect and interruption recovery.
+- [ ] Conduct the integrated real-project pilot and authorized private deployment smoke checks. **Deployment portion verified (2026-11-26):** installed Web release connected to pinned formal Core/Governance CLIs, explicit existing workspace choices, server-only model route/credentials and loopback-only access; API read smoke 19/19 and production browser/restart checks 11/11 passed without rewriting Core records or creating synthetic production questions. The installed release interpreter passed all 234 backend/contract tests and the rebuilt synthetic browser regression 36/36 in an external isolated workspace. A supported Node 22.23.2 builder passed all 54 frontend tests and production build. The isolated mutable synthetic checks remain separate. Real-project, wider artifact/output isolation and long-operation scientific acceptance remain open.
 - [ ] Support the owning Memory/Eval team's independent Memory ON/OFF comparison by exporting actual invocation/use evidence if needed; do not make Web UI acceptance depend on an unproven scientific benefit or copy Gold into Web.
 
 **Acceptance:** a displayed result traces to its input, method, parameters, invocation and evidence; historical and contradictory results remain inspectable; task completion or invocation count is never treated as scientific validity; process-level and outcome evaluation are separate.
@@ -374,17 +374,17 @@ Code reuse requires source-level review of license, maintenance, dependencies, d
 
 ## 13. Deployment direction
 
-Remote-service-first is fixed; the actual authorized Linux host remains a W0 decision. Browser and later Desktop connect to the same backend via authenticated API/SSE. Service/workspace/request identity and server-side evidence resolution are explicit. Keep API keys and tools on the backend; avoid broad mounts and public exposure before access isolation and TLS review.
+Remote-service-first is fixed and an authorized private Linux deployment has been activated through formally installed public Core/Governance CLIs. Private host/workspace/credential identities stay outside this repository. Browser and later Desktop connect to the same backend via authenticated API/SSE. Service/workspace/request identity and server-side evidence resolution are explicit. Keep API keys and tools on the backend; avoid broad mounts and public exposure before access isolation and TLS review.
 
-See [deployment principles](../deployment.md). No production service or host is modified by this planning task.
+See [deployment and operations](../deployment.md). The original planning task made no production change; the later owner-authorized Web deployment is now recorded there. Core/Modules code and existing scientific records were not migrated or rewritten.
 
 ## 14. Open decisions
 
-Resolve in W0 A–D, not in another TODO or architecture plan: exact pinned Core/Module contracts and Host transport; native confirmation and reviewer seam; shared snapshot/event and invocation-view contract; first provider/model and long-operation recovery mechanism; canonical service/workspace mapping, authorization and telemetry; concrete reusable UI components; first real pilot and artifact viewers; authorized Linux host.
+The earlier W0 choices for public contracts, Host transport, native confirmation, snapshot/event/projection semantics, initial provider, technical ledger, UI stack and private host/workspace deployment have been resolved in the audit and implementation sections. Do not keep treating those historical questions as new work or create another roadmap. Still open: real scientific pilot/Modules acceptance, optional Review direct-API activation, larger artifacts and long-running executor recovery.
 
 Desktop topology and sole Web product ownership are settled. No new Core or Module capability is presumed without source-backed need.
 
-Gaps found while building W1, each for its existing owner and none blocking the read side: a public read of plan history and reuse invalidation, of text-evidence content and of delivered unscoped requests (Core); a supported amendment-confirmation path for a non-Agent host (Core); public DEEP recall/TaskMemoryGraph (Memory); passage-level results (Literature). Until an owner provides one, Web shows the item as unavailable.
+Remaining public-interface gaps belong to their existing owners: plan history/reuse invalidation, text-evidence content and delivered unscoped request enumeration (Core); public DEEP recall/TaskMemoryGraph (Memory); passage-level results (Literature); optional direct-API reviewer transport (Scientific Review). Web shows unavailable data honestly. The earlier non-Agent amendment gap is resolved by Web's agreed use of Core's existing generic hook, not a new tool or endpoint; documenting that first-party-host trust remains a Core documentation follow-up.
 
 ## 15. Out of scope until justified
 
