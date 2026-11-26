@@ -64,6 +64,12 @@ Use one version-aware projection and refresh channel in W1 and W2: authoritative
 
 Do not collapse them into one generic graph. Do not invent causal edges, scientific conclusions, module calls, Memory usage, model reasoning or execution states. Unknown or unrecorded information must remain explicitly unknown.
 
+- In the dual-track workflow view, attach observed execution events to a plan step only when a real recorded `step_id` exists; keep unlinked events at the Request level and never infer step ownership from timestamps or model prose.
+- Any top-level Attention Stream is strictly an aggregated read projection of existing pending items (`A#`, `WAIT_FOR_USER`, `begin_reconcile`, `goal_version_changes`), never a second task state machine; clicking navigates to the request without auto-confirming or mutating scientific state.
+- Evidence previews read the live source file and verify against the recorded SHA-256; disclose unavailable or drifted historical snapshots explicitly and never present a modified current file as a historical snapshot.
+- In Memory views, keep information depth (`T1`/`T2`/`T3`) independent from retrieval depth (`FAST`/`STANDARD`/`DEEP`), show unexposed `DEEP` retrieval as unavailable, and route curation or `source_registration` exclusively through public interfaces owned by `bioharness-module-memory`.
+- Default inspectors to plain scientific language with raw IDs, tokens and JSON payloads collapsed under technical details (auto-expanding on `partial`, `failed` or `UNKNOWN` recovery), and distinguish 503/unavailable responses ("last confirmed HH:MM:SS") from empty lists.
+
 Never expose or fabricate private chain-of-thought. Show concise scientific rationale, Core instructions, model/tool events, evidence and outcomes that are actually recorded.
 
 A Memory candidate is not proof that a task used it. A retrieved item is not proof that it influenced a decision. A model/tool invocation is not proof that its scientific result is valid. Distinguish availability, retrieval, selection, consumption, observed execution, validation and scientific conclusion.

@@ -129,16 +129,14 @@ Do not show private chain-of-thought or fabricate internal reasoning. An observe
 
 ## 6. Main workspace interaction
 
-Initial desktop-sized Web layout:
+Four-zone resizable desktop-sized Web workbench (V3 product-architecture upgrade):
 
-- **Left navigation:** research projects, scope tree, branches and request selection.
-- **Center canvas:** selected research tree, workflow or evidence graph.
-- **Right inspector:** selected node's scientific purpose, method, parameters, status, sources, results and limitations.
-- **Conversation panel:** direct model API interaction, contextual to the selected project/request/node.
-- **Activity/trace panel:** actual model and Module calls, errors and evidence events.
-- **Top context bar:** selected project/scope, request, model/provider and connection state.
+- **Top bar & Attention Stream:** workspace selector, breadcrumbs, active background-run indicator, command palette (`⌘K`) and an aggregated read-only Attention Stream surfacing pending `A#` mainline amendments, `WAIT_FOR_USER`, `begin_reconcile` and `goal_version_changes` (clicking navigates only; never auto-confirms or mutates scientific state).
+- **Activity rail & resizable left sidebar:** primary area switcher (`Research`, `Dual-Track`, `Artifacts`, `Memory`, `Resources`, `Modules`, `Compute`, `Settings`) plus arbitrary-depth Governance tree (default recommended visual paradigm: `Project → Question → Analysis → Route A/B/C`, never a rigid schema and never drag-reparentable), separate Unscoped Requests and Conversations list.
+- **Center stage:** conversation workspace (five-layer identity: Scope / Request / Conversation / Run / Operation; `1 Conversation : 1 Request` explicit binding; non-blocking background runs across project switches) and **dual-track workflow canvas** (Core Scientific Plan track + Observed Execution track, attaching execution events to a step only when a real recorded `step_id` exists and keeping unlinked events at Request level).
+- **Right inspector & six-dimension Artifacts/Evidence panel:** Data, Methods, Results, Evidence, Comparison and Findings projected from Core, Governance `routes` and project documents (preserving technical failures, scientific negative results, partial results and historical evidence distinctly). Evidence previews verify the live file against the recorded SHA-256 and disclose unavailable or drifted historical snapshots explicitly. Default to plain scientific language with raw IDs, tokens and JSON payloads collapsed under technical details (auto-expanding on `partial`, `failed` or `UNKNOWN` recovery).
 
-Panels may collapse or switch layout. The graph remains the primary scientific navigation surface; the conversation panel does not replace it. Node selection opens detail lazily. Raw logs and large outputs are drill-down content, not permanent graph nodes.
+Panels may collapse or resize freely. The graph and artifacts remain primary scientific surfaces alongside conversation. Node selection opens detail lazily, and 503/unavailable reads display last-confirmed timestamps rather than empty states.
 
 ## 7. Module-specific inspectors
 
@@ -248,7 +246,7 @@ The integrated UI provides the invocation timeline, common invocation/Module ins
 
 | Layer | Selected direction | Implementation boundary |
 |---|---|---|
-| Frontend | React + TypeScript + Vite | Retain compatible current components; no Next.js migration |
+| Frontend | React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui + `react-resizable-panels` + `lucide-react` + `cmdk` | Adapt/replace frontend components selectively while preserving verified logic and tests; no Next.js migration |
 | Scientific graph | React Flow + Dagre | Source-backed controlled graph, no general workflow editor |
 | State and refresh | SWR + local selection; existing SSE invalidation adapted | Query cache only; source snapshots remain authoritative |
 | Conversation UI | assistant-ui primitives | External-store runtime over the server's recorded event log; no upstream Agent runtime, no client-owned transcript; AG-UI frames not adopted |
