@@ -102,6 +102,17 @@ async def test_provider_reasoning_is_neither_streamed_nor_returned():
     assert turn.text == "The answer." == "".join(pieces)
 
 
+async def test_in_stream_api_error_is_not_reported_as_an_unreachable_endpoint():
+    answer = {"text": "Incomplete.", "tool_calls": [
+        {"name": "science_plan", "arguments": {"plan": {"objective": "fixture"}}}],
+        "stream_error": {"message": KEY + " private provider diagnostics", "type": "fixture_unknown"}}
+    with FakeOpenAI(lambda messages, tools: answer) as server:
+        with pytest.raises(ProviderError) as caught:
+            await collect(client(server), [{"role": "user", "text": "q"}])
+    assert caught.value.code == "PROVIDER_RESPONSE_ERROR"
+    assert KEY not in caught.value.message and "private provider diagnostics" not in caught.value.message
+
+
 @pytest.mark.parametrize("ending", [
     {"finish_reason": "length"}, {"finish_reason": "content_filter"},
     {"finish_reason": None}, {"disconnect_before_finish": True},

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
 from pydantic_ai.direct import model_request_stream
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelAPIError, ModelConnectionError, ModelHTTPError
 from pydantic_ai.messages import (
     ModelMessage, ModelRequest, ModelResponse, PartDeltaEvent, PartStartEvent, TextPart,
     TextPartDelta, ToolCallPart, ToolReturnPart, UserPromptPart,
@@ -132,6 +132,12 @@ class ModelClient:
                 finish_reason = stream.finish_reason
         except ModelHTTPError as error:
             raise ProviderError("PROVIDER_HTTP_ERROR", f"provider answered HTTP {error.status_code}") from None
+        except ModelConnectionError as error:
+            raise ProviderError("PROVIDER_UNREACHABLE", f"provider connection failed ({type(error).__name__})") from None
+        except ModelAPIError:
+            # A failed response/stream is not proof that the endpoint was unreachable.
+            # Provider diagnostics may contain credentials or raw content; do not forward them.
+            raise ProviderError("PROVIDER_RESPONSE_ERROR", "provider returned an invalid or failed response") from None
         except Exception as error:  # connection, timeout, malformed stream: the type says enough
             raise ProviderError("PROVIDER_UNREACHABLE", f"provider request failed ({type(error).__name__})") from None
 

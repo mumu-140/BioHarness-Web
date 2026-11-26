@@ -124,3 +124,16 @@ def test_context_omission_does_not_recommend_replaying_side_effects():
     assert omitted["omitted_by_host"] is True
     assert "call the tool again" not in omitted["note"]
     assert "side effects" in omitted["note"] and "read-only" in omitted["note"]
+
+
+def test_in_stream_api_error_never_dispatches_its_tool_calls(tmp_path):
+    reply = {**tool("science_plan", {"plan": PLAN}),
+             "stream_error": {"message": "fixture internal error", "type": "fixture_unknown"}}
+    with Harness(tmp_path, Script(reply), max_model_turns_per_run=1) as h:
+        cid = h.post(text=QUESTION).json()["conversation"]["id"]
+        state = h.wait(cid)
+        events = h.events(cid)
+        assert operations(events, "core") == [("science_begin", "SUCCEEDED")]
+        end = finished(events)[-1]
+        assert end["state"] == "FAILED" and "PROVIDER_RESPONSE_ERROR" in end["reason"]
+        assert h.now(state["conversation"]["request_id"])["phase"] == "NEEDS_PLAN"
