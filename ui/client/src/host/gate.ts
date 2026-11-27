@@ -31,6 +31,14 @@ const APPROVED_API: Array<{ method: string; path: RegExp }> = [
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/runs$/ },
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/runs\/[^/]+\/cancel$/ },
   { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/events$/ },
+  /* Step 4: Execution records & configured module discovery */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/invocations$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/modules$/ },
+  /* Step 4: Bounded evidence preview, verified content/range stream, and structured table */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/evidence-preview$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/evidence-content$/ },
+  { method: 'HEAD', path: /^\/api\/workspaces\/[^/]+\/evidence-content$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/evidence-table$/ },
 ];
 
 export const NOT_PROVIDED = 'NOT_PROVIDED_BY_HOST';

@@ -89,6 +89,39 @@ export interface MainlineAmendmentPending {
   [key: string]: unknown;
 }
 
+export interface PlanStep {
+  id: string;
+  kind: string;
+  objective?: string;
+  serves?: string[];
+  why?: string;
+  needs?: string[];
+  method?: string;
+  parameters?: Record<string, unknown>;
+  deliverable?: string;
+  check?: string;
+  depends_on?: string[];
+}
+
+export interface Plan {
+  question_type?: string;
+  objective?: string;
+  requirements?: string[];
+  steps: PlanStep[];
+  significance?: string;
+  knowledge_gap?: string;
+  expected_findings?: string[];
+  limits?: string[];
+}
+
+export interface StepProgress {
+  id: string;
+  kind: string;
+  status: string;
+  attempts: number;
+  review?: string;
+}
+
 export interface NowData {
   request_id: string;
   question?: string;
@@ -96,9 +129,24 @@ export interface NowData {
   question_type?: string;
   phase?: string;
   action?: string;
+  must_not_stop?: boolean;
+  instruction?: string;
+  anchor?: string;
+  plan?: Plan;
+  plan_version?: number;
+  progress?: { done: number; total: number; steps: StepProgress[] };
+  step?: PlanStep & { attempt?: number; last_review?: Record<string, unknown> };
+  also_available?: string[];
+  optional_explore_steps?: string[];
+  unresolved_steps?: Array<{ id: string; status: string; summary: string }>;
+  open_concerns?: Array<{ about: string; concern: string }>;
   waiting_for_user?: { question?: string; [key: string]: unknown } | null;
   mainline_amendment_pending?: MainlineAmendmentPending | null;
   delivery_kind?: string | null;
+  answer?: string;
+  limitations?: string[];
+  disclosure?: string;
+  evidence_changed_since_submission?: string[];
   scope_context?: { scope_id?: string | null; project_id?: string | null; [key: string]: unknown } | null;
   [key: string]: unknown;
 }
@@ -109,19 +157,219 @@ export interface OpenRequestsData {
   [key: string]: unknown;
 }
 
+export interface GovernanceRecordRef {
+  request_id: string;
+  scope_id?: string | null;
+  revision?: number;
+  request_status?: string;
+  delivery_kind?: string | null;
+}
+
+export interface EvidenceAnchor {
+  request_id: string;
+  submission_index: number;
+  evidence_id: string;
+  sha256: string;
+}
+
+export interface EvidenceRef extends EvidenceAnchor {
+  source?: string;
+  kind?: string;
+  bytes?: number | null;
+  snapshot?: boolean;
+  step_id?: string;
+  submission_status?: string;
+}
+
 export interface TreeScopeNode {
   scope_id: string;
   parent_id?: string | null;
+  parent_scope_id?: string | null;
   title?: string;
   name?: string;
+  objective?: string;
+  path?: string[];
+  mainline_version?: number;
+  request_count?: number;
+  requests?: GovernanceRecordRef[];
+  scopes?: TreeScopeNode[];
   [key: string]: unknown;
 }
 
 export interface TreeData {
+  project_id?: string;
   nodes?: TreeScopeNode[];
   scopes?: TreeScopeNode[];
-  projects?: Array<{ project_id?: string; scopes?: TreeScopeNode[]; [key: string]: unknown }>;
+  projects?: Array<{ project_id?: string; scopes?: TreeScopeNode[]; scope_id?: string; [key: string]: unknown }>;
+  shared_evidence?: Array<{ sha256: string; references: EvidenceRef[] }>;
+  request_binding?: GovernanceRecordRef & { path?: string[] | null };
+  note?: string;
   [key: string]: unknown;
+}
+
+export interface AttemptRecord extends GovernanceRecordRef {
+  submission_index: number;
+  step_id: string;
+  plan_version?: number | null;
+  at?: string | null;
+  submission_status: string;
+  summary: string;
+  method_used?: string;
+  parameters_used?: Record<string, unknown>;
+  condition_gaps?: string[];
+  execution_verified?: boolean;
+  evidence: EvidenceRef[];
+}
+
+export interface RoutesData {
+  scope_id: string;
+  included_scope_ids?: string[];
+  attempt_count?: number;
+  offset?: number;
+  attempts: AttemptRecord[];
+  note?: string;
+}
+
+export interface ContextSubmission {
+  request_id: string;
+  submission_index: number;
+  step_id: string;
+  submission_status: string;
+  summary?: string;
+  evidence?: EvidenceRef[];
+  evidence_count?: number;
+}
+
+export interface ContextData {
+  ok?: boolean;
+  scope_guidance?: string;
+  shared?: {
+    scope?: TreeScopeNode;
+    ancestors?: TreeScopeNode[];
+    children?: TreeScopeNode[];
+    requests?: GovernanceRecordRef[];
+    recent_submissions?: ContextSubmission[];
+  };
+  selected_request?: GovernanceRecordRef & { objective?: string; mainline_version?: number };
+  note?: string;
+  warnings?: string[];
+}
+
+export interface InvocationItem {
+  cursor: number;
+  id: string;
+  run_id: string;
+  kind: string;
+  name: string;
+  state: string;
+  started_at: string;
+  ended_at: string | null;
+  server: string | null;
+  input: unknown;
+  output: unknown;
+  error: { code?: string | null; message?: string; [key: string]: unknown } | string | null;
+  note: string | null;
+  initiator: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface InvocationsResponse {
+  service: string;
+  workspace: string;
+  conversation_id: string;
+  request_id: string | null;
+  authority: string;
+  note: string;
+  items: InvocationItem[];
+  next_before: number | null;
+}
+
+export interface ModuleServerObservation {
+  server: string;
+  configured: boolean;
+  state: string;
+  run_id: string | null;
+  observed_at: string | null;
+  tools?: string[];
+  offered_tools?: string[];
+  error?: { code?: string | null; message?: string; [key: string]: unknown } | null;
+}
+
+export interface ModulesResponse {
+  service: string;
+  workspace: string;
+  conversation_id: string;
+  request_id: string | null;
+  authority: string;
+  note: string;
+  servers: ModuleServerObservation[];
+}
+
+export interface EvidencePreview {
+  evidence_id: string;
+  kind: string;
+  name: string;
+  recorded_sha256: string;
+  recorded_bytes: number | null;
+  content_available: boolean;
+  unavailable_reason: string | null;
+  current_file_identity: 'MATCHES_RECORD' | 'DIFFERS_FROM_RECORD' | 'NOT_CHECKED';
+  format?: string;
+  size_bytes?: number;
+  truncated?: boolean;
+  content: string | null;
+}
+
+export interface EvidencePreviewResponse {
+  ok: boolean;
+  selector: Record<string, unknown>;
+  error?: { origin: string; code: string | null; message: string };
+  recorded_reference?: string;
+  snapshot_integrity?: string;
+  source_note?: string;
+  preview?: EvidencePreview;
+}
+
+export interface EvidenceTableColumn {
+  id: string;
+  name: string;
+  index: number;
+}
+
+export interface EvidenceTableData {
+  evidence_id: string;
+  kind: string;
+  name: string;
+  recorded_sha256: string;
+  recorded_bytes: number | null;
+  size_bytes?: number;
+  content_available: boolean;
+  unavailable_reason: string | null;
+  current_file_identity: 'MATCHES_RECORD' | 'DIFFERS_FROM_RECORD' | 'NOT_CHECKED';
+  delimiter?: string;
+  columns: EvidenceTableColumn[];
+  columns_truncated?: boolean;
+  rows: Array<Record<string, unknown>>;
+  offset: number;
+  limit: number;
+  returned_rows: number;
+  has_more: boolean;
+  total_rows: number | null;
+  total_rows_known: boolean;
+  truncated: boolean;
+  row_semantics: string;
+  sort_scope: string;
+  filter_scope: string;
+}
+
+export interface EvidenceTableResponse {
+  ok: boolean;
+  selector: Record<string, unknown>;
+  error?: { origin: string; code: string | null; message: string };
+  recorded_reference?: string;
+  snapshot_integrity?: string;
+  source_note?: string;
+  table?: EvidenceTableData;
 }
 
 export interface Snapshot<T = Record<string, unknown>> {
@@ -224,6 +472,40 @@ export const bhKeys = {
     view: string,
     selector: Record<string, string | number | boolean | undefined> = {},
   ) => ['bioharness', service, workspace, 'view', view, stableSelectorKey(selector)] as const,
+  invocations: (service: string, workspace: string, conversationId: string, before?: number | null) =>
+    ['bh', service, workspace, 'invocations', conversationId, before ?? 'latest'] as const,
+  modules: (service: string, workspace: string, conversationId: string) =>
+    ['bh', service, workspace, 'modules', conversationId] as const,
+  evidencePreview: (service: string, workspace: string, anchor: EvidenceAnchor) =>
+    [
+      'bh',
+      service,
+      workspace,
+      'evidence-preview',
+      anchor.request_id,
+      anchor.submission_index,
+      anchor.evidence_id,
+      anchor.sha256,
+    ] as const,
+  evidenceTable: (
+    service: string,
+    workspace: string,
+    anchor: EvidenceAnchor,
+    offset: number,
+    limit: number,
+  ) =>
+    [
+      'bh',
+      service,
+      workspace,
+      'evidence-table',
+      anchor.request_id,
+      anchor.submission_index,
+      anchor.evidence_id,
+      anchor.sha256,
+      offset,
+      limit,
+    ] as const,
 };
 
 function stableSelectorKey(selector: Record<string, string | number | boolean | undefined>): string {
@@ -689,4 +971,163 @@ export function eventsToMessages(
     parentId = row.id;
     return message;
   });
+}
+
+
+/* ---- Step 4 API fetchers & evidence identity helpers -------------------- */
+
+export async function fetchInvocations(
+  workspace: string,
+  conversationId: string,
+  opts: { before?: number | null; limit?: number } = {},
+): Promise<InvocationsResponse> {
+  const params = new URLSearchParams();
+  if (typeof opts.before === 'number') {
+    params.set('before', String(opts.before));
+  }
+  if (typeof opts.limit === 'number') {
+    params.set('limit', String(opts.limit));
+  }
+  const qs = params.toString();
+  const res = await hostFetch(
+    conversationsPath(workspace, `/${encodeURIComponent(conversationId)}/invocations${qs ? `?${qs}` : ''}`),
+    { headers: { Accept: 'application/json' } },
+  );
+  return parseJsonOrError<InvocationsResponse>(res);
+}
+
+export async function fetchModules(
+  workspace: string,
+  conversationId: string,
+): Promise<ModulesResponse> {
+  const res = await hostFetch(
+    conversationsPath(workspace, `/${encodeURIComponent(conversationId)}/modules`),
+    { headers: { Accept: 'application/json' } },
+  );
+  return parseJsonOrError<ModulesResponse>(res);
+}
+
+export function evidenceAnchorParams(anchor: EvidenceAnchor): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set('request_id', anchor.request_id);
+  params.set('submission_index', String(anchor.submission_index));
+  params.set('evidence_id', anchor.evidence_id);
+  params.set('sha256', anchor.sha256);
+  return params;
+}
+
+export function evidenceContentUrl(workspace: string, anchor: EvidenceAnchor): string {
+  return `/api/workspaces/${encodeURIComponent(workspace)}/evidence-content?${evidenceAnchorParams(anchor).toString()}`;
+}
+
+export async function fetchEvidencePreview(
+  workspace: string,
+  anchor: EvidenceAnchor,
+): Promise<EvidencePreviewResponse> {
+  const url = `/api/workspaces/${encodeURIComponent(workspace)}/evidence-preview?${evidenceAnchorParams(anchor).toString()}`;
+  const res = await hostFetch(url, { headers: { Accept: 'application/json' } });
+  return parseJsonOrError<EvidencePreviewResponse>(res);
+}
+
+export async function fetchEvidenceTable(
+  workspace: string,
+  anchor: EvidenceAnchor,
+  offset: number,
+  limit: number,
+): Promise<EvidenceTableResponse> {
+  const params = evidenceAnchorParams(anchor);
+  params.set('offset', String(offset));
+  params.set('limit', String(limit));
+  const url = `/api/workspaces/${encodeURIComponent(workspace)}/evidence-table?${params.toString()}`;
+  const res = await hostFetch(url, { headers: { Accept: 'application/json' } });
+  return parseJsonOrError<EvidenceTableResponse>(res);
+}
+
+export function evidenceAnchorKey(anchor: EvidenceAnchor): string {
+  return `${anchor.request_id}:${anchor.submission_index}:${anchor.evidence_id}:${anchor.sha256}`;
+}
+
+/** Collects actual request-level recorded EvidenceRefs from Governance snapshots without fabricating any items. */
+export function collectRequestEvidenceRefs(
+  requestId: string | null,
+  routesData: RoutesData | null | undefined,
+  contextData: ContextData | null | undefined,
+  treeData: TreeData | null | undefined,
+): EvidenceRef[] {
+  if (!requestId) {
+    return [];
+  }
+  const byKey = new Map<string, EvidenceRef>();
+  const add = (ref: EvidenceRef, stepId?: string, submissionStatus?: string) => {
+    if (
+      ref.request_id !== requestId ||
+      typeof ref.submission_index !== 'number' ||
+      !ref.evidence_id ||
+      !ref.sha256
+    ) {
+      return;
+    }
+    const key = evidenceAnchorKey(ref);
+    const prev = byKey.get(key);
+    byKey.set(key, {
+      ...prev,
+      ...ref,
+      step_id: ref.step_id ?? stepId ?? prev?.step_id,
+      submission_status: ref.submission_status ?? submissionStatus ?? prev?.submission_status,
+    });
+  };
+
+  for (const attempt of routesData?.attempts ?? []) {
+    if (attempt.request_id !== requestId) {
+      continue;
+    }
+    for (const ref of attempt.evidence ?? []) {
+      add(ref, attempt.step_id, attempt.submission_status);
+    }
+  }
+  for (const sub of contextData?.shared?.recent_submissions ?? []) {
+    if (sub.request_id !== requestId) {
+      continue;
+    }
+    for (const ref of sub.evidence ?? []) {
+      add(ref, sub.step_id, sub.submission_status);
+    }
+  }
+  for (const shared of treeData?.shared_evidence ?? []) {
+    for (const ref of shared.references ?? []) {
+      add(ref);
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => a.submission_index - b.submission_index || a.evidence_id.localeCompare(b.evidence_id),
+  );
+}
+
+export function classifyEvidenceFormat(
+  name: string | undefined,
+  kind?: string,
+): 'pdf' | 'table' | 'image' | 'html' | 'code' | 'unsupported' {
+  if (kind && kind !== 'file') {
+    return 'unsupported';
+  }
+  const lower = (name ?? '').toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  const ext = dot >= 0 ? lower.slice(dot) : '';
+  if (ext === '.pdf') return 'pdf';
+  if (ext === '.csv' || ext === '.tsv' || ext === '.tab') return 'table';
+  if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.gif' || ext === '.webp') {
+    return 'image';
+  }
+  if (ext === '.html' || ext === '.htm') return 'html';
+  if (
+    ext === '' ||
+    [
+      '.txt', '.json', '.md', '.log', '.fa', '.fasta', '.faa', '.fna',
+      '.tree', '.treefile', '.nwk', '.newick', '.py', '.r', '.sh',
+      '.yaml', '.yml', '.xml', '.js', '.ts', '.css',
+    ].includes(ext)
+  ) {
+    return 'code';
+  }
+  return 'unsupported';
 }

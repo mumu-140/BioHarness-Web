@@ -115,8 +115,9 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     const settingsItem = page.getByTestId('nav-settings');
     if (await settingsItem.count()) {
       await settingsItem.click();
-      await page.getByRole('tab').first().waitFor({ timeout: 8000 });
-      const tabs = (await page.getByRole('tab').allInnerTexts()).map(t => t.trim());
+      const settingsDialog = page.getByRole('dialog').last();
+      await settingsDialog.getByRole('tab').first().waitFor({ timeout: 8000 });
+      const tabs = (await settingsDialog.getByRole('tab').allInnerTexts()).map(t => t.trim());
       check('settings open with Models, General and Chat tabs',
         tabs.includes('Models') && tabs.includes('General') && tabs.includes('Chat'), tabs.join('|'));
       check('Speech, Data controls and Account settings are not offered',

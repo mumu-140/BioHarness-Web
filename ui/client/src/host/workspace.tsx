@@ -1,21 +1,16 @@
 /**
- * Explicit BioHarness service/workspace/request identity and unsent draft preservation
+ * Explicit BioHarness service/workspace/request/scope/conversation identity and unsent draft preservation
  * (not upstream LibreChat code).
- *
- * URL query parameters (`?ws=...&req=...`) carry explicit workspace/request selection so reload
- * and back/forward always restore the exact target. Unsent composer drafts are preserved in
- * sessionStorage scoped by service + workspace + conversation; transcripts and API keys are
- * never stored here.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { atom, useSetAtom } from 'jotai';
+import { Constants } from 'librechat-data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
-import type { BioHarnessMeta } from './bioharness';
+import type { BioHarnessMeta, EvidenceAnchor } from './bioharness';
 import { bhKeys, fetchMeta } from './bioharness';
 
-/** Controls opening LibreChat's adopted Settings dialog directly to a specific tab (e.g. models). */
 export const settingsRequestedTabAtom = atom<string | null>(null);
 
 export interface BranchSourceRef {
@@ -31,11 +26,18 @@ export interface BioHarnessWorkspaceContextValue {
   workspaces: string[];
   workspace: string | null;
   selectedRequestId: string | null;
+  selectedScopeId: string | null;
+  linkedConversationId: string | null;
   branchSource: BranchSourceRef | null;
   setBranchSource: (next: BranchSourceRef | null) => void;
   selectWorkspace: (ws: string) => void;
-  openConversation: (conversationId: string, opts?: { requestId?: string | null }) => void;
-  openNewResearch: (opts?: { requestId?: string | null; branchSource?: BranchSourceRef | null }) => void;
+  selectScope: (scopeId: string | null) => void;
+  openConversation: (conversationId: string, opts?: { requestId?: string | null; scopeId?: string | null }) => void;
+  openNewResearch: (opts?: { requestId?: string | null; scopeId?: string | null; branchSource?: BranchSourceRef | null }) => void;
+  openWorkflowView: (opts?: { requestId?: string | null; conversationId?: string | null; stepId?: string | null; scopeId?: string | null }) => void;
+  openEvidenceView: (opts?: { requestId?: string | null; conversationId?: string | null; anchor?: EvidenceAnchor | null; scopeId?: string | null }) => void;
+  openExecutionsView: (opts?: { requestId?: string | null; conversationId?: string | null; scopeId?: string | null }) => void;
+  stageTextInConversation: (opts: { conversationId: string | null; requestId: string | null; snippet: string }) => void;
   getDraft: (conversationKey: string) => string;
   setDraft: (conversationKey: string, text: string) => void;
   clearDraft: (conversationKey: string) => void;
@@ -66,6 +68,15 @@ function writeStoredDraft(storageKey: string, text: string): void {
   }
 }
 
+function extractRouteConversationId(pathname: string): string | null {
+  const match = pathname.match(/^\/c\/([^/]+)/);
+  if (!match) {
+    return null;
+  }
+  const id = decodeURIComponent(match[1]);
+  return id && id !== Constants.NEW_CONVO ? id : null;
+}
+
 export function BioHarnessWorkspaceProvider({
   children,
   onOpenSettings,
@@ -88,7 +99,6 @@ export function BioHarnessWorkspaceProvider({
   });
 
   const meta = metaQuery.data;
-  /* `user.username` already holds `meta.service` from session resume, preventing a frame-0 key mismatch on reload. */
   const service = meta?.service ?? user?.username ?? null;
   const workspaces = useMemo(() => meta?.workspaces ?? [], [meta?.workspaces]);
 
@@ -104,12 +114,19 @@ export function BioHarnessWorkspaceProvider({
   }, [workspaces, urlWs]);
 
   const selectedRequestId = searchParams.get('req') || null;
+  const selectedScopeId = searchParams.get('scope') || null;
+  const linkedConversationId =
+    extractRouteConversationId(location.pathname) ?? (searchParams.get('convo') || null);
+
   const [branchSource, setBranchSource] = useState<BranchSourceRef | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  /* Normalize `?ws=` into the URL when authenticated so reload & back/forward preserve workspace. */
   useEffect(() => {
-    if (!workspace || urlWs === workspace || !location.pathname.startsWith('/c/')) {
+    if (
+      !workspace ||
+      urlWs === workspace ||
+      !(location.pathname.startsWith('/c/') || location.pathname.startsWith('/w/'))
+    ) {
       return;
     }
     const next = new URLSearchParams(searchParams);
@@ -172,8 +189,24 @@ export function BioHarnessWorkspaceProvider({
     [workspaces, navigate],
   );
 
+  const selectScope = useCallback(
+    (scopeId: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (workspace) {
+        next.set('ws', workspace);
+      }
+      if (scopeId) {
+        next.set('scope', scopeId);
+      } else {
+        next.delete('scope');
+      }
+      setSearchParams(next);
+    },
+    [searchParams, setSearchParams, workspace],
+  );
+
   const openConversation = useCallback(
-    (conversationId: string, opts?: { requestId?: string | null }) => {
+    (conversationId: string, opts?: { requestId?: string | null; scopeId?: string | null }) => {
       const next = new URLSearchParams();
       if (workspace) {
         next.set('ws', workspace);
@@ -181,13 +214,18 @@ export function BioHarnessWorkspaceProvider({
       if (opts?.requestId) {
         next.set('req', opts.requestId);
       }
-      navigate(`/c/${encodeURIComponent(conversationId)}${next.toString() ? `?${next.toString()}` : ''}`);
+      const sc = opts?.scopeId ?? selectedScopeId;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      const qs = next.toString();
+      navigate(`/c/${encodeURIComponent(conversationId)}${qs ? `?${qs}` : ''}`);
     },
-    [workspace, navigate],
+    [workspace, selectedScopeId, navigate],
   );
 
   const openNewResearch = useCallback(
-    (opts?: { requestId?: string | null; branchSource?: BranchSourceRef | null }) => {
+    (opts?: { requestId?: string | null; scopeId?: string | null; branchSource?: BranchSourceRef | null }) => {
       setBranchSource(opts?.branchSource ?? null);
       const next = new URLSearchParams();
       if (workspace) {
@@ -196,9 +234,115 @@ export function BioHarnessWorkspaceProvider({
       if (opts?.requestId) {
         next.set('req', opts.requestId);
       }
-      navigate(`/c/new${next.toString() ? `?${next.toString()}` : ''}`);
+      const sc = opts?.scopeId ?? opts?.branchSource?.scopeId ?? null;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      const qs = next.toString();
+      navigate(`/c/new${qs ? `?${qs}` : ''}`);
     },
     [workspace, navigate],
+  );
+
+  const openWorkflowView = useCallback(
+    (opts?: { requestId?: string | null; conversationId?: string | null; stepId?: string | null; scopeId?: string | null }) => {
+      const next = new URLSearchParams();
+      if (workspace) {
+        next.set('ws', workspace);
+      }
+      const req = opts?.requestId !== undefined ? opts.requestId : selectedRequestId;
+      if (req) {
+        next.set('req', req);
+      }
+      const convo = opts?.conversationId !== undefined ? opts.conversationId : linkedConversationId;
+      if (convo) {
+        next.set('convo', convo);
+      }
+      const sc = opts?.scopeId !== undefined ? opts.scopeId : selectedScopeId;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      if (opts?.stepId) {
+        next.set('step', opts.stepId);
+      }
+      navigate(`/w/workflow?${next.toString()}`);
+    },
+    [workspace, selectedRequestId, linkedConversationId, selectedScopeId, navigate],
+  );
+
+  const openEvidenceView = useCallback(
+    (opts?: { requestId?: string | null; conversationId?: string | null; anchor?: EvidenceAnchor | null; scopeId?: string | null }) => {
+      const next = new URLSearchParams();
+      if (workspace) {
+        next.set('ws', workspace);
+      }
+      const req = opts?.anchor?.request_id ?? (opts?.requestId !== undefined ? opts.requestId : selectedRequestId);
+      if (req) {
+        next.set('req', req);
+      }
+      const convo = opts?.conversationId !== undefined ? opts.conversationId : linkedConversationId;
+      if (convo) {
+        next.set('convo', convo);
+      }
+      const sc = opts?.scopeId !== undefined ? opts.scopeId : selectedScopeId;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      if (opts?.anchor) {
+        next.set('sub', String(opts.anchor.submission_index));
+        next.set('ev', opts.anchor.evidence_id);
+        next.set('sha', opts.anchor.sha256);
+      }
+      navigate(`/w/evidence?${next.toString()}`);
+    },
+    [workspace, selectedRequestId, linkedConversationId, selectedScopeId, navigate],
+  );
+
+  const openExecutionsView = useCallback(
+    (opts?: { requestId?: string | null; conversationId?: string | null; scopeId?: string | null }) => {
+      const next = new URLSearchParams();
+      if (workspace) {
+        next.set('ws', workspace);
+      }
+      const req = opts?.requestId !== undefined ? opts.requestId : selectedRequestId;
+      if (req) {
+        next.set('req', req);
+      }
+      const convo = opts?.conversationId !== undefined ? opts.conversationId : linkedConversationId;
+      if (convo) {
+        next.set('convo', convo);
+      }
+      const sc = opts?.scopeId !== undefined ? opts.scopeId : selectedScopeId;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      navigate(`/w/executions?${next.toString()}`);
+    },
+    [workspace, selectedRequestId, linkedConversationId, selectedScopeId, navigate],
+  );
+
+  const stageTextInConversation = useCallback(
+    ({
+      conversationId,
+      requestId,
+      snippet,
+    }: {
+      conversationId: string | null;
+      requestId: string | null;
+      snippet: string;
+    }) => {
+      const targetKey = conversationId ?? (requestId ? `req:${requestId}` : 'new');
+      const current = getDraft(targetKey);
+      const nextText = current.trim() ? `${current.trimEnd()}
+${snippet}` : snippet;
+      setDraft(targetKey, nextText);
+      if (conversationId) {
+        openConversation(conversationId, { requestId });
+      } else {
+        openNewResearch({ requestId });
+      }
+    },
+    [getDraft, setDraft, openConversation, openNewResearch],
   );
 
   const openModelSettings = useCallback(() => {
@@ -215,11 +359,18 @@ export function BioHarnessWorkspaceProvider({
       workspaces,
       workspace,
       selectedRequestId,
+      selectedScopeId,
+      linkedConversationId,
       branchSource,
       setBranchSource,
       selectWorkspace,
+      selectScope,
       openConversation,
       openNewResearch,
+      openWorkflowView,
+      openEvidenceView,
+      openExecutionsView,
+      stageTextInConversation,
       getDraft,
       setDraft,
       clearDraft,
@@ -233,10 +384,17 @@ export function BioHarnessWorkspaceProvider({
       workspaces,
       workspace,
       selectedRequestId,
+      selectedScopeId,
+      linkedConversationId,
       branchSource,
       selectWorkspace,
+      selectScope,
       openConversation,
       openNewResearch,
+      openWorkflowView,
+      openEvidenceView,
+      openExecutionsView,
+      stageTextInConversation,
       getDraft,
       setDraft,
       clearDraft,

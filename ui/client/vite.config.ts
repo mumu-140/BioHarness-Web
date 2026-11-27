@@ -504,6 +504,22 @@ export default defineConfig(({ command }) => ({
                     return 'export-tools';
                   }
 
+                  if (
+                    normalizedId.includes('/@xyflow/') ||
+                    normalizedId.includes('/@dagrejs/') ||
+                    normalizedId.includes('/d3-') ||
+                    normalizedId.includes('/zustand/') ||
+                    normalizedId.includes('/classcat/')
+                  ) {
+                    return 'scientific-graph';
+                  }
+                  if (
+                    normalizedId.includes('/ag-grid-') ||
+                    normalizedId.includes('/ag-stack/')
+                  ) {
+                    return 'scientific-grid';
+                  }
+
                   // Everything else falls into a generic vendor chunk.
                   return 'vendor';
                 }
@@ -562,6 +578,9 @@ export default defineConfig(({ command }) => ({
     alias: {
       '~': path.join(import.meta.dirname, 'src/'),
       'micromark-extension-math': 'micromark-extension-llm-math',
+      /* @dagrejs/dagre 2.0.0's esm build wraps require("@dagrejs/graphlib") in an esbuild shim
+       * that fails in browser ESM under Vite 8/Rolldown; the CJS build lets Rolldown resolve it statically. */
+      '@dagrejs/dagre': path.resolve(import.meta.dirname, '../node_modules/@dagrejs/dagre/dist/dagre.cjs.js'),
     },
   },
 }));
@@ -735,6 +754,11 @@ export function copyPublicAssets(): Plugin {
       await fs.promises.cp(path.join(publicDir, 'assets'), path.join(outDir, 'assets'), {
         recursive: true,
       });
+      if (fs.existsSync(path.join(publicDir, 'pdfjs'))) {
+        await fs.promises.cp(path.join(publicDir, 'pdfjs'), path.join(outDir, 'pdfjs'), {
+          recursive: true,
+        });
+      }
       await fs.promises.copyFile(
         path.join(publicDir, 'robots.txt'),
         path.join(outDir, 'robots.txt'),

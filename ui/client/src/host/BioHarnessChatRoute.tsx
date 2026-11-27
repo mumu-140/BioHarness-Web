@@ -6,20 +6,17 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRecoilValue } from 'recoil';
-import { Play, SlidersHorizontal } from 'lucide-react';
 import { Constants } from 'librechat-data-provider';
 import type { TConversation, TMessage } from 'librechat-data-provider';
 import { ChatScreen } from '@librechat/chat/components';
 import { ChatContext } from '@librechat/chat/react';
 import type { ChatContract } from '@librechat/chat/react';
-import { Button, useMediaQuery } from '@librechat/client';
 import { AddedChatContext, EditorProvider } from '~/Providers';
 import { MessageSurfaceContext } from '~/components/Chat/Messages/ui/surface';
 import ApprovalProvider from '~/components/Chat/Messages/Content/ApprovalContext';
 import { OwnerTextProvider } from '~/components/Chat/Messages/PrivateText';
 import { preloadMessages, renderMessages } from '~/components/Chat/Messages/load';
 import AppChatSurface from '~/components/Chat/Surface';
-import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import store from '~/store';
 import type {
   ConversationStateResponse,
@@ -46,6 +43,7 @@ import { useBioHarnessConversationEvents, useBioHarnessVersionStream } from './e
 import { useBioHarnessWorkspace } from './workspace';
 import BioHarnessChatBanners from './BioHarnessChatBanners';
 import BioHarnessComposer from './BioHarnessComposer';
+import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 
 const EMPTY_FILES = new Map();
 const noop = () => undefined;
@@ -56,7 +54,6 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   const activeConversationId = isNew ? null : rawParam;
 
   const queryClient = useQueryClient();
-  const isSmallScreen = useMediaQuery('(max-width: 767px)');
   const enterToSend = useRecoilValue(store.enterToSend);
   const maximizeChatSpace = useRecoilValue(store.maximizeChatSpace);
 
@@ -72,7 +69,6 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     getDraft,
     setDraft,
     clearDraft,
-    openModelSettings,
   } = useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
@@ -409,84 +405,19 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
             : 'Enter your scientific question (sent verbatim to Core)…';
 
   const headerSlot = (
-    <header
-      className="border-border-light bg-surface-canvas/95 sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 backdrop-blur-xs"
-      data-testid="bh-chat-header"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        {isSmallScreen && <OpenSidebar testId="header-open-sidebar-button" />}
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-          <span
-            className="bg-surface-hover text-text-primary rounded-md px-2 py-0.5 font-medium"
-            data-testid="bh-header-workspace"
-          >
-            {workspace ?? '—'}
-          </span>
-          <span className="text-text-tertiary">/</span>
-          <span
-            className="text-text-primary truncate font-mono"
-            data-testid="bh-header-request"
-          >
-            {effectiveRequestId ? effectiveRequestId : 'Unbound'}
-          </span>
-          {activeConversationId && (
-            <>
-              <span className="text-text-tertiary">/</span>
-              <span
-                className="text-text-secondary truncate font-mono"
-                data-testid="bh-header-convo"
-              >
-                {activeConversationId.slice(0, 12)}
-              </span>
-            </>
-          )}
-          {activeRunId && (
-            <span
-              className="rounded-md bg-teal-500/15 px-2 py-0.5 font-medium text-teal-700 dark:text-teal-300"
-              data-testid="bh-header-active-run"
-            >
-              {cancelRequested ? 'Cancel requested…' : `Run ${activeRunId.slice(0, 8)}`}
-            </span>
-          )}
-          {activeConversationId && (
-            <span
-              className="text-text-tertiary text-[11px]"
-              data-testid="bh-sse-status"
-            >
-              {log.connected ? 'SSE live' : 'SSE connecting…'}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2">
-        {activeConversationId && boundRequestId && !isDelivered && !activeRunId && runtimeEnabled && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="bh-continue-core-btn"
-            disabled={isActing}
-            onClick={() => void handleContinueFromCore()}
-            className="gap-1.5 text-xs"
-          >
-            <Play className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Continue from Core</span>
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-testid="bh-header-models-btn"
-          onClick={openModelSettings}
-          className="gap-1.5 text-xs"
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="max-w-[140px] truncate">{activeModel || 'Models'}</span>
-        </Button>
-      </div>
-    </header>
+    <BioHarnessRequestHeader
+      activeTab="conversation"
+      requestId={effectiveRequestId}
+      conversationId={activeConversationId}
+      activeRunId={activeRunId}
+      cancelRequested={cancelRequested}
+      sseConnected={log.connected}
+      showContinueFromCore={Boolean(
+        activeConversationId && boundRequestId && !isDelivered && !activeRunId && runtimeEnabled,
+      )}
+      continueDisabled={isActing}
+      onContinueFromCore={() => void handleContinueFromCore()}
+    />
   );
 
   const landingView = (

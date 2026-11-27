@@ -185,13 +185,28 @@ def create_app(
     index_file = (static_root / "index.html") if static_root is not None else None
     get_csp = _make_csp_provider(index_file)
 
+    _PDFJS_CSP = (
+        "default-src 'none'; "
+        "script-src 'self' 'wasm-unsafe-eval'; "
+        "worker-src 'self' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' blob: data:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' blob: data:; "
+        "frame-ancestors 'self'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'none'"
+    )
+
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-        response.headers.setdefault("Content-Security-Policy", get_csp())
+        csp = _PDFJS_CSP if request.url.path.startswith("/pdfjs/") else get_csp()
+        response.headers.setdefault("Content-Security-Policy", csp)
         return response
 
     @app.get("/api/health")
@@ -238,7 +253,7 @@ def create_app(
                 if candidate.is_file():
                     headers = {"Cache-Control": "no-cache"} if candidate == index_file else {}
                     return FileResponse(candidate, headers=headers)
-                if cleaned.startswith("assets/") or Path(cleaned).suffix.lower() in _STATIC_ASSET_EXTENSIONS:
+                if cleaned.startswith(("assets/", "pdfjs/")) or Path(cleaned).suffix.lower() in _STATIC_ASSET_EXTENSIONS:
                     raise HTTPException(404, {"origin": "web", "code": "NOT_FOUND",
                                               "message": "asset not found"})
             if not index_file.is_file():

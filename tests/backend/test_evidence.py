@@ -192,3 +192,99 @@ def test_an_extra_configured_root_is_allowed(workspace_dir, tmp_path):
     result = evidence.preview(workspace, item(path, b'{"a":1}'), 4096)
     assert result["content_available"] is True
     assert result["format"] == "json" and result["content"] == '{\n  "a": 1\n}'
+
+
+def test_open_verified_content_serves_verified_pdf_and_refuses_drift(workspace, workspace_dir):
+    pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+    path = workspace_dir / "report.pdf"
+    path.write_bytes(pdf_bytes)
+    fd, meta = evidence.open_verified_content(workspace, item(path, pdf_bytes))
+    try:
+        assert meta["media_type"] == "application/pdf"
+        assert meta["current_file_identity"] == "MATCHES_RECORD"
+        assert meta["size_bytes"] == len(pdf_bytes)
+        assert os.read(fd, 100) == pdf_bytes
+    finally:
+        os.close(fd)
+
+    # Drift detection: modifying file after recording refuses serving bytes as recorded version.
+    path.write_bytes(pdf_bytes + b"tampered")
+    with pytest.raises(evidence.EvidenceContentError) as exc:
+        evidence.open_verified_content(workspace, item(path, pdf_bytes))
+    assert exc.value.status == 409
+    assert exc.value.code == "EVIDENCE_CONTENT_DRIFT"
+
+
+def test_open_verified_content_refuses_unsupported_and_oversized_and_html_runs_as_text(workspace, workspace_dir, monkeypatch):
+    bam = workspace_dir / "reads.bam"
+    bam.write_bytes(b"\x00\x01\x02")
+    with pytest.raises(evidence.EvidenceContentError) as exc:
+        evidence.open_verified_content(workspace, item(bam, b"\x00\x01\x02"))
+    assert exc.value.status == 415
+    assert exc.value.code == "UNSUPPORTED_MEDIA_FORMAT"
+
+    html = workspace_dir / "plot.html"
+    html_bytes = b"<html><script>alert(1)</script></html>"
+    html.write_bytes(html_bytes)
+    fd, meta = evidence.open_verified_content(workspace, item(html, html_bytes))
+    os.close(fd)
+    assert meta["media_type"] == "text/plain; charset=utf-8"
+
+    big = workspace_dir / "big.pdf"
+    big.write_bytes(b"%PDF-1.4\n" + b"0" * 100)
+    monkeypatch.setattr(evidence, "HASH_LIMIT_BYTES", 32)
+    with pytest.raises(evidence.EvidenceContentError) as exc2:
+        evidence.open_verified_content(workspace, item(big, big.read_bytes()))
+    assert exc2.value.status == 409
+    assert exc2.value.code == "EVIDENCE_EXCEEDS_HASH_BUDGET"
+
+
+def test_parse_byte_range_bounds_and_rejects_malformed():
+    assert evidence.parse_byte_range(None, 100) == (0, 99, False)
+    assert evidence.parse_byte_range("bytes=0-9", 100) == (0, 9, True)
+    assert evidence.parse_byte_range("bytes=90-", 100) == (90, 99, True)
+    assert evidence.parse_byte_range("bytes=-10", 100) == (90, 99, True)
+    assert evidence.parse_byte_range("bytes=0-999", 100, max_chunk=20) == (0, 19, True)
+    for bad in ("bytes=100-110", "bytes=10-5", "bytes=0-1,2-3", "items=0-5", "bytes=-0"):
+        with pytest.raises(evidence.EvidenceContentError) as exc:
+            evidence.parse_byte_range(bad, 100)
+        assert exc.value.status == 416
+
+
+def test_table_page_paginates_honestly_and_never_infers_truncated_totals(workspace, workspace_dir):
+    tsv_text = "gene\tlog2fc\tpadj\nG1\t1.5\t0.001\nG2\t-2.0\t0.01\nG3\t0.4\t0.5\n"
+    data = tsv_text.encode("utf-8")
+    path = workspace_dir / "deg.tsv"
+    path.write_bytes(data)
+
+    page1 = evidence.table_page(workspace, item(path, data), offset=0, limit=2)
+    assert page1["content_available"] is True
+    assert page1["current_file_identity"] == "MATCHES_RECORD"
+    assert [c["name"] for c in page1["columns"]] == ["gene", "log2fc", "padj"]
+    assert page1["returned_rows"] == 2
+    assert page1["has_more"] is True
+    assert page1["total_rows"] == 3
+    assert page1["total_rows_known"] is True
+    assert page1["truncated"] is False
+    assert page1["sort_scope"] == "loaded_rows_only"
+    assert page1["rows"][0]["c0"] == "G1"
+
+    page2 = evidence.table_page(workspace, item(path, data), offset=2, limit=2)
+    assert page2["returned_rows"] == 1
+    assert page2["has_more"] is False
+    assert page2["rows"][0]["c0"] == "G3"
+
+    # Truncated parse cap: total_rows MUST be None and total_rows_known False!
+    trunc = evidence.table_page(workspace, item(path, data), offset=0, limit=2, parse_limit_bytes=35)
+    assert trunc["content_available"] is True
+    assert trunc["truncated"] is True
+    assert trunc["total_rows"] is None
+    assert trunc["total_rows_known"] is False
+    assert trunc["has_more"] is True
+
+    # Drift refuses serving table rows as recorded version
+    path.write_bytes(data + b"G4\t9\t0\n")
+    drifted = evidence.table_page(workspace, item(path, data), offset=0, limit=10)
+    assert drifted["content_available"] is False
+    assert drifted["current_file_identity"] == "DIFFERS_FROM_RECORD"
+    assert drifted["unavailable_reason"] == "CONTENT_DIFFERS_FROM_RECORD"

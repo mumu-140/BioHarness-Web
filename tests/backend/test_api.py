@@ -277,3 +277,105 @@ def test_missing_assets_exact_api_and_symlink_escape_return_404(settings, fake_r
         assert res.status_code == 404
         assert "do-not-leak" not in res.text
         assert "frontend" not in res.text
+
+
+# ---- Step 4: bounded evidence content (PDF/image/range) & structured table APIs ---
+CONTENT = "/api/workspaces/pilot/evidence-content"
+TABLE = "/api/workspaces/pilot/evidence-table"
+
+
+def test_evidence_content_supports_auth_range_head_and_rejects_drift_or_unauth(client, fake_runner, workspace_dir):
+    import hashlib
+    pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+    sha = hashlib.sha256(pdf_bytes).hexdigest()
+    path = workspace_dir / "paper.pdf"
+    path.write_bytes(pdf_bytes)
+    fake_runner.answers["evidence"] = {
+        "ok": True,
+        "evidence": {"id": "e1", "kind": "file", "source": str(path), "sha256": sha, "bytes": len(pdf_bytes)},
+    }
+
+    # Unauthenticated range request must be refused (401)
+    assert client.get(CONTENT, params=anchor(sha), headers={"Range": "bytes=0-7"}).status_code == 401
+
+    # HEAD returns headers without body
+    head = client.head(CONTENT, params=anchor(sha), headers=AUTH)
+    assert head.status_code == 200
+    assert head.headers["accept-ranges"] == "bytes"
+    assert head.headers["content-length"] == str(len(pdf_bytes))
+    assert head.headers["x-evidence-identity"] == "MATCHES_RECORD"
+    assert head.headers["cache-control"] == "no-store"
+    assert head.headers["x-content-type-options"] == "nosniff"
+    assert str(workspace_dir) not in str(head.headers)
+
+    # Bounded partial Range request returns 206 + Content-Range + exact slice
+    r206 = client.get(CONTENT, params=anchor(sha), headers={**AUTH, "Range": "bytes=0-7"})
+    assert r206.status_code == 206
+    assert r206.content == pdf_bytes[:8]
+    assert r206.headers["content-range"] == f"bytes 0-7/{len(pdf_bytes)}"
+    assert r206.headers["content-type"] == "application/pdf"
+
+    # Out-of-bounds range returns 416
+    r416 = client.get(CONTENT, params=anchor(sha), headers={**AUTH, "Range": "bytes=9999-10000"})
+    assert r416.status_code == 416
+    assert r416.headers["content-range"] == f"bytes */{len(pdf_bytes)}"
+
+    # Drifted file returns 409 Conflict instead of presenting mutated bytes as recorded version
+    path.write_bytes(pdf_bytes + b"drifted")
+    r409 = client.get(CONTENT, params=anchor(sha), headers=AUTH)
+    assert r409.status_code == 409
+    assert r409.json()["detail"]["code"] == "EVIDENCE_CONTENT_DRIFT"
+    assert r409.json()["detail"]["current_file_identity"] == "DIFFERS_FROM_RECORD"
+
+
+def test_evidence_table_paginates_and_discloses_bounds_and_rejects_unauth(client, fake_runner, workspace_dir):
+    import hashlib
+    csv_bytes = b"gene,fc,pval\nA1,2.3,0.001\nB2,-1.1,0.04\nC3,0.2,0.8\n"
+    sha = hashlib.sha256(csv_bytes).hexdigest()
+    path = workspace_dir / "results.csv"
+    path.write_bytes(csv_bytes)
+    fake_runner.answers["evidence"] = {
+        "ok": True,
+        "evidence": {"id": "e1", "kind": "file", "source": str(path), "sha256": sha, "bytes": len(csv_bytes)},
+    }
+
+    assert client.get(TABLE, params=anchor(sha)).status_code == 401
+
+    res = client.get(TABLE, params={**anchor(sha), "offset": 0, "limit": 2}, headers=AUTH)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    tbl = body["table"]
+    assert tbl["content_available"] is True
+    assert tbl["current_file_identity"] == "MATCHES_RECORD"
+    assert tbl["total_rows"] == 3
+    assert tbl["total_rows_known"] is True
+    assert tbl["returned_rows"] == 2
+    assert tbl["has_more"] is True
+    assert tbl["sort_scope"] == "loaded_rows_only"
+    assert str(workspace_dir) not in res.text
+
+    res2 = client.get(TABLE, params={**anchor(sha), "offset": 2, "limit": 2}, headers=AUTH)
+    assert res2.json()["table"]["returned_rows"] == 1
+    assert res2.json()["table"]["has_more"] is False
+
+
+def test_pdfjs_assets_use_dedicated_csp_and_missing_pdfjs_asset_returns_404(settings, fake_runner, tmp_path):
+    static = tmp_path / "static"
+    (static / "pdfjs" / "web").mkdir(parents=True)
+    (static / "index.html").write_text("frontend", encoding="utf-8")
+    (static / "pdfjs" / "web" / "viewer.html").write_text("<html>pdfjs</html>", encoding="utf-8")
+    app = TestClient(create_app(settings, sources=Sources(settings, fake_runner), static_dir=static))
+
+    ok = app.get("/pdfjs/web/viewer.html")
+    assert ok.status_code == 200
+    assert "'wasm-unsafe-eval'" in ok.headers["content-security-policy"]
+    assert "connect-src 'self'" in ok.headers["content-security-policy"]
+
+    # Main SPA route MUST NOT get wasm-unsafe-eval
+    spa = app.get("/w/evidence")
+    assert spa.status_code == 200
+    assert "'wasm-unsafe-eval'" not in spa.headers["content-security-policy"]
+
+    # Missing file under /pdfjs/ must return 404, not SPA index.html
+    assert app.get("/pdfjs/web/missing.mjs").status_code == 404

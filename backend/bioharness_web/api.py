@@ -294,6 +294,129 @@ def create_router(
             "preview": {**redact(result), "content": content},
         }
 
+    @router.api_route("/workspaces/{workspace_id}/evidence-content", methods=["GET", "HEAD"])
+    async def evidence_content(
+        request: Request,
+        workspace_id: str,
+        request_id: str,
+        submission_index: int,
+        evidence_id: str,
+        sha256: str,
+    ):
+        try:
+            workspace = sources.workspace(workspace_id)
+            selector = normalize_selector("evidence", dict(
+                request_id=request_id, submission_index=submission_index,
+                evidence_id=evidence_id, sha256=sha256))
+            raw = await sources.raw(workspace, "evidence", selector)
+        except (UnknownWorkspace, SelectorError, ToolError) as error:
+            raise _http_error(error) from None
+        redact = path_redactor(workspace)
+        item = (raw or {}).get("evidence")
+        if not raw or raw.get("ok") is not True or not isinstance(item, dict):
+            raise HTTPException(404, redact(source_error(GOVERNANCE, raw or {})))
+        try:
+            fd, meta = await asyncio.to_thread(evidence.open_verified_content, workspace, item)
+        except evidence.EvidenceContentError as err:
+            raise HTTPException(err.status, {"origin": "web", "code": err.code,
+                                             "message": err.message, **err.extra}) from None
+        size = int(meta["size_bytes"])
+        etag = f'"{meta["sha256"]}"'
+        range_header = request.headers.get("range")
+        if_range = request.headers.get("if-range")
+        if range_header and if_range and if_range.strip() != etag:
+            range_header = None
+        try:
+            start, end, is_partial = evidence.parse_byte_range(range_header, size)
+        except evidence.EvidenceContentError as err:
+            os.close(fd)
+            headers = {"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes", "Cache-Control": "no-store"}
+            raise HTTPException(416, {"origin": "web", "code": err.code, "message": err.message},
+                                headers=headers) from None
+
+        length = (end - start + 1) if size > 0 else 0
+        disposition = "inline" if meta["inline"] else "attachment"
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+            "Content-Length": str(length),
+            "Content-Disposition": f'{disposition}; filename="{meta["safe_name"]}"',
+            "ETag": etag,
+            "X-Evidence-Identity": str(meta["current_file_identity"]),
+            "X-Content-Type-Options": "nosniff",
+        }
+        if is_partial:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        status_code = 206 if is_partial else 200
+
+        if request.method == "HEAD":
+            os.close(fd)
+            return Response(status_code=status_code, media_type=meta["media_type"], headers=headers)
+
+        def _stream_fd():
+            try:
+                if size == 0 or length == 0:
+                    return
+                with os.fdopen(fd, "rb", closefd=True) as handle:
+                    handle.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = handle.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            except Exception:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise
+
+        return StreamingResponse(
+            _stream_fd(),
+            status_code=status_code,
+            media_type=meta["media_type"],
+            headers=headers,
+        )
+
+    @router.get("/workspaces/{workspace_id}/evidence-table")
+    async def evidence_table(
+        workspace_id: str,
+        request_id: str,
+        submission_index: int,
+        evidence_id: str,
+        sha256: str,
+        offset: int = Query(0, ge=0, le=1_000_000),
+        limit: int = Query(100, ge=1, le=500),
+    ):
+        try:
+            workspace = sources.workspace(workspace_id)
+            selector = normalize_selector("evidence", dict(
+                request_id=request_id, submission_index=submission_index,
+                evidence_id=evidence_id, sha256=sha256))
+            raw = await sources.raw(workspace, "evidence", selector)
+        except (UnknownWorkspace, SelectorError, ToolError) as error:
+            raise _http_error(error) from None
+        redact = path_redactor(workspace)
+        item = (raw or {}).get("evidence")
+        if not raw or raw.get("ok") is not True or not isinstance(item, dict):
+            return {"ok": False, "selector": selector,
+                    "error": redact(source_error(GOVERNANCE, raw or {}))}
+        table = await asyncio.to_thread(
+            evidence.table_page, workspace, item, offset=offset, limit=limit)
+        # Keep cell values unmodified; redact only path/metadata fields outside rows.
+        rows = table.pop("rows", [])
+        columns = table.pop("columns", [])
+        return {
+            "ok": True,
+            "selector": selector,
+            "recorded_reference": raw.get("recorded_reference"),
+            "snapshot_integrity": raw.get("snapshot_integrity"),
+            "source_note": raw.get("note"),
+            "table": {**redact(table), "columns": columns, "rows": rows},
+        }
+
     @router.get("/workspaces/{workspace_id}/stream")
     async def stream(
         workspace_id: str,

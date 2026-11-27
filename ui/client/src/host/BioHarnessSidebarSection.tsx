@@ -1,14 +1,20 @@
 /**
- * BioHarness workspace selector, conversations list, and open research requests
- * seated inside LibreChat's adopted UnifiedSidebar (not upstream code).
+ * BioHarness workspace selector, @rc-component/tree Governance research hierarchy,
+ * conversations list, and open requests seated inside LibreChat's adopted UnifiedSidebar
+ * (not upstream LibreChat code).
  */
-import { memo } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import Tree from '@rc-component/tree';
+import type { DataNode, Key } from '@rc-component/tree/lib/interface';
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
   Cpu,
   FolderGit2,
+  FolderTree,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -18,10 +24,17 @@ import { Button, Spinner } from '@librechat/client';
 import useDrawerViewport from '~/hooks/Nav/useDrawerViewport';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import { cn } from '~/utils';
-import type { OpenRequestsData, Snapshot, WorkspaceConversation } from './bioharness';
+import type {
+  OpenRequestsData,
+  Snapshot,
+  TreeData,
+  TreeScopeNode,
+  WorkspaceConversation,
+} from './bioharness';
 import {
   bhKeys,
   extractOpenRequests,
+  extractTreeScopes,
   fetchConversations,
   fetchView,
 } from './bioharness';
@@ -33,6 +46,88 @@ const RUN_BADGE: Record<string, { label: string; cls: string }> = {
   FAILED: { label: 'Failed', cls: 'bg-red-500/15 text-red-700 dark:text-red-300' },
   INTERRUPTED: { label: 'Interrupted', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
 };
+
+export interface ResearchTreeEntry extends DataNode {
+  key: string;
+  nodeKind: 'scope' | 'request';
+  scopeId?: string;
+  requestId?: string;
+  children?: ResearchTreeEntry[];
+}
+
+/** Projects Governance `views/tree` arbitrary-depth scope hierarchy into @rc-component/tree DataNodes. */
+export function buildResearchTreeNodes(scopes: TreeScopeNode[]): {
+  nodes: ResearchTreeEntry[];
+  allScopeKeys: string[];
+} {
+  if (scopes.length === 0) {
+    return { nodes: [], allScopeKeys: [] };
+  }
+  const byId = new Map<string, ResearchTreeEntry>();
+  const allScopeKeys: string[] = [];
+
+  for (const scope of scopes) {
+    const key = `scope:${scope.scope_id}`;
+    allScopeKeys.push(key);
+    const reqChildren: ResearchTreeEntry[] = (scope.requests ?? []).map((req) => ({
+      key: `req:${req.request_id}`,
+      nodeKind: 'request',
+      scopeId: scope.scope_id,
+      requestId: req.request_id,
+      isLeaf: true,
+      title: (
+        <span
+          className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px]"
+          data-testid={`bh-tree-req-${req.request_id}`}
+        >
+          <span className="truncate">{req.request_id}</span>
+          {req.request_status && (
+            <span className="text-text-tertiary shrink-0 font-sans text-[10px]">
+              ({req.request_status})
+            </span>
+          )}
+        </span>
+      ),
+    }));
+    const label = scope.title || scope.name || scope.scope_id;
+    byId.set(scope.scope_id, {
+      key,
+      nodeKind: 'scope',
+      scopeId: scope.scope_id,
+      children: reqChildren,
+      title: (
+        <span
+          className="inline-flex min-w-0 items-center gap-1 text-xs font-medium"
+          data-testid={`bh-tree-scope-${scope.scope_id}`}
+          title={scope.objective || label}
+        >
+          <span className="truncate">{label}</span>
+          {typeof scope.request_count === 'number' && (
+            <span className="text-text-tertiary shrink-0 text-[10px]">({scope.request_count})</span>
+          )}
+        </span>
+      ),
+    });
+  }
+
+  const roots: ResearchTreeEntry[] = [];
+  for (const scope of scopes) {
+    const entry = byId.get(scope.scope_id)!;
+    const parentId = scope.parent_scope_id ?? (
+      Array.isArray(scope.path) && scope.path.length > 1
+        ? scope.path[scope.path.length - 2]
+        : null
+    );
+    if (parentId && parentId !== scope.scope_id && byId.has(parentId)) {
+      const parent = byId.get(parentId)!;
+      parent.children = [...(parent.children ?? []), entry];
+    } else {
+      roots.push(entry);
+    }
+  }
+
+  return { nodes: roots, allScopeKeys };
+}
 
 const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
   const { conversationId: routeConversationId } = useParams();
@@ -46,13 +141,17 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     workspaces,
     workspace,
     selectedRequestId,
+    selectedScopeId,
+    linkedConversationId,
     selectWorkspace,
+    selectScope,
     openConversation,
     openNewResearch,
     openModelSettings,
   } = useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
+  const activeConversationId = routeConversationId ?? linkedConversationId;
 
   const conversationsQuery = useQuery<WorkspaceConversation[]>({
     queryKey: bhKeys.conversations(service ?? 'svc', workspace ?? ''),
@@ -70,12 +169,51 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     refetchOnWindowFocus: false,
   });
 
+  const treeQuery = useQuery<Snapshot<TreeData>>({
+    queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'tree'),
+    queryFn: () => fetchView<TreeData>(workspace!, 'tree'),
+    enabled: Boolean(service && workspace),
+    staleTime: 20_000,
+    refetchOnWindowFocus: false,
+  });
+
   const conversations = conversationsQuery.data ?? [];
   const openRequests = extractOpenRequests(openRequestsQuery.data);
+  const treeScopes = useMemo(() => extractTreeScopes(treeQuery.data), [treeQuery.data]);
+  const { nodes: treeNodes, allScopeKeys } = useMemo(
+    () => buildResearchTreeNodes(treeScopes),
+    [treeScopes],
+  );
+
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  useEffect(() => {
+    setExpandedKeys(allScopeKeys);
+  }, [workspace, allScopeKeys.join('|')]);
+
+  const selectedTreeKeys = useMemo<Key[]>(() => {
+    if (selectedRequestId) {
+      return [`req:${selectedRequestId}`];
+    }
+    if (selectedScopeId) {
+      return [`scope:${selectedScopeId}`];
+    }
+    return [];
+  }, [selectedRequestId, selectedScopeId]);
+
   const closeDrawerIfMobile = () => {
     if (isSmallScreen) {
       setSidebarOpen(false);
     }
+  };
+
+  const handleSelectRequest = (reqId: string, scopeId?: string | null) => {
+    const existing = conversations.find((c) => c.request_id === reqId);
+    if (existing) {
+      openConversation(existing.id, { requestId: reqId, scopeId });
+    } else {
+      openNewResearch({ requestId: reqId, scopeId });
+    }
+    closeDrawerIfMobile();
   };
 
   return (
@@ -163,155 +301,193 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
         <span>New research question</span>
       </Button>
 
-      {/* Scrollable workspace conversations & open Core requests */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-0.5">
-        {/* Conversations */}
-        <section aria-label="Conversations" data-testid="bh-conversations-section">
-          <div className="text-text-tertiary mb-1.5 flex items-center justify-between px-1 text-[11px] font-semibold uppercase tracking-wide">
-            <span>Conversations</span>
-            {runtimeEnabled && (
-              <button
-                type="button"
-                aria-label="Refresh conversations"
-                onClick={() => void conversationsQuery.refetch()}
-                className="hover:text-text-primary rounded p-0.5 transition-colors"
-              >
-                <RefreshCw className="h-3 w-3" aria-hidden="true" />
-              </button>
-            )}
-          </div>
-
-          {!runtimeEnabled ? (
-            <p className="text-text-secondary px-1 text-xs" data-testid="bh-runtime-unavailable">
-              Native runtime is not enabled on this service.
-            </p>
-          ) : conversationsQuery.isLoading ? (
-            <div className="text-text-secondary flex items-center gap-2 px-1 py-2 text-xs">
-              <Spinner className="h-3.5 w-3.5" />
-              <span>Loading conversations…</span>
-            </div>
-          ) : conversationsQuery.isError ? (
-            <div
-              className="border-status-error-border bg-status-error-subtle text-text-secondary rounded-lg border p-2 text-xs"
-              data-testid="convo-list-error"
-              role="alert"
-            >
-              <p>Could not load conversations.</p>
-              <button
-                type="button"
-                onClick={() => void conversationsQuery.refetch()}
-                className="text-text-primary mt-1 underline"
-              >
-                Retry
-              </button>
-            </div>
-          ) : conversations.length === 0 ? (
-            <p className="text-text-secondary px-1 text-xs">No conversations in this workspace yet.</p>
-          ) : (
-            <ul className="space-y-1" data-testid="bh-conversations-list">
-              {conversations.map((item) => {
-                const active = routeConversationId === item.id;
-                const badge = item.last_run_state ? RUN_BADGE[item.last_run_state] : undefined;
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      data-testid={`bh-convo-item-${item.id}`}
-                      aria-current={active ? 'page' : undefined}
-                      onClick={() => {
-                        openConversation(item.id, { requestId: item.request_id });
-                        closeDrawerIfMobile();
-                      }}
-                      className={cn(
-                        'hover:bg-surface-hover flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-start transition-colors',
-                        active && 'bg-surface-active-alt text-text-primary font-medium',
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-xs">
-                          <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-                          <span className="truncate font-mono">
-                            {item.request_id || item.id.slice(0, 12)}
-                          </span>
-                        </span>
-                        {badge && (
-                          <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px]', badge.cls)}>
-                            {badge.label}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-text-tertiary truncate ps-5 text-[11px]">
-                        {item.request_id ? `conv ${item.id.slice(0, 8)}` : 'Unbound conversation'}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        {/* Open Core Requests */}
-        <section aria-label="Open requests" data-testid="bh-open-requests-section">
-          <div className="text-text-tertiary mb-1.5 flex items-center justify-between px-1 text-[11px] font-semibold uppercase tracking-wide">
-            <span>Open Core Requests</span>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">
+        {/* Governance Research Tree (@rc-component/tree 1.5.3) */}
+        <section aria-label="Research tree" data-testid="bh-research-tree-section">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <span className="text-text-tertiary inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
+              <FolderTree className="h-3 w-3" aria-hidden="true" />
+              Research tree
+            </span>
             <button
               type="button"
-              aria-label="Refresh open requests"
-              onClick={() => void openRequestsQuery.refetch()}
-              className="hover:text-text-primary rounded p-0.5 transition-colors"
+              aria-label="Refresh research tree"
+              onClick={() => void treeQuery.refetch()}
+              className="text-text-tertiary hover:text-text-primary rounded p-0.5 transition-colors"
             >
               <RefreshCw className="h-3 w-3" aria-hidden="true" />
             </button>
           </div>
-
-          {openRequestsQuery.isLoading ? (
-            <div className="text-text-secondary flex items-center gap-2 px-1 py-2 text-xs">
-              <Spinner className="h-3.5 w-3.5" />
-              <span>Loading requests…</span>
+          {treeQuery.isLoading ? (
+            <div className="text-text-tertiary px-2 py-1 text-xs">Loading tree…</div>
+          ) : treeQuery.isError ? (
+            <div className="text-text-destructive px-2 py-1 text-xs" role="alert">
+              Research tree unavailable.
             </div>
+          ) : treeNodes.length === 0 ? (
+            <div className="text-text-tertiary px-2 py-1 text-xs">No governance scopes recorded yet.</div>
+          ) : (
+            <div
+              className="bh-rc-tree border-border-light bg-surface-primary/40 rounded-lg border px-1.5 py-1 text-xs"
+              data-testid="bh-research-tree"
+            >
+              <Tree<ResearchTreeEntry>
+                treeData={treeNodes}
+                draggable={false}
+                selectable={true}
+                expandedKeys={expandedKeys}
+                selectedKeys={selectedTreeKeys}
+                onExpand={(keys) => setExpandedKeys(keys)}
+                onSelect={(_keys, info) => {
+                  const node = info.node as unknown as ResearchTreeEntry;
+                  if (node.nodeKind === 'request' && node.requestId) {
+                    handleSelectRequest(node.requestId, node.scopeId ?? null);
+                  } else if (node.nodeKind === 'scope' && node.scopeId) {
+                    selectScope(node.scopeId);
+                  }
+                }}
+                switcherIcon={({ expanded, isLeaf }) => {
+                  if (isLeaf) {
+                    return <span className="inline-block w-3" />;
+                  }
+                  return expanded ? (
+                    <ChevronDown className="text-text-tertiary inline h-3 w-3" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="text-text-tertiary inline h-3 w-3" aria-hidden="true" />
+                  );
+                }}
+                showIcon={false}
+              />
+            </div>
+          )}
+        </section>
+
+        {/* Conversations */}
+        {!runtimeEnabled && (
+          <div
+            data-testid="bh-runtime-unavailable"
+            className="border-border-light bg-surface-primary/50 text-text-secondary rounded-lg border px-2.5 py-2 text-xs"
+          >
+            Native model runtime is disabled (read-only mode).
+          </div>
+        )}
+        {runtimeEnabled && (
+          <section aria-label="Conversations" data-testid="bh-conversations-section">
+            <div className="mb-1 flex items-center justify-between px-1">
+              <span className="text-text-tertiary text-[11px] font-semibold uppercase tracking-wide">
+                Conversations ({conversations.length})
+              </span>
+              <button
+                type="button"
+                aria-label="Refresh conversations"
+                onClick={() => void conversationsQuery.refetch()}
+                className="text-text-tertiary hover:text-text-primary rounded p-0.5 transition-colors"
+              >
+                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+            {conversationsQuery.isLoading ? (
+              <div className="text-text-tertiary px-2 py-1 text-xs">Loading conversations…</div>
+            ) : conversations.length === 0 ? (
+              <div className="text-text-tertiary px-2 py-1 text-xs">No conversations yet.</div>
+            ) : (
+              <ul className="space-y-1" data-testid="bh-conversations-list">
+                {conversations.map((convo) => {
+                  const active = activeConversationId === convo.id;
+                  const badge = convo.last_run_state ? RUN_BADGE[convo.last_run_state] : null;
+                  return (
+                    <li key={convo.id}>
+                      <button
+                        type="button"
+                        data-testid={`bh-convo-item-${convo.id}`}
+                        onClick={() => {
+                          openConversation(convo.id, { requestId: convo.request_id });
+                          closeDrawerIfMobile();
+                        }}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+                          active
+                            ? 'bg-surface-hover text-text-primary font-medium'
+                            : 'text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary',
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="truncate font-mono">
+                            {convo.request_id || convo.id.slice(0, 10)}
+                          </span>
+                        </span>
+                        {badge && (
+                          <span
+                            className={cn(
+                              'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                              badge.cls,
+                            )}
+                          >
+                            {badge.label}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
+
+        {/* Open Core Requests */}
+        <section aria-label="Open requests" data-testid="bh-open-requests-section">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <span className="text-text-tertiary text-[11px] font-semibold uppercase tracking-wide">
+              Open requests ({openRequests.length})
+            </span>
+            <button
+              type="button"
+              aria-label="Refresh open requests"
+              onClick={() => void openRequestsQuery.refetch()}
+              className="text-text-tertiary hover:text-text-primary rounded p-0.5 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
+          {openRequestsQuery.isLoading ? (
+            <div className="text-text-tertiary px-2 py-1 text-xs">Loading open requests…</div>
           ) : openRequestsQuery.isError ? (
-            <p className="text-text-secondary px-1 text-xs">Could not load open requests.</p>
-          ) : openRequestsQuery.data && !openRequestsQuery.data.ok ? (
-            <p className="text-text-secondary px-1 text-xs">
-              {openRequestsQuery.data.error?.message || 'Core open-requests view unavailable.'}
-            </p>
+            <div className="text-text-destructive px-2 py-1 text-xs" role="alert">
+              Open requests unavailable.
+            </div>
           ) : openRequests.length === 0 ? (
-            <p className="text-text-secondary px-1 text-xs">No open Core requests.</p>
+            <div className="text-text-tertiary px-2 py-1 text-xs" data-testid="bh-open-requests-list">No open requests in workspace.</div>
           ) : (
             <ul className="space-y-1" data-testid="bh-open-requests-list">
               {openRequests.map((req) => {
-                const bound = conversations.find((c) => c.request_id === req.request_id);
-                const selected = selectedRequestId === req.request_id && routeConversationId === 'new';
+                const selected = selectedRequestId === req.request_id;
+                const boundConvo = conversations.find((c) => c.request_id === req.request_id);
                 return (
                   <li key={req.request_id}>
                     <button
                       type="button"
                       data-testid={`bh-open-req-${req.request_id}`}
-                      onClick={() => {
-                        if (bound) {
-                          openConversation(bound.id, { requestId: req.request_id });
-                        } else {
-                          openNewResearch({ requestId: req.request_id });
-                        }
-                        closeDrawerIfMobile();
-                      }}
+                      onClick={() => handleSelectRequest(req.request_id, req.scope_id ?? null)}
                       className={cn(
-                        'hover:bg-surface-hover flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-start transition-colors',
-                        selected && 'bg-surface-active-alt font-medium',
+                        'flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+                        selected
+                          ? 'bg-surface-hover text-text-primary'
+                          : 'text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary',
                       )}
                     >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-xs">
-                          <FolderGit2 className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-                          <span className="truncate font-mono">{req.request_id}</span>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="inline-flex min-w-0 items-center gap-1 font-mono font-medium">
+                          <FolderGit2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{req.request_id}</span>
                         </span>
-                        <span className="text-text-tertiary shrink-0 text-[10px]">
-                          {bound ? 'Bound' : 'No chat'}
-                        </span>
+                        {!boundConvo && (
+                          <span className="text-text-tertiary shrink-0 text-[10px]">unbound</span>
+                        )}
                       </div>
                       {(req.question || req.original_task_text) && (
-                        <span className="text-text-secondary line-clamp-2 ps-5 text-[11px]">
+                        <span className="text-text-tertiary line-clamp-2 text-[11px]">
                           {req.question || req.original_task_text}
                         </span>
                       )}
