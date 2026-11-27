@@ -1,0 +1,142 @@
+{
+  "name": "LibreChat",
+  "version": "v0.8.9",
+  "description": "",
+  "packageManager": "npm@11.13.0",
+  "scarfSettings": {
+    "enabled": false
+  },
+  "workspaces": [
+    "client",
+    "packages/client",
+    "packages/chat",
+    "packages/data-provider"
+  ],
+  "scripts": {
+    "build:data-provider": "cd packages/data-provider && npm run build",
+    "build:client-package": "cd packages/client && npm run build",
+    "build:chat": "cd packages/chat && npm run build",
+    "build:client": "cd client && npm run build",
+    "build": "npm run build:data-provider && npm run build:client-package && npm run build:chat && npm run build:client",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LibreChat-AI/LibreChat.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LibreChat-AI/LibreChat/issues"
+  },
+  "homepage": "https://librechat.ai/",
+  "devDependencies": {
+    "@types/react-virtualized": "^9.22.0",
+    "brace-expansion": "^2.1.2",
+    "caniuse-lite": "^1.0.30001741",
+    "cross-env": "^7.0.3",
+    "elliptic": "^6.6.1",
+    "jest": "^30.2.0"
+  },
+  "overrides": {
+    "minimatch@3": {
+      "brace-expansion": "^1.1.16"
+    },
+    "minimatch@5": {
+      "brace-expansion": "^2.1.2"
+    },
+    "minimatch@9": {
+      "brace-expansion": "^2.1.2"
+    },
+    "minimatch@10": {
+      "brace-expansion": "^5.0.8"
+    },
+    "@xmldom/xmldom": "^0.8.15",
+    "@humanfs/node": "^0.16.8",
+    "qs": "^6.16.1",
+    "@azure/msal-node": "^7.1.1",
+    "baseline-browser-mapping": "^2.11.0",
+    "browserslist": "^4.28.7",
+    "elliptic": "^6.6.1",
+    "fast-uri": "^3.1.9",
+    "fflate": "^0.8.3",
+    "form-data": "^4.0.6",
+    "ip-address": "^10.7.4",
+    "langsmith": "^0.6.0",
+    "postcss": "^8.5.18",
+    "postcss-selector-parser@6": "^6.1.3",
+    "postcss-selector-parser@7": "^7.1.3",
+    "tslib": "^2.8.1",
+    "fast-xml-parser": "5.12.1",
+    "serialize-javascript": "7.1.4",
+    "mdast-util-gfm-autolink-literal": "2.0.0",
+    "remark-gfm": {
+      "mdast-util-gfm-autolink-literal": "2.0.0"
+    },
+    "mdast-util-gfm": {
+      "mdast-util-gfm-autolink-literal": "2.0.0"
+    },
+    "katex": "^0.18.2",
+    "rehype-katex": {
+      "katex": "^0.18.2"
+    },
+    "remark-math": {
+      "micromark-extension-math": {
+        "katex": "^0.18.2"
+      }
+    },
+    "eslint": {
+      "ajv": "6.14.0"
+    },
+    "underscore": "1.13.8",
+    "hono": "^4.13.18",
+    "@hono/node-server": "^2.1.8",
+    "monaco-editor": {
+      "dompurify": "3.4.17"
+    },
+    "test-exclude": {
+      ".": "^8.0.0",
+      "glob": "^14.0.3",
+      "minimatch": "^11.0.3"
+    },
+    "@jest/reporters@30": {
+      "glob": "^14.0.3"
+    },
+    "jest-config@30": {
+      "glob": "^14.0.3"
+    },
+    "jest-runtime@30": {
+      "glob": "^14.0.3"
+    },
+    "rimraf": {
+      "glob": "^14.0.4"
+    },
+    "workbox-build": {
+      "glob": "^14.0.4"
+    },
+    "eslint-plugin-sonarjs": {
+      "minimatch": "^11.0.5"
+    },
+    "@typescript-eslint/typescript-estree@8": {
+      "minimatch": "^11.0.3"
+    },
+    "nodemon": {
+      "minimatch": "^11.0.5"
+    },
+    "@stryker-mutator/core": {
+      "minimatch": "^11.0.5"
+    },
+    "typed-rest-client": {
+      "qs": "^6.16.1"
+    },
+    "js-yaml": "^4.3.2",
+    "ws": "^8.21.0",
+    "@opentelemetry/core": "^2.9.0",
+    "@opentelemetry/propagator-jaeger": "^2.10.0",
+    "protobufjs": "^7.6.5",
+    "@grpc/grpc-js": "^1.14.5",
+    "gaxios": {
+      "uuid": "^11.1.1"
+    }
+  }
+}

@@ -94,7 +94,9 @@ Use remote Linux service, authenticated browser and future thin Desktop client, 
 
 ## C. Open-source reuse and legacy disposition
 
-Use packages and small MIT/Apache components with attribution and exact version locks; no whole-app fork. The source mirror contains the following pinned upstream snapshots, inspected without running upstream services. License labels reflect inspected root license; verify the license/NOTICE of reused files and transitive dependencies before redistribution.
+**Historical W0 decision, superseded for UI on 2026-11-27:** W0 selected small components and excluded whole-app forks. The owner subsequently required retiring the custom UI and adapting an existing application with `dsh-context`'s layout. The table and V1 disposition below record the original audit, not permission to continue that frontend direction. Current design and source pins are in [the sole roadmap, §17.4](../plans/2026-11-25-research-workspace-v2.md#174-upstream-based-ui-replacement-design-2026-11-27). Backend/public-contract boundaries remain in force.
+
+The source mirror contains the following pinned upstream snapshots, inspected without running upstream services. License labels reflect inspected root license; verify the license/NOTICE of reused files and transitive dependencies before redistribution.
 
 | Reference, source commit | Adopt / adapt | Explicitly avoid |
 |---|---|---|

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>BioHarness · 分视图设计稿</title>
+<style>
+:root {
+  --paper: #f6f7f5;
+  --surface: #ffffff;
+  --ink: #202826;
+  --muted: #56635d;
+  --rule: #dce2dd;
+  --accent: #18655e;
+  --tint: #edf5f1;
+  --warning: #825623;
+  --warning-tint: #faf3e8;
+  --font: Inter, "Noto Sans CJK SC", "Microsoft YaHei", "Arial Unicode MS", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font); }
+a { color: var(--accent); text-underline-offset: 3px; }
+.review { max-width: 1360px; margin: auto; padding: 32px; }
+.eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .12em; }
+h1 { margin: 0 0 8px; font-size: clamp(24px, 3vw, 34px); font-weight: 600; letter-spacing: -.02em; }
+.lead { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.8; }
+.scope { display: inline-block; margin: 16px 0 24px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; font-size: 12px; }
+.selector { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.board-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 24px; padding-bottom: 8px; }
+.board-tabs label { padding: 10px 16px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; font-size: 14px; }
+.board-tabs label:hover { background: var(--surface); }
+#structure:checked ~ .board-tabs label[for="structure"],
+#conversation:checked ~ .board-tabs label[for="conversation"],
+#plan:checked ~ .board-tabs label[for="plan"],
+#step:checked ~ .board-tabs label[for="step"],
+#execution:checked ~ .board-tabs label[for="execution"],
+#evidence:checked ~ .board-tabs label[for="evidence"],
+#narrow:checked ~ .board-tabs label[for="narrow"] { color: var(--accent); background: var(--tint); border-color: var(--accent); }
+#structure:focus-visible ~ .board-tabs label[for="structure"],
+#conversation:focus-visible ~ .board-tabs label[for="conversation"],
+#plan:focus-visible ~ .board-tabs label[for="plan"],
+#step:focus-visible ~ .board-tabs label[for="step"],
+#execution:focus-visible ~ .board-tabs label[for="execution"],
+#evidence:focus-visible ~ .board-tabs label[for="evidence"],
+#narrow:focus-visible ~ .board-tabs label[for="narrow"] { outline: 3px solid var(--accent); outline-offset: 3px; }
+.board { display: none; }
+#structure:checked ~ .boards #board-structure,
+#conversation:checked ~ .boards #board-conversation,
+#plan:checked ~ .boards #board-plan,
+#step:checked ~ .boards #board-step,
+#execution:checked ~ .boards #board-execution,
+#evidence:checked ~ .boards #board-evidence,
+#narrow:checked ~ .boards #board-narrow { display: block; }
+.board-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.board-head p { margin: 0; color: var(--muted); font-size: 13px; }
+.canvas { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+.canvas svg { display: block; width: 100%; height: auto; min-width: 960px; }
+.canvas.mobile { background: var(--paper); }
+.canvas.mobile svg { width: 390px; min-width: 0; max-width: 100%; margin: auto; }
+svg { font-family: var(--font); }
+svg text { fill: var(--ink); font-size: 16px; }
+svg .small { font-size: 13px; fill: var(--muted); }
+svg .tiny { font-size: 12px; fill: var(--muted); }
+svg .heading { font-size: 26px; font-weight: 600; }
+svg .subheading { font-size: 19px; font-weight: 600; }
+svg .label { font-size: 14px; }
+svg .brand { font-size: 21px; font-weight: 650; }
+svg .muted { fill: var(--muted); }
+svg .accent { fill: var(--accent); }
+svg .white { fill: var(--surface); }
+svg .surface { fill: var(--surface); }
+svg .paper { fill: var(--paper); }
+svg .tint { fill: var(--tint); }
+svg .rule { stroke: var(--rule); stroke-width: 1; fill: none; }
+svg .box { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+svg .selected { fill: var(--tint); stroke: var(--accent); stroke-width: 1.5; }
+svg .connector { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+svg .warn { fill: var(--warning); }
+svg .warn-bg { fill: var(--warning-tint); }
+figcaption { color: var(--muted); font-size: 13px; line-height: 1.8; margin-top: 12px; }
+figure { margin: 0; }
+.notes { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 32px; margin-top: 24px; }
+.notes section { border-top: 1px solid var(--rule); padding-top: 12px; }
+h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.notes p, .notes li { font-size: 14px; line-height: 1.85; }
+.notes p { margin: 0; }
+.notes ul { padding-left: 20px; margin: 0; }
+footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 12px; line-height: 1.9; color: var(--muted); }
+@media (max-width: 640px) {
+  .review { padding: 20px 16px; }
+  .board-tabs label { padding: 9px 12px; }
+  .notes { grid-template-columns: 1fr; gap: 16px; }
+}
+</style>
+</head>
+<body>
+<main class="review">
+<header>
+  <p class="eyebrow">BIOHARNESS / DESIGN REVIEW / 2026-11-27</p>
+  <h1>一个页面，一件主要的事。</h1>
+  <p class="lead">沿用 dsh-context 的视图分离与选择联动，去掉仪表盘堆叠。对话、计划、证据分开；细节逐层进入。</p>
+  <p class="scope">设计定稿 · 2026-11-27 · 非应用实现 · 下方按钮仅切换画板 · 画板内不执行操作</p>
+</header>
+<input class="selector" type="radio" name="board" id="structure" aria-label="查看信息层级画板" checked>
+<input class="selector" type="radio" name="board" id="conversation" aria-label="查看对话画板">
+<input class="selector" type="radio" name="board" id="plan" aria-label="查看计划画板">
+<input class="selector" type="radio" name="board" id="step" aria-label="查看步骤详情画板">
+<input class="selector" type="radio" name="board" id="execution" aria-label="查看执行记录画板">
+<input class="selector" type="radio" name="board" id="evidence" aria-label="查看证据画板">
+<input class="selector" type="radio" name="board" id="narrow" aria-label="查看窄屏和异常状态画板">
+<nav class="board-tabs" aria-label="设计画板，不是产品导航">
+  <label for="structure">01 信息层级</label><label for="conversation">02 对话</label><label for="plan">03 计划</label><label for="step">04 步骤</label><label for="execution">05 执行</label><label for="evidence">06 证据</label><label for="narrow">07 窄屏</label>
+</nav>
+<div class="boards">
+<section class="board" id="board-structure" aria-label="信息层级">
+  <div class="board-head"><h2>三种主要工作，三个独立页面</h2><p>类型：层级图 · 7 个节点 · 无常驻检查器</p></div>
+  <figure>
+  <div class="canvas">
+  <svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ia-title ia-desc">
+    <title id="ia-title">研究请求的页面层级</title>
+    <desc id="ia-desc">同一研究请求下有对话、研究流程和证据三个主要页面，执行记录为辅助页面；步骤与证据详情逐层进入，不并列堆放。</desc>
+    <rect width="1280" height="640" class="surface"/>
+    <path d="M640 128V168M192 168H1056M192 168V228M480 168V228M768 168V228M1056 168V228M480 324V420M768 324V420" class="connector"/>
+    <rect x="504" y="56" width="272" height="72" rx="6" class="selected"/>
+    <text x="640" y="87" text-anchor="middle" class="subheading accent">同一个研究请求</text>
+    <text x="640" y="110" text-anchor="middle" class="small">身份不变，切换工作视角</text>
+    <rect x="72" y="228" width="240" height="96" rx="6" class="box"/>
+    <text x="96" y="258" class="tiny">主要页面 01</text><text x="96" y="286" class="subheading">对话</text><text x="96" y="309" class="small">提问、回应、明确提交</text>
+    <rect x="360" y="228" width="240" height="96" rx="6" class="box"/>
+    <text x="384" y="258" class="tiny">主要页面 02</text><text x="384" y="286" class="subheading">研究流程</text><text x="384" y="309" class="small">查看计划与真实依赖</text>
+    <rect x="648" y="228" width="240" height="96" rx="6" class="box"/>
+    <text x="672" y="258" class="tiny">主要页面 03</text><text x="672" y="286" class="subheading">证据</text><text x="672" y="309" class="small">找到结果并追溯来源</text>
+    <rect x="936" y="228" width="240" height="96" rx="6" class="box" stroke-dasharray="5 4"/>
+    <text x="960" y="258" class="tiny">辅助页面 · 非主标签</text><text x="960" y="286" class="subheading">执行记录</text><text x="960" y="309" class="small">需要检查运行时再进入</text>
+    <rect x="360" y="420" width="240" height="80" rx="6" class="box"/>
+    <text x="384" y="454">步骤详情</text><text x="384" y="482" class="small">替换画布，不新增侧栏</text>
+    <rect x="648" y="420" width="240" height="80" rx="6" class="box"/>
+    <text x="672" y="454">证据详情</text><text x="672" y="482" class="small">替换列表，保留返回位置</text>
+    <path d="M72 552H1176" class="rule"/>
+    <text x="72" y="584" class="small">连线表示页面归属，不表示科学依赖。三个主页面都保留同一服务、工作区和请求身份。</text>
+    <text x="72" y="610" class="small">跨页联动采用明确导航；不会自动发送消息、确认事项、执行步骤或重试调用。</text>
+  </svg>
+  </div>
+  <figcaption>相较上一版，删除默认的步骤侧栏、证据卡片列和底部执行面板。不是折叠后仍占位，而是不进入当前页面。</figcaption>
+  </figure>
+  <div class="notes"><section><h3>渐进展开，而非仪表盘</h3><p>第一层只回答“现在看什么”。第二层回答“这一项具体是什么”。第三层才出现参数、标识和原始记录。每次最多呈现一个主要内容区。</p></section><section><h3>保留上游，不叠加两套外观</h3><p>整站底座锁定 LibreChat；dsh-context 提供视图组织和页面内选择方式。保持已定稿布局，只使用一套导航、字体、颜色与组件尺寸，不把两个产品的页面原样拼在一起。</p></section></div>
+</section>
+<section class="board" id="board-conversation" aria-label="对话页面">
+  <div class="board-head"><h2>对话只承担交流与回应</h2><p>默认无图、无证据栏、无运行统计</p></div>
+  <figure><div class="canvas">
+  <svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chat-title chat-desc">
+    <title id="chat-title">独立对话页面静态线框</title>
+    <desc id="chat-desc">侧栏保留研究导航，中间只有消息与输入框，需要回应的事项直接在对话中呈现，不同时显示流程和日志。</desc>
+    <rect width="1280" height="800" class="surface"/>
+    <rect width="224" height="800" class="paper"/><path d="M224 0V800" class="rule"/>
+    <text x="24" y="44" class="brand">BioHarness</text><text x="24" y="80" class="small">研究工作区</text>
+    <rect x="16" y="112" width="192" height="40" rx="6" class="box"/><text x="36" y="138" class="label">＋ 新研究</text>
+    <text x="24" y="198" class="tiny">项目</text><text x="24" y="236" class="label">基因表达研究</text><text x="40" y="274" class="small">处理条件比较</text>
+    <rect x="16" y="292" width="192" height="44" rx="6" class="tint"/><text x="48" y="319" class="label accent">比较表达差异</text>
+    <text x="40" y="366" class="small">历史请求</text><text x="24" y="426" class="small">未归属请求</text>
+    <path d="M24 720H200" class="rule"/><text x="24" y="756" class="small">资源与设置</text>
+    <text x="272" y="38" class="small">基因表达研究 / 处理条件比较</text><text x="272" y="80" class="heading">比较处理条件下的表达差异</text>
+    <text x="1120" y="38" class="small">已连接</text><text x="1120" y="80" class="label muted">执行记录</text>
+    <text x="272" y="130" class="accent">对话</text><text x="352" y="130" class="muted">研究流程</text><text x="472" y="130" class="muted">证据</text>
+    <path d="M272 148H1232" class="rule"/><path d="M272 148H312" stroke="var(--accent)" stroke-width="2"/>
+    <text x="352" y="214" class="small">你</text><text x="352" y="246">请比较两种处理条件的差异，并保留无法判断的情况。</text>
+    <path d="M352 282H1136" class="rule"/>
+    <text x="352" y="322" class="small">BioHarness</text><text x="352" y="358">研究问题已记录。开始前，需要确认对照组与样本范围。</text>
+    <rect x="352" y="396" width="784" height="132" rx="6" class="selected"/>
+    <text x="376" y="430" class="label accent">需要你回应</text><text x="376" y="464">哪一组作为对照？是否排除任何样本？</text><text x="376" y="500" class="small">请在下方回答。只有明确提交才会发送给研究运行时。</text>
+    <text x="352" y="570" class="small">当前计划可在“研究流程”查看；此处不常驻显示流程摘要。</text>
+    <rect x="352" y="632" width="784" height="112" rx="8" class="box"/>
+    <text x="376" y="668" class="muted">输入回答或补充要求…</text>
+    <text x="376" y="718" class="small">草稿仅保留，不自动发送</text>
+    <rect x="1032" y="692" width="80" height="32" rx="4" fill="var(--accent)"/><text x="1072" y="714" text-anchor="middle" class="label white">发送</text>
+    <text x="352" y="778" class="tiny">示例内容，仅用于构图；不代表实际请求、确认项或科学结论。</text>
+  </svg></div><figcaption>一条消息列，一个输入区。需要回应的事项是当前对话的一部分，不另设抢眼的全局任务仪表盘。</figcaption></figure>
+  <div class="notes"><section><h3>首屏强调预算</h3><p>一个主要操作：发送。一个待回应事项。工具调用默认压缩为消息中的简洁记录；多项待回应事项逐项浏览，不在上方铺满卡片。</p></section><section><h3>切换不会改变研究身份</h3><p>查看计划、证据后返回同一对话与草稿。没有明确会话绑定时提供说明，不猜测应当显示哪个请求的消息。</p></section></div>
+</section>
+<section class="board" id="board-plan" aria-label="科学计划页面">
+  <div class="board-head"><h2>把空间还给科学计划</h2><p>主对象：当前计划 · 唯一强调：Core 当前步骤</p></div>
+  <figure><div class="canvas">
+  <svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="plan-title plan-desc">
+    <title id="plan-title">没有常驻详情面板的研究流程</title>
+    <desc id="plan-desc">计划占据整个内容区，示例包含一个分支和一个双前驱汇合；步骤详情通过进入子页面查看，执行记录不显示在画布下方。</desc>
+    <defs><marker id="plan-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1L7 4L1 7" fill="none" stroke="var(--muted)"/></marker></defs>
+    <rect width="1280" height="800" class="surface"/><rect width="224" height="800" class="paper"/><path d="M224 0V800" class="rule"/>
+    <text x="24" y="44" class="brand">BioHarness</text><text x="24" y="80" class="small">研究工作区</text><rect x="16" y="112" width="192" height="40" rx="6" class="box"/><text x="36" y="138" class="label">＋ 新研究</text>
+    <text x="24" y="198" class="tiny">项目</text><text x="24" y="236" class="label">基因表达研究</text><text x="40" y="274" class="small">处理条件比较</text><rect x="16" y="292" width="192" height="44" rx="6" class="tint"/><text x="48" y="319" class="label accent">比较表达差异</text><text x="40" y="366" class="small">历史请求</text><text x="24" y="426" class="small">未归属请求</text><path d="M24 720H200" class="rule"/><text x="24" y="756" class="small">资源与设置</text>
+    <text x="272" y="38" class="small">基因表达研究 / 处理条件比较</text><text x="272" y="80" class="heading">比较处理条件下的表达差异</text><text x="1120" y="38" class="small">已连接</text><text x="1120" y="80" class="label muted">执行记录</text>
+    <text x="272" y="130" class="muted">对话</text><text x="352" y="130" class="accent">研究流程</text><text x="472" y="130" class="muted">证据</text><path d="M272 148H1232" class="rule"/><path d="M352 148H424" stroke="var(--accent)" stroke-width="2"/>
+    <text x="272" y="194" class="small">当前计划 · 状态由 Core 返回</text><text x="1016" y="194" class="small">图视图 / 列表</text><text x="1176" y="194" class="small">适应</text>
+    <path d="M496 364H532Q540 364 540 356V296Q540 288 548 288H576" class="connector" marker-end="url(#plan-arrow)"/>
+    <path d="M496 396H520Q528 396 528 404V472Q528 480 536 480H576" class="connector" marker-end="url(#plan-arrow)"/>
+    <path d="M800 288H832Q840 288 840 296V356Q840 364 848 364H880" class="connector" marker-end="url(#plan-arrow)"/>
+    <path d="M800 480H844Q852 480 852 472V404Q852 396 860 396H880" class="connector" marker-end="url(#plan-arrow)"/>
+    <rect x="288" y="332" width="208" height="104" rx="6" class="selected"/><text x="308" y="360" class="tiny accent">01 · 当前步骤</text><text x="308" y="390">确认比较范围</text><text x="308" y="418" class="small">等待用户回应</text>
+    <rect x="576" y="236" width="224" height="104" rx="6" class="box"/><text x="596" y="264" class="tiny">02</text><text x="596" y="294">检查输入质量</text><text x="596" y="322" class="small">尚无工作记录</text>
+    <rect x="576" y="428" width="224" height="104" rx="6" class="box"/><text x="596" y="456" class="tiny">03</text><text x="596" y="486">整理设计矩阵</text><text x="596" y="514" class="small">尚无工作记录</text>
+    <rect x="880" y="332" width="240" height="104" rx="6" class="box"/><text x="900" y="360" class="tiny">04 · 两个前驱</text><text x="900" y="390">执行差异分析</text><text x="900" y="418" class="small">尚无工作记录</text>
+    <text x="272" y="640" class="small">选择步骤进入详情；返回后恢复画布位置与缩放。</text>
+    <path d="M272 704H1232" class="rule"/>
+    <text x="272" y="736" class="small">连线仅表示 Core 明确记录的计划依赖，不表示调用归属或科学验证。</text><text x="272" y="772" class="tiny">示例计划，不是固定分析模板。实际步骤、状态与关系由公开记录决定。</text>
+  </svg></div><figcaption>默认不显示指标条、步骤右栏、底部日志或证据卡片。图不是信息容器总汇，只表达步骤与依赖。</figcaption></figure>
+  <div class="notes"><section><h3>保留 dsh-context 的组织方式，不照搬密度</h3><p>沿用独立视图、聚焦选择、简洁节点和清晰关系。移除多卡片总览；节点只放标题、记录状态和必要摘要。长标题允许换行，不裁掉科学含义。</p></section><section><h3>大计划与未知状态</h3><p>用定位搜索、局部聚焦与列表处理大计划，不缩小所有文字。没有计划则说明尚未获得计划；版本未知时照实显示，不假设操作已绑定到某个步骤。</p></section></div>
+</section>
+<section class="board" id="board-step" aria-label="步骤详情页面">
+  <div class="board-head"><h2>步骤详情是下一层，不是新增一列</h2><p>返回计划恢复位置 · 不堆叠抽屉</p></div>
+  <figure><div class="canvas">
+  <svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="step-title step-desc">
+    <title id="step-title">步骤详情独立子页面</title>
+    <desc id="step-desc">选择计划步骤后，内容区切换为可阅读的步骤说明。默认仅显示目标方法，输入输出和记录证据通过局部标签切换，技术记录折叠。</desc>
+    <rect width="1280" height="800" class="surface"/><rect width="224" height="800" class="paper"/><path d="M224 0V800" class="rule"/>
+    <text x="24" y="44" class="brand">BioHarness</text><text x="24" y="80" class="small">研究工作区</text><text x="24" y="198" class="tiny">项目</text><text x="24" y="236" class="label">基因表达研究</text><text x="40" y="274" class="small">处理条件比较</text><rect x="16" y="292" width="192" height="44" rx="6" class="tint"/><text x="48" y="319" class="label accent">比较表达差异</text><path d="M24 720H200" class="rule"/><text x="24" y="756" class="small">资源与设置</text>
+    <text x="272" y="38" class="small">基因表达研究 / 处理条件比较</text><text x="272" y="80" class="heading">比较处理条件下的表达差异</text><text x="1120" y="80" class="label muted">执行记录</text>
+    <text x="272" y="130" class="muted">对话</text><text x="352" y="130" class="accent">研究流程</text><text x="472" y="130" class="muted">证据</text><path d="M272 148H1232" class="rule"/><path d="M352 148H424" stroke="var(--accent)" stroke-width="2"/>
+    <text x="320" y="198" class="label accent">← 返回计划</text><text x="320" y="242" class="small">步骤 01 · 等待用户回应</text><text x="320" y="284" class="heading">确认比较范围</text>
+    <rect x="1024" y="248" width="160" height="40" rx="4" class="selected"/><text x="1104" y="274" text-anchor="middle" class="label accent">在对话中讨论</text>
+    <text x="320" y="338" class="accent">目标与方法</text><text x="472" y="338" class="muted">输入与输出</text><text x="624" y="338" class="muted">记录与证据</text><path d="M320 356H1184" class="rule"/><path d="M320 356H408" stroke="var(--accent)" stroke-width="2"/>
+    <text x="320" y="410" class="small">这一步要解决什么</text><text x="320" y="450">明确比较对象、对照组及纳入范围，保留用户原始约束。</text>
+    <text x="320" y="514" class="small">计划中记录的方法</text><text x="320" y="554">核对用户提供的样本说明，并提出需要明确回答的问题。</text>
+    <text x="320" y="618" class="small">尚未获得的信息</text><text x="320" y="658">对照组名称、需要排除的样本。</text>
+    <path d="M320 712H1184" class="rule"/><text x="320" y="746" class="small">› 技术详情：来源、标识、计划版本</text><text x="320" y="780" class="tiny">示例文案；实际只呈现 Core 已记录内容。不显示“执行此步骤”按钮。</text>
+  </svg></div><figcaption>同一时刻只阅读一个维度。参数与原始 JSON 不与方法正文争夺注意力，失败或未知状态的相关说明除外。</figcaption></figure>
+  <div class="notes"><section><h3>“讨论”不是“执行”</h3><p>点击后进入已绑定的对话，并生成可编辑的步骤引用草稿。不会自动发送、改变下一步，也不会把未来调用默认为属于这一选择。</p></section><section><h3>信息多，但层级少</h3><p>目标与方法、输入与输出、记录与证据按需切换，不把所有字段铺成卡片墙。历史记录与当前计划分开标记；没有可信关联的调用不放入此处。</p></section></div>
+</section>
+<section class="board" id="board-execution" aria-label="执行记录辅助页面">
+  <div class="board-head"><h2>检查运行时，再打开执行记录</h2><p>请求级辅助页面 · 不伪造步骤泳道</p></div>
+  <figure><div class="canvas">
+  <svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="exec-title exec-desc">
+    <title id="exec-title">按需进入的请求级执行记录</title>
+    <desc id="exec-desc">执行记录独占内容区，显示观察到的事件和未知结果。没有可信步骤关联时不画步骤泳道，也不因退出页面而停止任务。</desc>
+    <rect width="1280" height="800" class="surface"/><rect width="224" height="800" class="paper"/><path d="M224 0V800" class="rule"/>
+    <text x="24" y="44" class="brand">BioHarness</text><text x="24" y="80" class="small">研究工作区</text><text x="24" y="236" class="label">基因表达研究</text><rect x="16" y="292" width="192" height="44" rx="6" class="tint"/><text x="48" y="319" class="label accent">比较表达差异</text><path d="M24 720H200" class="rule"/><text x="24" y="756" class="small">资源与设置</text>
+    <text x="272" y="38" class="small">基因表达研究 / 处理条件比较</text><text x="272" y="80" class="heading">比较处理条件下的表达差异</text><text x="1120" y="80" class="label accent">执行记录</text><text x="272" y="130" class="muted">对话</text><text x="352" y="130" class="muted">研究流程</text><text x="472" y="130" class="muted">证据</text><path d="M272 148H1232" class="rule"/>
+    <text x="304" y="198" class="label accent">← 返回来源页面</text><text x="304" y="242" class="heading">执行记录</text><text x="304" y="274" class="small">请求级观察 · 不等于科学验证</text>
+    <rect x="304" y="304" width="896" height="72" rx="6" class="warn-bg"/><text x="328" y="332" class="label warn">有一项调用结果尚未确认</text><text x="328" y="358" class="small">保持未知状态，先核对实际操作结果；此处不提供盲目重试。</text>
+    <text x="304" y="420" class="label accent">全部事件</text><text x="408" y="420" class="label muted">模型</text><text x="472" y="420" class="label muted">工具</text><text x="1104" y="420" class="small">加载更早记录</text>
+    <path d="M304 440H1200" class="rule"/><text x="320" y="474" class="small">观察事件</text><text x="944" y="474" class="small">记录状态</text><text x="1136" y="474" class="small">详情</text><path d="M304 492H1200" class="rule"/>
+    <text x="320" y="530">读取研究上下文</text><text x="320" y="556" class="small">Project Governance</text><text x="944" y="534" class="label">已收到返回</text><text x="1144" y="534" class="accent">›</text><path d="M304 580H1200" class="rule"/>
+    <text x="320" y="618">获取输入摘要</text><text x="320" y="644" class="small">配置的 Module 工具</text><text x="944" y="622" class="label warn">结果未知</text><text x="1144" y="622" class="accent">›</text><path d="M304 668H1200" class="rule"/>
+    <text x="304" y="714" class="small">没有可信的步骤与版本关联，以上事件只属于请求。</text><text x="304" y="746" class="small">离开本页不取消运行；取消请求与取消完成分别呈现。</text><text x="304" y="780" class="tiny">异常状态示例，与其他画板不是同一次运行回放；没有生成虚构时间或费用。</text>
+  </svg></div><figcaption>沿用 dsh-context 的事件筛选与逐项检查方式，但不带入 Agent 家族图、上下文浏览器或未记录的成本指标。</figcaption></figure>
+  <div class="notes"><section><h3>状态独立表达</h3><p>运行完成、科学结论成立、用户确认是三件事。取消操作先显示“已请求取消”，直到执行端实际确认；工具结果未知时不替用户猜测成功或失败。</p></section><section><h3>技术深度按需进入</h3><p>点击单条事件进入详情，再看经过脱敏的参数、返回和时间。错误与恢复所需信息直接显示，原始载荷仍可折叠；不展示私有思维链。</p></section></div>
+</section>
+<section class="board" id="board-evidence" aria-label="证据页面">
+  <div class="board-head"><h2>证据先让人找到，再让人核对</h2><p>列表 → 单项详情 · 不默认放另一张关系图</p></div>
+  <figure><div class="canvas">
+  <svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="evi-title evi-desc">
+    <title id="evi-title">独立证据列表页面</title>
+    <desc id="evi-desc">请求证据与分支历史明确分开，先用简洁列表查找证据，再进入单项预览；当前文件发生变化时明确提示不能当作历史快照。</desc>
+    <rect width="1280" height="800" class="surface"/><rect width="224" height="800" class="paper"/><path d="M224 0V800" class="rule"/>
+    <text x="24" y="44" class="brand">BioHarness</text><text x="24" y="80" class="small">研究工作区</text><text x="24" y="236" class="label">基因表达研究</text><rect x="16" y="292" width="192" height="44" rx="6" class="tint"/><text x="48" y="319" class="label accent">比较表达差异</text><path d="M24 720H200" class="rule"/><text x="24" y="756" class="small">资源与设置</text>
+    <text x="272" y="38" class="small">基因表达研究 / 处理条件比较</text><text x="272" y="80" class="heading">比较处理条件下的表达差异</text><text x="1120" y="80" class="label muted">执行记录</text><text x="272" y="130" class="muted">对话</text><text x="352" y="130" class="muted">研究流程</text><text x="472" y="130" class="accent">证据</text><path d="M272 148H1232" class="rule"/><path d="M472 148H512" stroke="var(--accent)" stroke-width="2"/>
+    <text x="304" y="214" class="heading">此请求的证据</text><text x="1056" y="214" class="label accent">查看分支历史 ›</text><text x="304" y="250" class="small">只列出已记录的引用。记录存在不代表科学结论有效。</text>
+    <rect x="304" y="288" width="432" height="44" rx="6" class="box"/><text x="324" y="316" class="label muted">查找名称或记录中的描述</text>
+    <path d="M304 368H1200" class="rule"/><text x="320" y="402" class="small">证据</text><text x="848" y="402" class="small">来源</text><text x="1016" y="402" class="small">文件可用性</text><path d="M304 420H1200" class="rule"/>
+    <text x="320" y="462">样本说明</text><text x="320" y="490" class="small">sample-description.tsv · 示例文件名</text><text x="848" y="462" class="label">提交引用</text><text x="1016" y="462" class="label">打开时核对</text><text x="1180" y="462" class="accent">›</text><path d="M304 516H1200" class="rule"/>
+    <text x="320" y="558">输入检查报告</text><text x="320" y="586" class="small">input-check.html · 示例文件名</text><text x="848" y="558" class="label">历史提交</text><text x="1016" y="558" class="label warn">文件已变化</text><text x="1180" y="558" class="accent">›</text><path d="M304 612H1200" class="rule"/>
+    <text x="304" y="666" class="small">选中后进入单项详情；先核对完整证据锚点和哈希，再展示可用内容。</text><text x="304" y="702" class="small">不能读取的历史内容保持不可用，不用修改后的当前文件替代。</text><text x="304" y="778" class="tiny">证据状态构图示例，不代表本项目已有这些文件或执行过校验。</text>
+  </svg></div><figcaption>不把数据、方法、结果、比较、发现全部做成并列空面板；先提供实际存在的引用与单项核对。</figcaption></figure>
+  <div class="notes"><section><h3>单项详情也只占一个主区域</h3><p>预览是默认内容，来源与校验、原始标识通过局部切换查看。查看分支历史是明确的范围切换，不能继续把历史列表标作“此请求的证据”。</p></section><section><h3>未知不是空列表</h3><p>503、读取失败、尚无记录、加载了部分记录分别表达。列表不能拿历史缓存冒充实时结果，部分分页不能显示成完整证据清单。</p></section></div>
+</section>
+<section class="board" id="board-narrow" aria-label="窄屏和异常状态">
+  <div class="board-head"><h2>窄屏换表达，不压缩文字</h2><p>以步骤列表代替缩小的关系图</p></div>
+  <figure><div class="canvas mobile">
+  <svg viewBox="0 0 390 844" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mobile-title mobile-desc">
+    <title id="mobile-title">窄屏计划列表与暂时不可用提示</title>
+    <desc id="mobile-desc">窄屏隐藏项目侧栏，将计划展示为可进入的步骤列表；服务不可用时保留最后确认的数据，并明确它不是当前状态。</desc>
+    <rect width="390" height="844" class="surface"/><text x="20" y="38" class="small">☰ 项目</text><text x="294" y="38" class="small">执行记录</text>
+    <text x="20" y="82" class="subheading">比较处理条件下的</text><text x="20" y="110" class="subheading">表达差异</text>
+    <text x="20" y="158" class="muted">对话</text><text x="100" y="158" class="accent">研究流程</text><text x="224" y="158" class="muted">证据</text><path d="M20 176H370" class="rule"/><path d="M100 176H172" stroke="var(--accent)" stroke-width="2"/>
+    <rect x="20" y="196" width="348" height="100" rx="6" class="warn-bg"/><text x="36" y="226" class="label warn">暂时无法更新</text><text x="316" y="226" class="label accent">刷新</text><text x="36" y="252" class="small">当前显示最后确认的计划，并非实时状态。</text><text x="36" y="278" class="small">最后确认：14:32:10（示例时间）</text>
+    <text x="20" y="334" class="small">步骤列表</text><text x="268" y="334" class="label accent">全屏看图</text>
+    <rect x="20" y="356" width="348" height="88" rx="6" class="box"/><text x="36" y="386" class="small">01 · 最后记录：等待回应</text><text x="36" y="420">确认比较范围</text><text x="340" y="420" class="accent">›</text>
+    <rect x="20" y="460" width="348" height="88" rx="6" class="box"/><text x="36" y="490" class="small">02 · 尚无工作记录</text><text x="36" y="524">检查输入质量</text><text x="340" y="524" class="accent">›</text>
+    <rect x="20" y="564" width="348" height="88" rx="6" class="box"/><text x="36" y="594" class="small">03 · 尚无工作记录</text><text x="36" y="628">整理设计矩阵</text><text x="340" y="628" class="accent">›</text>
+    <rect x="20" y="668" width="348" height="88" rx="6" class="box"/><text x="36" y="698" class="small">04 · 前驱：02、03</text><text x="36" y="732">执行差异分析</text><text x="340" y="732" class="accent">›</text>
+    <text x="20" y="798" class="small">列表保留依赖说明，不暗示步骤串行。</text><text x="20" y="826" class="tiny">异常状态设计示例 · 非实际服务状态</text>
+  </svg></div><figcaption>不因为接口失败就清空计划，也不把旧状态当作当前状态。图与列表表达同一份源数据，列表顺序不是执行顺序。</figcaption></figure>
+  <div class="notes"><section><h3>窄屏交互</h3><p>项目导航是唯一抽屉。步骤、事件、证据详情都进入完整内容页；返回恢复选择与位置。需要回应时明确进入对话，不打开层层叠加的模态窗口。</p></section><section><h3>可访问性约束</h3><p>产品触控目标至少 44 px；文本不随画布无限缩小。键盘可遍历列表与节点，焦点可见；状态始终有文字，不能只靠颜色传达。</p></section></div>
+</section>
+</div>
+<footer>
+  <strong>设计依据：</strong>cathrynlavery/diagram-design（795eec4）：删除优先、单一视觉重点、低密度、正交连接、无阴影、静态 SVG；结合 hello-ui 的任务聚焦与状态覆盖。配色为本稿定制的中性底色与克制青绿，不照搬技能默认皮肤。<br>
+  <strong>产品复用定案：</strong>LibreChat-AI/LibreChat v0.8.9（d4e85d2）作为完整应用底座；bowenliang123/dsh-context（dafccf2）提供视图组织。所有复杂组件使用成熟上游实现；固定来源、版本和限制见唯一方案 §17.5。此文件是已定稿设计，不是可用产品。<br>
+  <strong>唯一方案：</strong><a href="2026-11-25-research-workspace-v2.md#174-upstream-based-ui-replacement-design-2026-11-27">研究工作台方案 §17.4</a>。所有消息、步骤、文件和状态均为明确标注的构图示例，未连接模型、Core、Module 或任何业务接口。
+</footer>
+</main>
+</body>
+</html>

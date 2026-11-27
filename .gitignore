@@ -12,3 +12,6 @@ frontend/dist/
 # Core state written by developer Agent hosts; never part of this public repository
 .bioharness/
 *.tsbuildinfo
+ui/client/dist/
+ui/packages/*/dist/
+ui/**/junit.xml
