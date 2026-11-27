@@ -4070,5 +4070,7 @@
   "com_ui_slack_apps_redirect": "OAuth redirect URL",
   "com_ui_slack_apps_events": "Events URL",
   "com_ui_slack_apps_interactions": "Interactivity URL",
-  "com_ui_slack_apps_empty": "No Slack apps yet. Create an app in Slack, then add its credentials here to connect agents to your workspace."
+  "com_ui_slack_apps_empty": "No Slack apps yet. Create an app in Slack, then add its credentials here to connect agents to your workspace.",
+  "com_bioharness_settings_models": "Models",
+  "com_bioharness_settings_models_section": "Model providers & slots"
 }

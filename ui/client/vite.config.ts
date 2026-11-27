@@ -99,7 +99,10 @@ export default defineConfig(({ command }) => ({
     bootLoadingLabels(),
     lazyChunkGuard(),
     copyPublicAssets(),
+    /* BioHarness: changed from LibreChat v0.8.9. Disable the donor service worker (C3) so
+     * build assets are never stale-precached across frontend switches or authentication states. */
     VitePWA({
+      disable: true,
       /** `auto` emits a parser-blocking `<script>` at the end of `<head>`. On a slow
        *  HTTP/1.1 link it queues behind every modulepreload, so the body, and with it
        *  the loading canvas, cannot paint until most of the bundle has downloaded.

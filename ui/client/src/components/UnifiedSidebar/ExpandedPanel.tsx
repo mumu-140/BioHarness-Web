@@ -1,6 +1,7 @@
 import { memo, useCallback, Suspense } from 'react';
 import { SquarePen } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+/* BioHarness: changed from LibreChat v0.8.9. Preserve explicit `?ws=` workspace selection on New Chat. */
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
 import type { NavLink } from '~/common';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
@@ -33,6 +34,10 @@ const NewChatButton = memo(function NewChatButton({
   }, [switchToHistory, setActive]);
 
   const { handleNewChatClick } = useNewChat({ onNewChat: handlePanelSwitch });
+  const location = useLocation();
+  const navigate = useNavigate();
+  const ws = new URLSearchParams(location.search).get('ws');
+  const newHref = ws ? `/c/new?ws=${encodeURIComponent(ws)}` : '/c/new';
 
   return (
     <TooltipAnchor
@@ -40,12 +45,20 @@ const NewChatButton = memo(function NewChatButton({
       description={tooltipDescription}
       render={
         <a
-          href="/c/new"
+          href={newHref}
           data-testid="new-chat-button"
           aria-label={localize('com_ui_new_chat')}
           aria-keyshortcuts={ariaKey}
           className="hover:bg-surface-nav-hover flex h-9 w-9 items-center justify-center rounded-lg transition-colors"
-          onClick={handleNewChatClick}
+          onClick={(e) => {
+            if (ws) {
+              e.preventDefault();
+              handlePanelSwitch();
+              navigate(newHref);
+              return;
+            }
+            handleNewChatClick(e);
+          }}
         >
           <SquarePen className="text-text-primary h-5 w-5" />
         </a>

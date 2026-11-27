@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { MessageSquare, Info } from 'lucide-react';
+import { MessageSquare, Info, SlidersHorizontal } from 'lucide-react';
 import { SettingsTabValues } from 'librechat-data-provider';
 import { GearIcon, DataIcon, UserIcon, SpeechIcon } from '@librechat/client';
 import type { ComponentType, ReactNode } from 'react';
@@ -12,7 +12,8 @@ export type SettingsTab =
   | SettingsTabValues.LANGFUSE
   | SettingsTabValues.DATA
   | SettingsTabValues.ACCOUNT
-  | SettingsTabValues.ABOUT;
+  | SettingsTabValues.ABOUT
+  | 'models';
 
 export type SectionId =
   | 'appearance'
@@ -37,7 +38,8 @@ export type SectionId =
   | 'security'
   | 'connections'
   | 'billing'
-  | 'about';
+  | 'about'
+  | 'models';
 
 export interface SettingsContextValue {
   balanceEnabled: boolean;
@@ -107,13 +109,19 @@ function createLangfuseIcon(className: string): ReactNode {
 /* BioHarness: changed from LibreChat v0.8.9. Speech would send audio to the browser vendor's or the donor's
  * speech service, and the Data and Account tabs manage donor accounts, imports, shared links and
  * keys. None of that exists on this host, so these tabs and their settings are not offered. */
-export const HOST_UNAVAILABLE_TABS: ReadonlySet<SettingsTabValues> = new Set([
+export const HOST_UNAVAILABLE_TABS: ReadonlySet<SettingsTab> = new Set([
   SettingsTabValues.SPEECH,
   SettingsTabValues.DATA,
   SettingsTabValues.ACCOUNT,
 ]);
 
 const ALL_TABS: TabMeta[] = [
+  {
+    id: 'models',
+    labelKey: 'com_bioharness_settings_models',
+    icon: createElement(SlidersHorizontal, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'models', labelKey: 'com_bioharness_settings_models_section' }],
+  },
   {
     id: SettingsTabValues.GENERAL,
     labelKey: 'com_nav_setting_general',

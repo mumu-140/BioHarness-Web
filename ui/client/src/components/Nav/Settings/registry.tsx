@@ -1,6 +1,7 @@
 import { SettingsTabValues } from 'librechat-data-provider';
 import type { SettingEntry } from './types';
 import { HOST_UNAVAILABLE_TABS } from './types';
+import BioHarnessModelsSettings from '~/host/BioHarnessModelsSettings';
 import {
   unseenTabBadgeAtom,
   replyNotificationsAtom,
@@ -899,6 +900,20 @@ const allEntries: SettingEntry[] = [
 ];
 
 /* BioHarness: changed from LibreChat v0.8.9. See HOST_UNAVAILABLE_TABS. */
-export const registry: SettingEntry[] = allEntries.filter(
-  (entry) => !HOST_UNAVAILABLE_TABS.has(entry.tab),
-);
+const bioHarnessEntries: SettingEntry[] = [
+  {
+    id: 'bioharness-models',
+    tab: 'models',
+    section: 'models',
+    labelKey: 'com_bioharness_settings_models_section',
+    keywords: ['model', 'provider', 'api', 'key', 'openai', 'anthropic', 'gemini'],
+    Component: BioHarnessModelsSettings,
+  },
+];
+
+export const registry: SettingEntry[] = [
+  ...bioHarnessEntries,
+  ...allEntries.filter(
+    (entry) => !HOST_UNAVAILABLE_TABS.has(entry.tab),
+  ),
+];

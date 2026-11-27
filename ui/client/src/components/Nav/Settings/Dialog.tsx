@@ -1,4 +1,7 @@
-import { useState } from 'react';
+/* BioHarness: changed from LibreChat v0.8.9. Supports opening Settings directly to the Models tab. */
+import { useEffect, useState } from 'react';
+import { useAtom } from 'jotai';
+import { settingsRequestedTabAtom } from '~/host/workspace';
 import * as Tabs from '@radix-ui/react-tabs';
 import { X, ChevronLeft } from 'lucide-react';
 import { SettingsTabValues } from 'librechat-data-provider';
@@ -28,6 +31,14 @@ export default function SettingsDialog({ open, onOpenChange }: TDialogProps) {
   const remScale = useRemScale();
   const isSmallScreen = useMediaQuery(`(max-width: ${767 * remScale}px)`);
   const [activeTab, setActiveTab] = useState<SettingsTab>(SettingsTabValues.GENERAL);
+  const [requestedTab, setRequestedTab] = useAtom(settingsRequestedTabAtom);
+  useEffect(() => {
+    if (open && requestedTab) {
+      setActiveTab(requestedTab as SettingsTab);
+      setMobileDetail(true);
+      setRequestedTab(null);
+    }
+  }, [open, requestedTab, setRequestedTab]);
   const [query, setQuery] = useState('');
   const [mobileDetail, setMobileDetail] = useState(!isSmallScreen);
 

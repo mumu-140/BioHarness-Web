@@ -249,7 +249,7 @@ The integrated UI provides the invocation timeline, common invocation/Module ins
 
 | Layer | Selected direction | Implementation boundary |
 |---|---|---|
-| Frontend | Complete LibreChat React/Vite frontend at the roadmap's fixed pin, with selected dsh-context presentation | Preserve donor React 18 baseline; retire current custom shell/pages/styles; UI-only build and backend-free start-up verified in `ui/` (roadmap §17.4 step 2); conversation, stream and scientific views are not yet connected |
+| Frontend | Complete LibreChat React/Vite frontend at the roadmap's fixed pin, with selected dsh-context presentation | Preserve donor React 18 baseline; retire current custom shell/pages/styles; UI-only build, C1–C5 security/SPA/SW closure and Step 3 native vertical slice (workspace/request/conversation/SSE/HITL/UNKNOWN/R2 model settings) verified in `ui/` against both fixture loops and an authorized live-provider Core loop (`auto/deepseek-v4.1-flash`); Step 4 scientific views/evidence viewers and Step 5 replacement remain open |
 | Scientific graph and tree | React Flow + Dagre for plan dependencies; rc-tree for Governance navigation | Mature interaction/layout implementations only; multiple predecessors, no Agent ancestry substitution, no graph editing or tree reparenting |
 | State and refresh | Donor React Query/routing adapted to BioHarness HTTP/SSE and cache isolation | Source snapshots remain authoritative; no parallel query store or donor scientific runtime |
 | Conversation UI | Complete LibreChat message/composer surfaces on a separate primary route | Adapt existing host/provider seams to server-recorded events and native HITL; no upstream Agent execution or client-owned transcript |

@@ -15,6 +15,22 @@ const APPROVED_API: Array<{ method: string; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/health$/ },
   { method: 'GET', path: /^\/api\/meta$/ },
   { method: 'POST', path: /^\/api\/session$/ },
+  /* Step 3: R2 Model Configuration Center */
+  { method: 'GET', path: /^\/api\/settings\/models$/ },
+  { method: 'PUT', path: /^\/api\/settings\/models$/ },
+  { method: 'POST', path: /^\/api\/settings\/models\/fetch-models$/ },
+  { method: 'POST', path: /^\/api\/settings\/models\/reset$/ },
+  /* Step 3: Workspace Core/Governance read snapshots & version invalidation SSE */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/views\/(open|now|tree|context|routes|evidence)$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/stream$/ },
+  /* Step 3: Native runtime conversations, runs, cancellation & authoritative event log SSE */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/conversations$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+$/ },
+  { method: 'PUT', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/request$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/runs$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/runs\/[^/]+\/cancel$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/conversations\/[^/]+\/events$/ },
 ];
 
 export const NOT_PROVIDED = 'NOT_PROVIDED_BY_HOST';
@@ -42,7 +58,12 @@ export class HostHttpError extends Error {
   }
 }
 
-const nativeFetch = window.fetch.bind(window);
+const nativeFetch: typeof fetch | null =
+  typeof window !== 'undefined' && typeof window.fetch === 'function'
+    ? window.fetch.bind(window)
+    : typeof globalThis.fetch === 'function'
+      ? globalThis.fetch.bind(globalThis)
+      : null;
 
 const isApproved = (method: string, url: URL): boolean => {
   if (url.origin !== window.location.origin) {
@@ -74,6 +95,9 @@ export async function hostFetch(path: string, init?: RequestInit): Promise<Respo
   const method = (init?.method ?? 'GET').toUpperCase();
   if (!isApproved(method, url)) {
     throw new Error(`host path is not approved: ${method} ${url.pathname}`);
+  }
+  if (!nativeFetch) {
+    throw new Error('fetch is not available in this environment');
   }
   return nativeFetch(url, { ...init, credentials: 'same-origin', cache: 'no-store' });
 }
@@ -164,6 +188,9 @@ export function installHostGate(routes: HostRoute[]): void {
     const url = resolveUrl(request ? request.url : (input as string | URL));
     const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
     if (url && (isLocalScheme(url) || isApproved(method, url))) {
+      if (!nativeFetch) {
+        return Promise.reject(new TypeError('fetch is not available in this environment'));
+      }
       return nativeFetch(input, init);
     }
     recordRefusal(method, refusalTarget(url));

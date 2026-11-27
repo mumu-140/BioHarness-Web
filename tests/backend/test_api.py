@@ -232,3 +232,48 @@ def test_preview_has_no_path_parameter(client, fake_runner, workspace_dir):
     assert body["ok"] is False and "preview" not in body
     assert all("/etc/passwd" not in " ".join(argv) for argv, _ in fake_runner.calls)
     assert client.get(PREVIEW, params={"request_id": "r1"}, headers=AUTH).status_code == 422
+
+
+# ---- C1 / C2: CSP security headers and SPA deep-link fallback ----------------
+def test_spa_deep_links_return_index_with_strict_csp_and_no_cache(settings, fake_runner, tmp_path):
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "assets" / "app.js").write_text("console.log('ok');", encoding="utf-8")
+    (static / "index.html").write_text(
+        "<!doctype html><html><head><script>window.__boot=1;</script></head><body>ok</body></html>",
+        encoding="utf-8",
+    )
+    app = TestClient(create_app(settings, sources=Sources(settings, fake_runner), static_dir=static))
+
+    for route in ("/", "/login", "/c/new", "/c/conv-42"):
+        res = app.get(route)
+        assert res.status_code == 200
+        assert "window.__boot=1;" in res.text
+        assert res.headers["cache-control"] == "no-cache"
+        csp = res.headers["content-security-policy"]
+        assert "default-src 'self'" in csp
+        assert "connect-src 'self'" in csp
+        assert "frame-ancestors 'self'" in csp
+        assert "script-src 'self' 'sha256-" in csp
+        assert "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
+        assert res.headers["x-content-type-options"] == "nosniff"
+        assert res.headers["x-frame-options"] == "SAMEORIGIN"
+
+    asset = app.get("/assets/app.js")
+    assert asset.status_code == 200 and "console.log('ok');" in asset.text
+
+
+def test_missing_assets_exact_api_and_symlink_escape_return_404(settings, fake_runner, tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("frontend", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do-not-leak", encoding="utf-8")
+    (static / "escape.txt").symlink_to(secret)
+    app = TestClient(create_app(settings, sources=Sources(settings, fake_runner), static_dir=static))
+
+    for missing in ("/api", "/api/nonexistent", "/assets/missing.js", "/missing.css", "/escape.txt"):
+        res = app.get(missing)
+        assert res.status_code == 404
+        assert "do-not-leak" not in res.text
+        assert "frontend" not in res.text

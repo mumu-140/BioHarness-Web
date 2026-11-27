@@ -29,8 +29,12 @@ Every changed non-JSON file carries a comment starting `BioHarness: changed from
 - Upstream test files of removed features were deleted (`skills` routes, Speech settings,
   one spec importing the server package); specs of changed components were updated.
 
-`client/src/host/` is new BioHarness code, not upstream: the request gate, the mapping of
-donor start-up and sign-in calls to the BioHarness service, and nothing else.
+`client/src/host/` is new BioHarness code, not upstream: the request gate (`gate.ts`),
+start-up/sign-in mappings (`routes.ts`, `session.ts`, `install.ts`), BioHarness HTTP/SSE/workspace
+bindings (`bioharness.ts`, `events.ts`, `workspace.tsx`), and the Step 3 vertical-slice adapters
+(`BioHarnessSidebarSection.tsx`, `BioHarnessChatRoute.tsx`, `BioHarnessModelsSettings.tsx`) seated
+inside LibreChat's adopted shell, sidebar, ChatScreen/MessagesView/Markdown, ComposerFrame and
+SettingsDialog. Donor VitePWA service-worker registration is disabled (`vite.config.ts`).
 
 ## Build and check
 
@@ -40,5 +44,6 @@ Needs Node 24.22.3 and npm 11.13.0 (`.nvmrc`, `packageManager`).
     npm run build            # data-provider, client package, chat, then client/dist
     (cd client && npx tsc --noEmit -p tsconfig.json && npx jest --watchAll=false)
     ../tests/browser/ui_run.sh <image with Node and Playwright Chromium>
+    ../tests/browser/ui_step3_run.sh <image with Node and Playwright Chromium>
 
 Serve `client/dist` with the unchanged backend through `BIOHARNESS_WEB_STATIC_DIR`.

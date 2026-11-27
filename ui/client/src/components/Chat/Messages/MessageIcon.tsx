@@ -36,7 +36,11 @@ export function arePropsEqual(prev: MessageIconProps, next: MessageIconProps): b
 
 const MessageIcon = memo(({ iconData, assistant, agent }: MessageIconProps) => {
   const { isSharedConvo } = useShareContext();
-  const { data: endpointsConfig } = useGetEndpointsQuery({ enabled: isSharedConvo !== true });
+  /* BioHarness: changed from LibreChat v0.8.9. Do not query donor /api/endpoints for BioHarness rows. */
+  const isBioHarnessRow = (iconData?.endpoint as string | undefined) === 'bioharness';
+  const { data: endpointsConfig } = useGetEndpointsQuery({
+    enabled: isSharedConvo !== true && !isBioHarnessRow,
+  });
 
   const agentName = agent?.name ?? '';
   const agentAvatar = agent?.avatar?.filepath ?? '';

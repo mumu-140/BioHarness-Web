@@ -52,6 +52,11 @@ import ChatSettingsProvider from './ChatSettings';
 import { useHealthCheck } from '~/data-provider';
 import Settings from '~/components/Nav/Settings';
 import { Banner } from '~/components/Banners';
+/* BioHarness: changed from LibreChat v0.8.9. Mounts BioHarnessWorkspaceProvider around the
+ * adopted RootLayout and suppresses donor-server background catalog/banner/file/search queries. */
+import { useSetAtom } from 'jotai';
+import { settingsOpenAtom } from '~/components/Nav/Settings';
+import { BioHarnessWorkspaceProvider } from '~/host/workspace';
 import ChatRecord from './Record';
 import store from '~/store';
 
@@ -124,13 +129,10 @@ function RootLayout() {
   );
   const { isAuthenticated, logout, user } = useAuthContext();
   /** Releases feature-catalog queries after first paint on browser idle. */
-  useCatalogWarmup(isAuthenticated);
+  useCatalogWarmup(false);
 
   useDrawerSwipe({
     paneRef,
-    /** Auth gates the whole tree below (`return null`), so the swipe surfaces
-     * only exist once authenticated — enabling earlier would attach to
-     * nothing and never re-run when they mount. */
     enabled: isSmallScreen && isAuthenticated,
     open: sidebarExpanded,
     onOpenChange: handleDrawerOpenChange,
@@ -138,9 +140,9 @@ function RootLayout() {
 
   useHealthCheck(isAuthenticated);
 
-  const assistantsMap = useAssistantsMap({ isAuthenticated });
-  const agentsMap = useAgentsMap({ isAuthenticated });
-  const fileMap = useFileMap({ isAuthenticated });
+  const assistantsMap = useAssistantsMap({ isAuthenticated: false });
+  const agentsMap = useAgentsMap({ isAuthenticated: false });
+  const fileMap = useFileMap({ isAuthenticated: false });
 
   const { data: config, isSuccess: isConfigReady, error: configError } = useGetStartupConfig();
   const { data: termsData } = useUserTermsQuery({
@@ -150,7 +152,7 @@ function RootLayout() {
     config?.interface?.codeHighlightThrottleMs,
   );
 
-  useSearchEnabled(isAuthenticated);
+  useSearchEnabled(false);
 
   useEffect(() => {
     if (termsData) {
@@ -186,7 +188,7 @@ function RootLayout() {
           <AssistantsMapContext.Provider value={assistantsMap}>
             <AgentsMapContext.Provider value={agentsMap}>
               <PromptGroupsProvider>
-                <Banner onHeightChange={setBannerHeight} />
+                {/* BioHarness: donor /api/banner is not mounted */}
                 <div className="flex" style={{ height: `calc(100dvh - ${bannerHeight}px)` }}>
                   <div
                     className="relative z-0 flex h-full w-full overflow-hidden"
@@ -248,8 +250,7 @@ function RootLayout() {
               </PromptGroupsProvider>
               <Settings />
               <KeyboardShortcutsProvider />
-              <ReplyNotifications />
-              <MessagesRetention />
+              {/* BioHarness: donor active-jobs/messages-retention polls are not mounted */}
               <AnalyticsConsent
                 gtmId={config?.analyticsGtmId}
                 consentRequired={config?.interface?.analyticsConsent !== false}
@@ -273,6 +274,7 @@ function RootLayout() {
 }
 
 export default function Root() {
+  const setSettingsOpen = useSetAtom(settingsOpenAtom);
   return (
     <>
       <ChatRecord />
@@ -281,7 +283,9 @@ export default function Root() {
           <ChatHostProvider host={appChatHost}>
             <StreamHostProvider host={appStreamHost}>
               <ComposerHostProvider host={appComposerHost}>
-                <RootLayout />
+                <BioHarnessWorkspaceProvider onOpenSettings={() => setSettingsOpen(true)}>
+                  <RootLayout />
+                </BioHarnessWorkspaceProvider>
               </ComposerHostProvider>
             </StreamHostProvider>
           </ChatHostProvider>

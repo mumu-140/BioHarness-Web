@@ -1447,5 +1447,7 @@
   "com_ui_zoom_level": "缩放级别",
   "com_ui_zoom_out": "缩小",
   "com_user_message": "您",
-  "com_ui_feedback_tag_other_issue": "其他问题"
+  "com_ui_feedback_tag_other_issue": "其他问题",
+  "com_bioharness_settings_models": "模型配置",
+  "com_bioharness_settings_models_section": "模型服务商与槽位"
 }
