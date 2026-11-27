@@ -92,15 +92,19 @@ def _messages(history: Sequence[dict[str, Any]], instructions: str) -> list[Mode
 
 
 class ModelClient:
-    def __init__(self, settings: ModelSettings):
+    def __init__(self, settings: ModelSettings, *, _model: OpenAIChatModel | None = None):
         self.settings = settings
-        self._model = OpenAIChatModel(
+        self._model = _model if _model is not None else OpenAIChatModel(
             settings.name,
             provider=OpenAIProvider(base_url=settings.base_url, api_key=settings.api_key),
         )
 
+    def snapshot(self) -> ModelClient:
+        """Return an isolated client pinned to the current settings and provider for one run."""
+        return ModelClient(self.settings, _model=self._model)
+
     def reconfigure(self, settings: ModelSettings) -> None:
-        """Hot-swap the active OpenAI-compatible chat model for subsequent turns."""
+        """Hot-swap the active OpenAI-compatible chat model for subsequent runs."""
         self.settings = settings
         self._model = OpenAIChatModel(
             settings.name,
@@ -120,15 +124,16 @@ class ModelClient:
                            parameters_json_schema=tool.schema)
             for tool in tools
         ])
+        settings, model = self.settings, self._model
         started = time.monotonic()
-        req_settings: dict[str, Any] = {"timeout": self.settings.request_timeout_seconds}
-        if self.settings.temperature is not None:
-            req_settings["temperature"] = self.settings.temperature
-        if self.settings.max_tokens is not None:
-            req_settings["max_tokens"] = self.settings.max_tokens
+        req_settings: dict[str, Any] = {"timeout": settings.request_timeout_seconds}
+        if settings.temperature is not None:
+            req_settings["temperature"] = settings.temperature
+        if settings.max_tokens is not None:
+            req_settings["max_tokens"] = settings.max_tokens
         try:
             async with model_request_stream(
-                self._model, _messages(history, instructions),
+                model, _messages(history, instructions),
                 model_request_parameters=parameters,
                 model_settings=req_settings,
             ) as stream:
@@ -176,7 +181,7 @@ class ModelClient:
             calls.append(ToolCall(id=part.tool_call_id, name=part.tool_name, raw_arguments=raw[:2000],
                                   arguments=arguments if isinstance(arguments, dict) else None))
         return Turn(
-            text=text, tool_calls=calls, model=response.model_name or self.settings.name,
+            text=text, tool_calls=calls, model=response.model_name or settings.name,
             finish_reason=finish_reason,
             usage={"input_tokens": usage.input_tokens or 0, "output_tokens": usage.output_tokens or 0},
             seconds=round(time.monotonic() - started, 3),

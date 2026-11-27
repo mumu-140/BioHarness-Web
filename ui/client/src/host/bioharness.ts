@@ -491,24 +491,70 @@ export function deriveRunStatus(
   return { activeRunId, cancelRequested, lastSeq, lastFinishedState };
 }
 
-/** Projects the authoritative server event log onto LibreChat's linear TMessage[] thread. */
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+/** Projects the authoritative server event log onto LibreChat's linear TMessage[] thread.
+ *
+ * Historical assistant messages preserve the recorded model from their own operation
+ * (`assistant.text.data.model` or matching `operation.finished`/`operation.started`),
+ * never retroactively adopting the currently active workspace model.
+ */
 export function eventsToMessages(
   events: ConversationEvent[],
   streamingDraft: string,
   conversationId: string,
-  modelLabel: string | null,
+  activeModelLabel: string | null,
 ): TMessage[] {
+  const opModelById = new Map<string, string>();
+  const runModelById = new Map<string, string>();
+  const startedOps = new Map<string, string>();
+
+  for (const event of events) {
+    if (event.type === 'run.started' && event.run_id) {
+      const m = nonEmptyString(event.data?.model);
+      if (m) {
+        runModelById.set(event.run_id, m);
+      }
+    } else if (event.type === 'operation.started' && event.data?.kind === 'model') {
+      const opId = nonEmptyString(event.data.operation_id);
+      const m = nonEmptyString(event.data.name);
+      if (opId && m) {
+        if (!opModelById.has(opId)) {
+          opModelById.set(opId, m);
+        }
+        startedOps.set(opId, m);
+      }
+    } else if (event.type === 'operation.finished' && event.data?.kind === 'model') {
+      const opId = nonEmptyString(event.data.operation_id);
+      const m = nonEmptyString(event.data.reported_model) ?? nonEmptyString(event.data.name);
+      if (opId) {
+        if (m) {
+          opModelById.set(opId, m);
+        }
+        startedOps.delete(opId);
+      }
+    } else if (event.type === 'run.finished') {
+      startedOps.clear();
+    }
+  }
+
+  let inFlightModel: string | null = null;
+  for (const modelName of startedOps.values()) {
+    inFlightModel = modelName;
+  }
+
   const rows: Array<{
     id: string;
     isCreatedByUser: boolean;
     sender: string;
     text: string;
+    model?: string;
     error?: boolean;
     unfinished?: boolean;
     createdAt?: string;
   }> = [];
-
-  const assistantSender = modelLabel || 'BioHarness';
 
   for (const event of events) {
     const seq = event.seq ?? 0;
@@ -522,10 +568,16 @@ export function eventsToMessages(
         createdAt: event.at,
       });
     } else if (event.type === 'assistant.text') {
+      const opId = nonEmptyString(event.data.operation_id);
+      const recordedModel =
+        nonEmptyString(event.data.model) ??
+        (opId ? (opModelById.get(opId) ?? null) : null) ??
+        (event.run_id ? (runModelById.get(event.run_id) ?? null) : null);
       rows.push({
         id: `e-${seq}`,
         isCreatedByUser: false,
-        sender: assistantSender,
+        sender: recordedModel ?? 'Assistant',
+        model: recordedModel ?? undefined,
         text,
         createdAt: event.at,
       });
@@ -570,10 +622,14 @@ export function eventsToMessages(
           : [err?.code ? String(err.code) : '', err?.message ? String(err.message) : '']
               .filter(Boolean)
               .join(': ') || 'Model provider call failed';
+      const opId = nonEmptyString(event.data.operation_id);
+      const failedModel =
+        nonEmptyString(event.data.name) ?? (opId ? (opModelById.get(opId) ?? null) : null);
       rows.push({
         id: `e-${seq}`,
         isCreatedByUser: false,
         sender: 'Model Provider',
+        model: failedModel ?? undefined,
         error: true,
         text: `Provider error: ${errText}`,
         createdAt: event.at,
@@ -604,10 +660,12 @@ export function eventsToMessages(
   }
 
   if (streamingDraft) {
+    const draftModel = inFlightModel ?? nonEmptyString(activeModelLabel);
     rows.push({
       id: 'live-draft',
       isCreatedByUser: false,
-      sender: assistantSender,
+      sender: draftModel ?? 'Assistant',
+      model: draftModel ?? undefined,
       text: streamingDraft,
       unfinished: true,
     });
@@ -625,7 +683,7 @@ export function eventsToMessages(
       error: row.error ?? false,
       unfinished: row.unfinished ?? false,
       endpoint: BIOHARNESS_ENDPOINT,
-      model: modelLabel ?? undefined,
+      model: row.model,
       createdAt: row.createdAt ?? new Date().toISOString(),
     };
     parentId = row.id;

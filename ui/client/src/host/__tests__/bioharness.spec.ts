@@ -92,4 +92,59 @@ describe('BioHarness host projections and cache keys', () => {
       }),
     ).toEqual([{ request_id: 'req-1', question: 'Q1' }]);
   });
+
+  it('preserves historical message model attribution after active model switches', () => {
+    const events: ConversationEvent[] = [
+      { seq: 1, run_id: 'r1', type: 'run.started', data: { model: 'model-alpha' } },
+      { seq: 2, run_id: 'r1', type: 'user.message', data: { text: 'Turn 1' } },
+      {
+        seq: 3,
+        run_id: 'r1',
+        type: 'operation.started',
+        data: { operation_id: 'op-1', kind: 'model', name: 'model-alpha' },
+      },
+      {
+        seq: 4,
+        run_id: 'r1',
+        type: 'operation.finished',
+        data: { operation_id: 'op-1', kind: 'model', name: 'model-alpha', reported_model: 'model-alpha-001', state: 'SUCCEEDED' },
+      },
+      {
+        seq: 5,
+        run_id: 'r1',
+        type: 'assistant.text',
+        data: { operation_id: 'op-1', text: 'Answer from alpha' },
+      },
+      { seq: 6, run_id: 'r1', type: 'run.finished', data: { state: 'FINISHED' } },
+      { seq: 7, run_id: 'r2', type: 'run.started', data: {} },
+      {
+        seq: 8,
+        run_id: 'r2',
+        type: 'assistant.text',
+        data: { text: 'Legacy reply without op record' },
+      },
+      { seq: 9, run_id: 'r2', type: 'run.finished', data: { state: 'FINISHED' } },
+      {
+        seq: 10,
+        run_id: 'r3',
+        type: 'operation.started',
+        data: { operation_id: 'op-3', kind: 'model', name: 'model-beta' },
+      },
+    ];
+
+    /* Active model is now model-gamma; historical turns and in-flight draft must NOT adopt it. */
+    const msgs = eventsToMessages(events, 'Streaming beta…', 'conv-1', 'model-gamma');
+    const userRow = msgs.find((m) => m.text === 'Turn 1');
+    const alphaRow = msgs.find((m) => m.text === 'Answer from alpha');
+    const legacyRow = msgs.find((m) => m.text === 'Legacy reply without op record');
+    const draftRow = msgs.find((m) => m.messageId === 'live-draft');
+
+    expect(userRow?.model).toBeUndefined();
+    expect(alphaRow?.sender).toBe('model-alpha-001');
+    expect(alphaRow?.model).toBe('model-alpha-001');
+    expect(legacyRow?.sender).toBe('Assistant');
+    expect(legacyRow?.model).toBeUndefined();
+    expect(draftRow?.sender).toBe('model-beta');
+    expect(draftRow?.model).toBe('model-beta');
+  });
 });

@@ -125,7 +125,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     // ---- 4. Original-question custody + full Core loop + Markdown/KaTeX + no donor mutators ----
     const verbatimQ = 'What is a count table? [verbatim-custody-2026]';
     await page.getByTestId('bh-composer-input').fill(verbatimQ);
-    await page.getByTestId('bh-send-btn').click();
+    await page.getByTestId('send-button').click();
     await page.waitForURL(/\/c\/(?!new)[^?]+/, { timeout: 15000 });
     const deliveredUrl = page.url();
 
@@ -164,7 +164,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     await page.getByTestId('bh-new-research-btn').click();
     await page.waitForURL('**/c/new?ws=fixture', { timeout: 10000 });
     await page.getByTestId('bh-composer-input').fill('Amend plan test [amendment]');
-    await page.getByTestId('bh-send-btn').click();
+    await page.getByTestId('send-button').click();
     await page.waitForURL(/\/c\/(?!new)[^?]+/, { timeout: 15000 });
     await page.getByTestId('bh-hitl-amendment').waitFor({ timeout: 30000 });
     await shot('step3-2-hitl-amendment');
@@ -178,7 +178,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
       `staged="${stagedVal}"`);
 
     // Deliberate native-user submit confirms amendment on Core!
-    await page.getByTestId('bh-send-btn').click();
+    await page.getByTestId('send-button').click();
     await page.waitForFunction(
       () => document.body.innerText.includes('Confirmed amendment A1 applied on Core mainline v2'),
       { timeout: 30000 }
@@ -194,9 +194,9 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     await page.getByTestId('bh-new-research-btn').click();
     await page.waitForURL('**/c/new?ws=fixture', { timeout: 10000 });
     await page.getByTestId('bh-composer-input').fill('Slow run [slow-cancel]');
-    await page.getByTestId('bh-send-btn').click();
+    await page.getByTestId('send-button').click();
     await page.waitForURL(/\/c\/(?!new)[^?]+/, { timeout: 15000 });
-    await page.getByTestId('bh-cancel-run-btn').waitFor({ timeout: 15000 });
+    await page.getByTestId('stop-generation-button').waitFor({ timeout: 15000 });
     const slowUrl = page.url();
 
     // Navigate away while running, then return + reload: run stays alive on backend!
@@ -204,12 +204,12 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     await page.waitForURL('**/c/new?ws=fixture', { timeout: 10000 });
     await page.waitForTimeout(500);
     await page.goto(slowUrl, { waitUntil: 'load' });
-    await page.getByTestId('bh-cancel-run-btn').waitFor({ timeout: 15000 });
+    await page.getByTestId('stop-generation-button').waitFor({ timeout: 15000 });
     check('background run continues across route switch and reload',
       await page.getByTestId('bh-header-active-run').count() === 1);
 
     // Request cancellation -> distinct run.cancel_requested recorded before run.finished(CANCELLED)
-    await page.getByTestId('bh-cancel-run-btn').click();
+    await page.getByTestId('stop-generation-button').click();
     await page.waitForFunction(
       () => document.body.innerText.includes('Run cancelled (confirmed)'),
       { timeout: 25000 }
@@ -245,7 +245,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     await page.getByTestId('bh-new-research-btn').click();
     await page.waitForURL('**/c/new?ws=fixture', { timeout: 10000 });
     await page.getByTestId('bh-composer-input').fill('Trigger upstream failure [provider-502]');
-    await page.getByTestId('bh-send-btn').click();
+    await page.getByTestId('send-button').click();
     await page.waitForFunction(
       () => document.body.innerText.includes('Provider error:'),
       { timeout: 20000 }

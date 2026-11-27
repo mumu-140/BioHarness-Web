@@ -31,6 +31,11 @@ export interface ConversationEventLog {
   connectSeq: number;
 }
 
+interface ScopedEventState {
+  ownerKey: string | null;
+  log: ConversationEventLog;
+}
+
 const EMPTY_LOG: ConversationEventLog = {
   events: [],
   draft: '',
@@ -38,80 +43,145 @@ const EMPTY_LOG: ConversationEventLog = {
   connectSeq: 0,
 };
 
+function makeOwnerKey(workspace: string | null, conversationId: string | null): string | null {
+  return workspace && conversationId ? `${workspace}::${conversationId}` : null;
+}
+
 export function useBioHarnessConversationEvents(
   service: string | null,
   workspace: string | null,
   conversationId: string | null,
 ): ConversationEventLog {
   const queryClient = useQueryClient();
-  const [log, setLog] = useState<ConversationEventLog>(EMPTY_LOG);
-  const processedSeqRef = useRef(0);
+  const ownerKey = makeOwnerKey(workspace, conversationId);
+  const [scoped, setScoped] = useState<ScopedEventState>({ ownerKey, log: EMPTY_LOG });
+  const processedRef = useRef<{ ownerKey: string | null; seq: number }>({
+    ownerKey: null,
+    seq: 0,
+  });
 
   useEffect(() => {
-    setLog(EMPTY_LOG);
-    processedSeqRef.current = 0;
-    if (!workspace || !conversationId) {
+    processedRef.current = { ownerKey, seq: 0 };
+    if (!workspace || !conversationId || !ownerKey) {
+      setScoped({ ownerKey: null, log: EMPTY_LOG });
       return;
     }
+
+    let closed = false;
+    setScoped({ ownerKey, log: EMPTY_LOG });
 
     const url = conversationsPath(workspace, `/${encodeURIComponent(conversationId)}/events`);
     const source = new EventSource(url);
 
     source.onopen = () => {
-      setLog((state) => ({
-        ...state,
-        connected: true,
-        connectSeq: state.connectSeq + 1,
-        /* Drop transient unrecorded delta on reconnect so replay doesn't duplicate text. */
-        draft: !state.connected && state.events.length > 0 ? '' : state.draft,
-      }));
+      if (closed) {
+        return;
+      }
+      setScoped((prev) => {
+        if (prev.ownerKey !== ownerKey) {
+          return prev;
+        }
+        return {
+          ownerKey,
+          log: {
+            ...prev.log,
+            connected: true,
+            connectSeq: prev.log.connectSeq + 1,
+            /* Drop transient unrecorded delta on reconnect so replay doesn't duplicate text. */
+            draft: !prev.log.connected && prev.log.events.length > 0 ? '' : prev.log.draft,
+          },
+        };
+      });
     };
 
     source.onerror = () => {
-      setLog((state) => ({ ...state, connected: false }));
+      if (closed) {
+        return;
+      }
+      setScoped((prev) => {
+        if (prev.ownerKey !== ownerKey) {
+          return prev;
+        }
+        return {
+          ownerKey,
+          log: { ...prev.log, connected: false },
+        };
+      });
     };
 
     /* Server explicitly resets cursor when the backing log was replaced. */
     source.addEventListener('stream.reset', () => {
-      processedSeqRef.current = 0;
-      setLog((state) => ({
-        ...EMPTY_LOG,
-        connected: true,
-        connectSeq: state.connectSeq + 1,
-      }));
+      if (closed) {
+        return;
+      }
+      processedRef.current = { ownerKey, seq: 0 };
+      setScoped((prev) => {
+        if (prev.ownerKey !== ownerKey) {
+          return prev;
+        }
+        return {
+          ownerKey,
+          log: {
+            ...EMPTY_LOG,
+            connected: true,
+            connectSeq: prev.log.connectSeq + 1,
+          },
+        };
+      });
     });
 
     const handleEvent = (message: MessageEvent) => {
+      if (closed) {
+        return;
+      }
       let event: ConversationEvent;
       try {
         event = JSON.parse(String(message.data)) as ConversationEvent;
       } catch {
         return;
       }
+      /* Strict session-identity isolation: drop any payload targeting another conversation. */
+      if (
+        typeof event.conversation_id === 'string' &&
+        event.conversation_id.length > 0 &&
+        event.conversation_id !== conversationId
+      ) {
+        return;
+      }
 
-      setLog((state) => {
+      setScoped((prev) => {
+        if (prev.ownerKey !== ownerKey) {
+          return prev;
+        }
+        const state = prev.log;
         if (event.seq === null) {
           return {
-            ...state,
-            connected: true,
-            draft: state.draft + String(event.data?.text ?? ''),
+            ownerKey,
+            log: {
+              ...state,
+              connected: true,
+              draft: state.draft + String(event.data?.text ?? ''),
+            },
           };
         }
         const last = state.events.length
           ? (state.events[state.events.length - 1].seq as number)
           : 0;
         if (event.seq <= last) {
-          return state;
+          return prev;
         }
         const clearDraft =
           event.type === 'assistant.text' ||
           event.type === 'run.finished' ||
           (event.type === 'operation.finished' && event.data?.kind === 'model');
         return {
-          ...state,
-          events: [...state.events, event],
-          connected: true,
-          draft: clearDraft ? '' : state.draft,
+          ownerKey,
+          log: {
+            ...state,
+            events: [...state.events, event],
+            connected: true,
+            draft: clearDraft ? '' : state.draft,
+          },
         };
       });
     };
@@ -121,23 +191,29 @@ export function useBioHarnessConversationEvents(
     }
 
     return () => {
+      closed = true;
       source.close();
     };
-  }, [workspace, conversationId]);
+  }, [workspace, conversationId, ownerKey]);
+
+  /* Synchronously isolate rendered state: never leak another conversation/workspace even for 1 frame. */
+  const effectiveLog = scoped.ownerKey === ownerKey ? scoped.log : EMPTY_LOG;
 
   /* Propagate authoritative Core/run transitions into the single React Query cache. */
-  const lastSeq = log.events.length ? (log.events[log.events.length - 1].seq ?? 0) : 0;
+  const lastSeq = effectiveLog.events.length
+    ? (effectiveLog.events[effectiveLog.events.length - 1].seq ?? 0)
+    : 0;
   useEffect(() => {
-    if (!service || !workspace || !conversationId || lastSeq === 0) {
+    if (!service || !workspace || !conversationId || !ownerKey || scoped.ownerKey !== ownerKey || lastSeq === 0) {
       return;
     }
-    if (lastSeq < processedSeqRef.current) {
-      processedSeqRef.current = 0;
+    if (processedRef.current.ownerKey !== ownerKey || lastSeq < processedRef.current.seq) {
+      processedRef.current = { ownerKey, seq: 0 };
     }
-    const fresh = log.events.filter(
-      (event) => typeof event.seq === 'number' && event.seq > processedSeqRef.current,
+    const fresh = effectiveLog.events.filter(
+      (event) => typeof event.seq === 'number' && event.seq > processedRef.current.seq,
     );
-    processedSeqRef.current = lastSeq;
+    processedRef.current = { ownerKey, seq: lastSeq };
     if (fresh.length === 0) {
       return;
     }
@@ -175,9 +251,9 @@ export function useBioHarnessConversationEvents(
         queryKey: bhKeys.conversation(service, workspace, conversationId),
       });
     }
-  }, [lastSeq, log.events, queryClient, service, workspace, conversationId]);
+  }, [lastSeq, effectiveLog.events, scoped.ownerKey, ownerKey, queryClient, service, workspace, conversationId]);
 
-  return log;
+  return effectiveLog;
 }
 
 /** Watches Core/Governance snapshot version digests and invalidates matching queries. */
@@ -192,6 +268,7 @@ export function useBioHarnessVersionStream(
     if (!service || !workspace) {
       return;
     }
+    let closed = false;
     const params = new URLSearchParams();
     if (requestId) {
       params.set('request_id', requestId);
@@ -201,12 +278,16 @@ export function useBioHarnessVersionStream(
     const source = new EventSource(url);
 
     const onChanged = () => {
+      if (closed) {
+        return;
+      }
       void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
     };
     source.addEventListener('changed', onChanged);
     source.addEventListener('view', onChanged);
 
     return () => {
+      closed = true;
       source.close();
     };
   }, [queryClient, service, workspace, requestId]);

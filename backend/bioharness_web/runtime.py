@@ -87,14 +87,25 @@ class Runtime:
         self._cancels: dict[str, asyncio.Event] = {}
         self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._attaching: set[str] = set()
+        self._known_api_keys: set[str] = {model.settings.api_key} if model.settings.api_key else set()
         self._hold = max(len(settings.access_token), len(model.settings.api_key))
         self._module_tools: dict[str, dict[str, tuple[str, ToolSpec]]] = {}
 
+    def _secrets(self, extra_key: str | None = None) -> tuple[str, ...]:
+        current = self.model.settings.api_key
+        if current:
+            self._known_api_keys.add(current)
+        if extra_key:
+            self._known_api_keys.add(extra_key)
+        secrets = [s for s in (self.settings.access_token, *self._known_api_keys) if s]
+        self._hold = max((len(s) for s in secrets), default=0)
+        return tuple(secrets)
+
     # ---- what leaves the host ---------------------------------------------
-    def _scrub(self, value: Any) -> Any:
+    def _scrub(self, value: Any, extra_key: str | None = None) -> Any:
         """Remove this service's own credentials wherever a tool or a user echoed them."""
         if isinstance(value, str):
-            for secret in (self.settings.access_token, self.model.settings.api_key):
+            for secret in self._secrets(extra_key):
                 if secret and secret in value:
                     value = value.replace(secret, "[credential removed by host]")
             return value
@@ -298,10 +309,12 @@ class Runtime:
     async def _run(self, conversation: dict, run_id: str, text: str | None, scope: dict | None) -> None:
         conversation_id = conversation["id"]
         workspace = self._workspace(conversation)
+        run_model = self.model.snapshot() if hasattr(self.model, "snapshot") else self.model
+        self._secrets(run_model.settings.api_key)
         state, reason = "FAILED", "internal error"
-        self._emit(conversation_id, run_id, "run.started", {})
+        self._emit(conversation_id, run_id, "run.started", {"model": run_model.settings.name})
         try:
-            await self._conduct(conversation, workspace, run_id, text, scope)
+            await self._conduct(conversation, workspace, run_id, text, scope, run_model)
             state, reason = "FINISHED", "the turn ended"
         except _Stop as stop:
             state, reason = stop.state, stop.reason
@@ -319,7 +332,7 @@ class Runtime:
             raise _Stop("CANCELLED", "cancelled at the user's request")
 
     async def _conduct(self, conversation: dict, workspace: Workspace, run_id: str,
-                       text: str | None, scope: dict | None) -> None:
+                       text: str | None, scope: dict | None, run_model: ModelClient) -> None:
         conversation_id = conversation["id"]
         redact = self._cleaner(workspace)
         notes: list[dict] = []  # host notices for the model, in the order they arose
@@ -400,7 +413,8 @@ class Runtime:
                             + "\n# Current state of this request, as returned by BioHarness Core\n"
                             + json.dumps(redact(last), ensure_ascii=False))
             turn = await self._model_op(conversation_id, run_id, turn_number,
-                                        self._scrub(instructions), history, specs)
+                                        self._scrub(instructions, run_model.settings.api_key),
+                                        history, specs, run_model)
             history.append({"role": "assistant", "text": turn.text, "tool_calls": [
                 {"id": call.id, "name": call.name, "arguments": call.arguments if call.arguments is not None else {}}
                 for call in turn.tool_calls]})
@@ -562,10 +576,12 @@ class Runtime:
 
     # ---- operations --------------------------------------------------------
     async def _model_op(self, conversation_id: str, run_id: str, turn_number: int, instructions: str,
-                        history: list[dict], specs: list[ToolSpec]):
-        operation_id = self.ledger.start_operation(run_id, "model", self.model.settings.name)
+                        history: list[dict], specs: list[ToolSpec], run_model: ModelClient):
+        model_name = run_model.settings.name
+        model_key = run_model.settings.api_key
+        operation_id = self.ledger.start_operation(run_id, "model", model_name)
         self._emit(conversation_id, run_id, "operation.started", {
-            "operation_id": operation_id, "kind": "model", "name": self.model.settings.name,
+            "operation_id": operation_id, "kind": "model", "name": model_name,
             "initiator": "host", "turn": turn_number})
 
         written, sent = "", 0
@@ -575,7 +591,7 @@ class Runtime:
             # characters, so a credential the model echoes is removed before any of it is sent.
             nonlocal written, sent
             written += piece
-            clean = self._scrub(written)
+            clean = self._scrub(written, model_key)
             ready = len(clean) - self._hold
             if ready > sent:
                 self._publish(conversation_id, {
@@ -584,7 +600,7 @@ class Runtime:
                     "data": {"operation_id": operation_id, "text": clean[sent:ready]}})
                 sent = ready
 
-        request = asyncio.ensure_future(self.model.turn(
+        request = asyncio.ensure_future(run_model.turn(
             instructions=instructions, history=history, tools=specs, on_text=on_text))
         cancelled = asyncio.ensure_future(self._cancels[run_id].wait())
         # Until the provider has answered, the request can only end by being closed: at the
@@ -612,10 +628,11 @@ class Runtime:
                 await asyncio.gather(request, return_exceptions=True)
             self.ledger.end_operation(operation_id, state)
             self._emit(conversation_id, run_id, "operation.finished", {
-                "operation_id": operation_id, "kind": "model", "name": self.model.settings.name,
+                "operation_id": operation_id, "kind": "model", "name": model_name,
                 "state": state, **detail})
         if turn.text:
-            self._emit(conversation_id, run_id, "assistant.text", {"operation_id": operation_id, "text": turn.text})
+            self._emit(conversation_id, run_id, "assistant.text", {
+                "operation_id": operation_id, "model": turn.model or model_name, "text": turn.text})
         return turn
 
     async def _core_op(self, conversation: dict, workspace: Workspace, run_id: str, tool: str,
