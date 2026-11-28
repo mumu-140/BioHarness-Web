@@ -101,14 +101,24 @@
   - 真实 Chromium 验收：`tests/browser/ui_r3_4_run.sh` **14/14 PASS**（覆盖 Literature 12 篇分页与截断声明、Statistics render PASS + 篡改 verify FAIL、Scientific Review 缺口声明、Protein Methods 真实 `helix.pdb` 审计、Execution 详情领域卡自动渲染、390px/320px 无溢出、零 pageerror/CSP/外联）。
   - 外部阻塞/归属清单：`paperseek` 与 `scansci-pdf` 需由部署环境配置到 PATH 或环境变量（上游独立安装）；`paperqa2` 与 Statistics 临床审查器 `PRODUCTION_NOT_ENABLED`（`BioHarness-Modules`）；Scientific Review 直连模型 API 适配器归属 `BioHarness-Modules`；`dapseq`/`genome-web-tf`/`sequence` 不可运行（`BioHarness-Modules`）。
 
-### R3.5 — 产品级联合验收与收尾
+### R3.5 — 产品级联合验收与收尾（已完成 Web 隔离产品级验收，2026-11-28）
 
-- [ ] 保留 R2 原生对话、A1/HITL、SSE 重连、深链、Request/Scope 证据历史、版本/字节校验、UNKNOWN 核对和后台运行行为，针对变化影响链执行 Python、TypeScript、Jest、生产构建及现有四套 Chromium 回归。记录实际退出码、失败、跳过及测试源身份；不以用例总数替代产品验收。
-- [ ] 在真实 Chromium 以科研用户视角完整操作：创建项目/子项目 → 添加小型真实格式资料 → 选择实际支持的模型与策略 → 找到 Memory/Skills/Modules → 真实调用 → 回答用户确认 → 查看计划/证据/模块输出 → 关闭或重载后继续。不允许用截图、静态 fixture 或按钮点击代替实际可用性；分别记录 fixture、真实公开 CLI/模块、经授权 live Provider 以及真实科研结果验证范围。不得向生产研究目录写入测试数据。
-- [ ] 逐项复核 UX-01–UX-14，尤其项目概念、缺入口、模式真假、中文、历史任务定位、空状态、模型高级设置、移动端与误导性 donor 设置；桌面及 390px 主任务闭环，另做 320px/1024px、主题、键盘、加载/错误/不可用视觉检查。私有验收保留截图及操作证据，公开仓库只记脱敏摘要。
-- [ ] 真实模块及 live 科研任务的测试仅使用已授权模型、工具和隔离研究数据，验证实际结果、来源与技术状态的差异；Memory ON/OFF 独立科研收益、跨路线结果比较与真实外部长作业验收仍在 R4/Eval，不能用本轮工程 PASS 替代。
-- [ ] 对照全部变更核实架构边界、数据访问与凭据、无重复科学状态、无新门禁、无并行 TODO、保留现有固定依赖及许可证；明确任何未实现、未验证、用户决策或外部模块缺口。
-- [ ] 在本文记录阶段完成证据/精确提交，更新上级 §17.3 R3 汇总；R4 保持未开始。独立提交，工作树干净。未完整验收的范围不能勾选完成。私有生产切换另行获得授权，保留旧发布与回滚能力。
+- [x] **全影响链回归（基于 R3.4 最终提交 `f8dcae5`）：**
+  - Python 隔离全量（`/tmp` 副本 + `pyproject.toml`）：`pytest -q` **exit 0**，`260 passed in 238.55s (0 failed, 0 skipped)`（含 R3.2/R3.3/R3.4 新增 11 项真实 CLI/MCP 测试与全部 R1/R2 合同测试）。
+  - 前端检查（`node:24.22.3-slim`）：`tsc --noEmit` **exit 0**；Jest **exit 0**（`8 suites / 43 tests passed`）；Vite 生产构建 **exit 0**（`built in 12.87s`）。
+  - 全部既有 Chromium 回归（`firecrawl-playwright-service:latest`，零失败）：`ui_run.sh` **33/33**、`ui_step3_run.sh` **28/28**、`ui_step4_run.sh` **27/27**、`ui_step5_run.sh` **30/30**、`ui_r3_2_run.sh` **17/17**、`ui_r3_3_run.sh` **22/22**、`ui_r3_4_run.sh` **14/14**。
+- [x] **真实 Chromium 科研全链路联合走查（`tests/browser/ui_r3_5_run.sh`，20/20 PASS，exit 0）：**
+  - **测试范围明确区分**：
+    - 真实本地公开 CLI / 模块：`bioharness-host`、`bioharness-governance`、`bioharness-memory-mcp`、`bioharness-literature`、`bioharness-statistics-report-binding`、`bioharness-protein-methods`。
+    - 隔离本地脚本化 OpenAI 兼容 Provider：驱动端到端创建根项目 `PPGR` → 上传 CSV/FASTA/PDF → 选用 `model-deep` + `concise` 策略完成运行 → 创建子项目 `motif-eval` → 键盘切换对话/研究流程/证据 → Memory 检索/T3 校验/显式消费反馈 → Skills 四态与 Governance 文档预览 → Literature/Statistics(PASS)/Protein Methods/Scientific Review 缺口检查 → Settings 脱敏诊断 → 真实服务进程重启并重载恢复历史与项目树。
+    - **未在本轮无授权条件下执行项（如实区分）**：外部付费 live LLM Provider 实网科研任务与生产研究目录读写均未执行，零测试数据写入生产目录。
+- [x] **UX-01–UX-14 与多视口/主题/键盘复核：** 已在真实 Chromium 验证 1440×900、1024×768、390×844、320×680 零横向溢出、简体中文核心交互与术语、亮/暗主题跨重载持久化、`ArrowRight`/`Home`/`Escape` 键盘导航及隐藏无效 donor 设置（UX-13）。
+- [x] **工程验证与 R4/Eval 边界区分：** 隔离真实模块验证通过仅代表接口与产品交互正确，不替代科学方法有效性、Memory ON/OFF 科研收益对比、跨路线结果比较或真实外部长作业验收（均归属 R4/Eval）。
+- [x] **架构、凭据、依赖与许可证审计（`6de1b15..HEAD`）：**
+  - `pyproject.toml`、`ui/package.json`、`ui/client/package.json`、`LICENSE`、`ui/LICENSE` **零变更**（无新增未审批依赖，保留全部上游许可证声明）。
+  - `BioHarness-Core` 与 `BioHarness-Modules` 仓库工作树**零改动**；全 diff 扫描无 API Key 或私有研究路径泄露；`docs/plans/` 无平行计划文件。
+  - **仍待使用者决策/上游模块补齐的外部缺口汇总**：(1) Memory Curator 交互式 `inspect_proposal`/`publish_reviewed` 与 `source_registration` 公开 MCP 工具（`BioHarness-Modules`，对应 R3.3 保持未勾的两项）；(2) Memory `DEEP` 检索模式（`BioHarness-Modules`）；(3) Scientific Review 直连模型 API 适配器（`BioHarness-Modules`）；(4) `paperseek`/`scansci-pdf` 部署环境 PATH 配置；(5) 可选模型 `reasoning_effort` 透传开关；(6) 私有生产切换授权与回滚窗口。
+- [x] **阶段提交与索引汇总：** R3.1(`5fab8c5`) → R3.2(`5dc2a46`) → R3.3(`ae86c2a`) → R3.4(`f8dcae5`) → R3.5(本提交) 均独立提交且工作树干净；已同步更新上级 §17.3 汇总（保留未完成的外部接口缺口透明状态，R4 保持未开始，私有生产部署未触动）。
 
 ## 4. 验收记录规则
 
