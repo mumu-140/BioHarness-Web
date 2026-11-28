@@ -120,6 +120,31 @@
   - **仍待使用者决策/上游模块补齐的外部缺口汇总**：(1) Memory Curator 交互式 `inspect_proposal`/`publish_reviewed` 与 `source_registration` 公开 MCP 工具（`BioHarness-Modules`，对应 R3.3 保持未勾的两项）；(2) Memory `DEEP` 检索模式（`BioHarness-Modules`）；(3) Scientific Review 直连模型 API 适配器（`BioHarness-Modules`）；(4) `paperseek`/`scansci-pdf` 部署环境 PATH 配置；(5) 可选模型 `reasoning_effort` 透传开关；(6) 私有生产切换授权与回滚窗口。
 - [x] **阶段提交与索引汇总：** R3.1(`5fab8c5`) → R3.2(`5dc2a46`) → R3.3(`ae86c2a`) → R3.4(`f8dcae5`) → R3.5(本提交) 均独立提交且工作树干净；已同步更新上级 §17.3 汇总（保留未完成的外部接口缺口透明状态，R4 保持未开始，私有生产部署未触动）。
 
+### R3 独立审核收尾修复（基线 `b5b3ed4`，已完成并专项回归，暂未部署，2026-11-28）
+- [x] **1. 原样科学问题与独立附件绑定 + 跨上下文/异步隔离：**
+  - `backend/bioharness_web/inputs.py` 新增 `validate_attachments()`（符号链接安全越界拒绝、`$WORKSPACE` 还原与 SHA-256 校验，发现篡改返回 `409 ATTACHMENT_SHA_MISMATCH`，越界返回 `403 ATTACHMENT_OUTSIDE_WORKSPACE`），并将 `list_workspace_inputs` 目录深度扩展至 `max_depth=3` 以发现落盘的模块产物。
+  - `backend/bioharness_web/api.py` 与 `runtime.py` 为新建会话与续跑接口新增独立结构化 `attachments` 字段；用户原始科学问题 100% 原样写入 `user.message.text` 与 Core `science_begin(question=...)`，附件元数据以独立宿主上下文消息传递给模型并在事件流中分离存储。
+  - `ui/client/src/host/BioHarnessChatRoute.tsx`、`workspace.tsx`、`BioHarnessCapabilitiesRoute.tsx` 与 `BioHarnessDomainModulesPanel.tsx` 引入 `contextKeyRef` 跨工作区/项目/请求/会话异步响应隔离，切换上下文时清空待附带输入、Memory 检索结果与模块运行状态并丢弃过期异步回调。
+- [x] **2. 复用现有技术账本与授权研究目录的专业模块执行记录、产物保存及下游引用：**
+  - `backend/bioharness_web/ledger.py` 在既有 `ledger.sqlite3` 中新增 `workspace_module_events` 表、`record_module_operation()` 与 `module_invocations()`，更新 `observed_module_usage()` 统计；当关联有效会话时同步写入标准 `operations` + `operation.started/finished` 记录以便 `/w/executions` 直接展示。
+  - `backend/bioharness_web/inputs.py` 新增 `save_module_artifact()`（原子 `O_CREAT|O_EXCL|O_NOFOLLOW` 落盘至 `<upload_root>/module-artifacts/<module_id>/`，未配置可写 `upload_root` 时安全跳过并诚实提示）。
+  - `backend/bioharness_web/domain_modules.py` 与 `BioHarnessDomainModulesPanel.tsx` 在 Literature / Statistics / Protein Methods 执行后真实落盘产物、写入账本、刷新 `actually_used`/`use_count` 与“最近专业模块执行记录”；支持 Statistics 渲染产物一键 `verify` 与“附加到对话输入”（若关联请求已 `DELIVERED`，自动导向新对话草稿以便直接提问）。
+- [x] **3. 快速/深度预算优化与任务续接：**
+  - `backend/bioharness_web/runtime.py` 将 `concise` 预算从过紧的 12 轮 / 80k 字符优化为 `min(max(24, int(base_turns*0.6)), base_turns)` 轮 / `min(max(120_000, int(base_chars*0.5)), base_chars)` 字符，`thorough` 提升至 `max(base_turns, 80)` 轮 / `max(base_chars, 360_000)` 字符（保持 `standard` 精确等于配置基线，且完全保持 Core stop-hook 契约不变）；轮次上限提示准确报告实际策略与上限值。
+  - `BioHarnessChatRoute.tsx` 与 `BioHarnessChatBanners.tsx` 在任务非正常结束（`INTERRUPTED`/`FAILED`/`CANCELLED`）且 Core 未交付时展示内联恢复横幅，提供“续接任务”与“切换深度预算续接（`thorough`）”，续接时完整保留所选模型覆盖、运行策略与附件绑定。
+- [x] **4. 移除科研领域与模块版本硬编码 + 动态探测真实可调用性：**
+  - 移除 `BioHarnessCapabilitiesRoute.tsx` 中硬编码的 `RESEARCH_AREAS`（`plant_motif_evolution`、`dap_seq` 等）与示例占位词，改为通用动态任务条件 Key/Value 输入并兼容实装 `bioharness-module-memory` 返回的数组或字典形态 `diagnose.context_trigger_keys`；移除 `BioHarnessChatBanners.tsx`/`BioHarnessChatRoute.tsx`/`BioHarnessDomainRenderers.tsx` 中的特定领域示例与版本号。
+  - 移除 `backend/bioharness_web/domain_modules.py` 中硬编码的 `/home/yangs/.local/share/bioharness-modules` 及静态版本号（`0.2.0`/`0.6.7`/`0.7.1`/`ed82a7b6`/`356a5c6`），改为运行时动态解析安装路径、读取包元数据/CLI `--version`，并通过 `probe_cli_callable()` 实测子进程可执行性；`capabilities.py` 对齐 CLI 实测可调用状态，并将工作区 Markdown `SKILL.md` 的 `callable` 诚实标注为 `None`（“按需读取 (文档)”而非“可调用”）。
+- [x] **5. 专项回归与真实用户路径联合验收（全部在授权 Linux 隔离环境执行，暂不部署）：**
+  - **Python 隔离全量回归**：`pytest -q` **265 passed in 246.22s (0 failed, 0 skipped)**，含新增 `tests/backend/test_r3_audit_fixes.py` 5 项（覆盖原样问题+独立附件、越界/SHA 篡改拒绝、专业模块落盘/账本/验证闭环、预算策略与中断续接、CLI 动态探测与 `SKILL.md` 诚实标注）。
+  - **前端检查（`node:24.22.3-slim`）**：`tsc --noEmit` **0 错误**；Jest **8 suites / 35 tests passed**（含新增 `ui/client/src/host/__tests__/r3_audit.spec.tsx`）；Vite 生产构建成功。
+  - **新增真实用户路径 Chromium 验收（`tests/browser/ui_r3_audit_run.sh`）**：**12/12 PASS** — 实证覆盖：(1) Core 原样保留科学问题且模型实收 `counts.csv` 路径+SHA-256；(2) Statistics 渲染产物落盘、一键 `verify` 通过、账本记录与直接回附下游新对话并被模型实收；(3) 双工作区（`primary` ↔ `secondary`）与多项目（`proj-alpha` ↔ `proj-beta`）切换零串扰；(4) 中断运行触发内联恢复横幅、一键切换 `thorough` 预算完成 `DELIVERED` 并在真实服务重启后完整留存。
+  - **全量既有 Chromium 回归（9/9 套件合计 203/203 PASS，零失败）**：`ui_r3_audit_run.sh` **12/12**、`ui_r3_5_run.sh` **20/20**、`ui_r3_4_run.sh` **14/14**、`ui_r3_3_run.sh` **22/22**、`ui_r3_2_run.sh` **17/17**、`ui_step5_run.sh` **30/30**、`ui_step4_run.sh` **27/27**、`ui_step3_run.sh` **28/28**、`ui_run.sh` **33/33**。
+  - **边界与外部缺口复核**：`BioHarness-Core`、`BioHarness-Modules`、`pyproject.toml`、`ui/package.json`、`ui/client/package.json` 及生产部署均**零改动**；未开展 R4。外部模块既有缺口维持单独记录，不在 Web 侧自行重建：
+    1. `BioHarness-Modules` (`bioharness-module-memory`)：Curator 交互式 `inspect_proposal`/`publish_reviewed` 与 `source_registration` 公开 MCP 工具及 `DEEP` 检索模式尚未公开。
+    2. `BioHarness-Modules` (`bioharness-module-scientific-review`)：`core_advisor.py` 当前仍经 `CodeArtsIntakeReviewer` 调用外部 CLI，未提供直连模型 API 适配器（Web 侧已动态探测并如实披露）。
+    3. 上游检索/文献工具（`paperseek`、`scansci-pdf`、`paperqa2`）及 Statistics 临床亚组审查器（`PRODUCTION_NOT_ENABLED`）由部署环境与上游模块独立决定，Web 侧严格按实测可用状态开放或降级提示。
+
 ## 4. 验收记录规则
 
 R3 开发检查点、缺口与验证结果只更新本文件相应小节（短摘要 + Git SHA/测试证据身份），上级只更新阶段状态。必要且实质的长期架构改变需使用者批准后更新现有架构文档；不新增平行计划。测试证据、截图、真实输入与凭据保持在授权的私有 CI/科研目录。

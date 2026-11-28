@@ -23,6 +23,9 @@ export interface BioHarnessChatBannersProps {
   onAttachRequest: (requestId: string) => void;
   nowData: NowData | null;
   activeRunId: string | null;
+  lastFinishedState?: string | null;
+  selectedStrategy?: 'standard' | 'concise' | 'thorough';
+  onContinueTask?: (overrideStrategy?: 'standard' | 'concise' | 'thorough') => void;
   onInsertIntoDraft: (snippet: string) => void;
   onBranchFromDelivered: (source: BranchSourceRef) => void;
   isNew: boolean;
@@ -54,6 +57,9 @@ const BioHarnessChatBanners = memo(function BioHarnessChatBanners({
   onAttachRequest,
   nowData,
   activeRunId,
+  lastFinishedState = null,
+  selectedStrategy = 'standard',
+  onContinueTask,
   onInsertIntoDraft,
   onBranchFromDelivered,
   isNew,
@@ -236,6 +242,64 @@ const BioHarnessChatBanners = memo(function BioHarnessChatBanners({
           </div>
         </div>
       )}
+
+      {!activeRunId &&
+        !isDelivered &&
+        runtimeEnabled &&
+        !isNew &&
+        !isUnknownBegin &&
+        lastFinishedState &&
+        lastFinishedState !== 'FINISHED' &&
+        onContinueTask && (
+          <div
+            data-testid="bh-run-interrupted-banner"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-400/60 bg-amber-50/80 px-3 py-2.5 text-amber-950 dark:bg-amber-950/35 dark:text-amber-100"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 font-semibold">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>
+                  {tr(
+                    `上次运行未完成（${lastFinishedState}）— Core 科研状态已完整保留`,
+                    `Previous run ended (${lastFinishedState}) — Core state is preserved`,
+                  )}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] opacity-85">
+                {tr(
+                  '可直接续接当前任务继续执行，或切换至“深度扩展”预算以获得更多轮次与上下文空间。',
+                  'Resume from Core directly, or switch to Thorough budget for additional turns and context.',
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                data-testid="bh-resume-task-btn"
+                disabled={isActing}
+                onClick={() => onContinueTask()}
+                className="h-7 gap-1 px-2.5 text-xs"
+              >
+                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                <span>{tr('续接任务', 'Resume task')}</span>
+              </Button>
+              {selectedStrategy !== 'thorough' && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="bh-resume-thorough-btn"
+                  disabled={isActing}
+                  onClick={() => onContinueTask('thorough')}
+                  className="h-7 gap-1 px-2.5 text-xs"
+                >
+                  <span>{tr('切换深度预算续接', 'Resume (Thorough)')}</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
 
       {(amendment || waitingForUser || revisingPlan || isDelivered) && (
         <div className="space-y-2" data-testid="bh-hitl-banner" aria-label="HITL notices">
@@ -438,7 +502,7 @@ const BioHarnessChatBanners = memo(function BioHarnessChatBanners({
                 disabled={scopeMode !== 'new'}
                 value={newScopeId}
                 onChange={(e) => onNewScopeIdChange(e.target.value)}
-                placeholder={parentScopeId ? tr('如 transcriptome', 'e.g. transcriptome') : tr('如 PPGR', 'e.g. PPGR')}
+                placeholder={parentScopeId ? tr('如 subtask-1', 'e.g. subtask-1') : tr('如 project-a', 'e.g. project-a')}
                 className="border-border-medium bg-surface-primary w-36 rounded border px-1.5 py-0.5 font-mono text-xs disabled:opacity-50"
               />
             </label>

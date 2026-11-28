@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import mcp_tools
+from . import domain_modules, mcp_tools
 from .cli import CliRunner, ToolError
 from .ledger import Ledger
 from .settings import Settings, Workspace
@@ -340,7 +340,8 @@ def scan_workspace_skills(workspace: Workspace) -> list[dict[str, Any]]:
                 "truncated": truncated,
                 "declared": True,
                 "installed": True,
-                "callable": True,
+                "callable": None,
+                "callable_note": "Markdown 技能指南，由 Agent 按需读取引用，非独立可执行 RPC",
             })
     return skills
 
@@ -509,24 +510,34 @@ async def build_capabilities_snapshot(
             except ToolError as exc:
                 governance_docs_error = f"{exc.code}: {exc.message}"
 
-    # 6. Known CLI modules availability (without guessing runtime execution)
+    # 6. Known CLI modules real callability & observed usage (actively probed, never assumed from PATH alone)
     cli_modules = []
-    for mod_id, cmd_name, desc in (
-        ("core", settings.core_cli, "BioHarness Core 主线协调器 (bioharness-host)"),
-        ("project-governance", settings.governance_cli, "项目树、上下文与证据引用只读投影 (bioharness-governance)"),
-        ("literature", "bioharness-literature", "文献检索与获取 CLI 适配器 (KnowledgeSeek + ScanSci)"),
-        ("statistics", "bioharness-statistics-report-binding", "统计学报告确定性绑定与数值一致性校验"),
-        ("protein-methods", "bioharness-protein-methods", "蛋白结构与设计审计 CLI"),
+    lit_provider_ok = (
+        domain_modules.probe_cli_callable(settings.paperseek_cli, ("--help",))["callable"]
+        or domain_modules.probe_cli_callable(settings.scansci_cli, ("--help",))["callable"]
+    )
+    for mod_id, cmd_name, probe_args, desc in (
+        ("core", settings.core_cli, ("--help",), "BioHarness Core 主线协调器 (bioharness-host)"),
+        ("project-governance", settings.governance_cli, ("--help",), "项目树、上下文与证据引用只读投影 (bioharness-governance)"),
+        ("literature", settings.literature_cli, ("--help",), "文献检索与获取 CLI 适配器 (KnowledgeSeek + ScanSci)"),
+        ("statistics", settings.statistics_cli, ("--help",), "统计学报告确定性绑定与数值一致性校验"),
+        ("protein-methods", settings.protein_cli, ("--version",), "蛋白结构与设计审计 CLI"),
     ):
-        found = shutil.which(cmd_name) is not None
-        used_count = int(observed["tools"].get(mod_id, 0) + observed["servers"].get(mod_id, 0))
+        probe = domain_modules.probe_cli_callable(cmd_name, probe_args)
+        is_callable = probe["callable"] and (lit_provider_ok if mod_id == "literature" else True)
+        by_srv = int(observed["servers"].get(mod_id, 0))
+        by_tool = sum(
+            int(cnt) for name, cnt in observed["tools"].items()
+            if name == mod_id or name.startswith(f"{mod_id}:")
+        )
+        used_count = max(by_srv, by_tool)
         cli_modules.append({
             "id": mod_id,
             "command": Path(cmd_name).name,
             "description": desc,
             "declared": True,
-            "installed": found,
-            "callable": found,
+            "installed": probe["installed"],
+            "callable": is_callable,
             "actually_used": used_count > 0,
             "use_count": used_count,
         })

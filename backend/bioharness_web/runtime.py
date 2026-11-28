@@ -41,17 +41,17 @@ def run_strategies(settings: Settings) -> list[dict[str, Any]]:
             "id": "concise",
             "label": "快速紧凑",
             "label_en": "Concise",
-            "max_turns": min(12, base_turns),
-            "context_chars": min(80_000, base_chars),
-            "description": "收紧单次运行的宿主轮次与上下文窗口，适合轻量问题与快速排查；不跳过 Core 规则或证据核验，与 Memory FAST/STANDARD 检索独立。",
+            "max_turns": min(max(24, int(base_turns * 0.6)), base_turns),
+            "context_chars": min(max(120_000, int(base_chars * 0.5)), base_chars),
+            "description": "适度收紧单次运行的宿主轮次与上下文预算，保留完整 Core 五调用闭环空间而不轻易中断，与 Memory FAST/STANDARD 检索独立。",
         },
         {
             "id": "thorough",
             "label": "深度扩展",
             "label_en": "Thorough",
-            "max_turns": min(60, max(base_turns, 60)),
-            "context_chars": max(base_chars, 320_000),
-            "description": "提高单次运行的宿主工具/模型轮次与上下文预算，适合多步分析与综合；不改变 Core 五调用或科学审查边界。",
+            "max_turns": max(base_turns, 80),
+            "context_chars": max(base_chars, 360_000),
+            "description": "扩展单次运行的宿主轮次与上下文窗口，适合多步分析、文献/统计验证与综合；不改变 Core 五调用或科学审查边界。",
         },
     ]
 
@@ -302,7 +302,8 @@ class Runtime:
                   scope: dict | None = None, *,
                   model_override: ModelSettings | None = None,
                   provider_id: str | None = None,
-                  strategy: str | None = None) -> str:
+                  strategy: str | None = None,
+                  attachments: list[dict[str, Any]] | None = None) -> str:
         conversation = self._conversation(workspace_id, conversation_id)
         if self.ledger.active_run(conversation_id) or conversation_id in self._attaching:
             raise RuntimeRefusal("RUN_ACTIVE", "a run is already in progress for this conversation")
@@ -331,7 +332,7 @@ class Runtime:
         self._cancels[run_id] = asyncio.Event()
         task = asyncio.get_running_loop().create_task(
             self._run(conversation, run_id, text, scope, model_override=model_override,
-                      provider_id=provider_id, budget=budget)
+                      provider_id=provider_id, budget=budget, attachments=attachments)
         )
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: (self._tasks.pop(run_id, None), self._cancels.pop(run_id, None),
@@ -361,7 +362,8 @@ class Runtime:
     async def _run(self, conversation: dict, run_id: str, text: str | None, scope: dict | None, *,
                    model_override: ModelSettings | None = None,
                    provider_id: str | None = None,
-                   budget: dict[str, Any] | None = None) -> None:
+                   budget: dict[str, Any] | None = None,
+                   attachments: list[dict[str, Any]] | None = None) -> None:
         conversation_id = conversation["id"]
         workspace = self._workspace(conversation)
         if model_override is not None:
@@ -381,7 +383,7 @@ class Runtime:
             started_payload["provider_id"] = provider_id
         self._emit(conversation_id, run_id, "run.started", started_payload)
         try:
-            await self._conduct(conversation, workspace, run_id, text, scope, run_model, active_budget)
+            await self._conduct(conversation, workspace, run_id, text, scope, run_model, active_budget, attachments=attachments)
             state, reason = "FINISHED", "the turn ended"
         except _Stop as stop:
             state, reason = stop.state, stop.reason
@@ -400,7 +402,8 @@ class Runtime:
 
     async def _conduct(self, conversation: dict, workspace: Workspace, run_id: str,
                        text: str | None, scope: dict | None, run_model: ModelClient,
-                       budget: dict[str, Any] | None = None) -> None:
+                       budget: dict[str, Any] | None = None, *,
+                       attachments: list[dict[str, Any]] | None = None) -> None:
         active_budget = budget or resolve_strategy_budget(self.settings, None)
         max_turns = int(active_budget["max_turns"])
         context_chars = int(active_budget["context_chars"])
@@ -408,7 +411,23 @@ class Runtime:
         redact = self._cleaner(workspace)
         notes: list[dict] = []  # host notices for the model, in the order they arose
         if text is not None:
-            self._emit(conversation_id, run_id, "user.message", {"text": text})  # verbatim
+            user_payload: dict[str, Any] = {"text": text}
+            if attachments:
+                user_payload["attachments"] = attachments
+            self._emit(conversation_id, run_id, "user.message", user_payload)  # verbatim question + separate attachments
+        if attachments:
+            att_lines = [
+                f"- {a.get('server_path') or a.get('relative_path')} "
+                f"({a.get('bytes', 0)} bytes, sha256={a.get('sha256', '')}, unverified_input=true)"
+                for a in attachments
+            ]
+            notes.append({
+                "role": "host",
+                "text": (
+                    "The user attached workspace input file(s) separately from their verbatim scientific question. "
+                    "Inspect/verify them via tools before citing as evidence:\n" + "\n".join(att_lines)
+                ),
+            })
 
         if conversation["request_id"] is None:
             arguments: dict[str, Any] = {"question": text}
@@ -525,8 +544,11 @@ class Runtime:
                 self._check_cancel(run_id)
         self._emit(conversation_id, run_id, "notice", {
             "source": "host",
-            "text": f"Technical limit of {self.settings.max_model_turns_per_run} model turns in one run reached. "
-                    "The request is unchanged in Core and can be resumed."})
+            "code": "TURN_LIMIT_REACHED",
+            "strategy": budget["id"],
+            "max_turns": max_turns,
+            "text": f"已达到当前预算策略（{budget['id']}）单次运行上限 {max_turns} 轮。"
+                    "Core 中的科研状态完整保留，您可以直接点击“续接任务”或切换为“深度扩展”继续执行。"})
         raise _Stop("INTERRUPTED", "technical turn limit reached")
 
     def _history(self, conversation_id: str) -> list[dict]:
@@ -537,6 +559,14 @@ class Runtime:
         for event in reversed(self.ledger.events(conversation_id)):
             if event["type"] == "user.message":
                 item = {"role": "user", "text": event["data"]["text"]}
+                atts = event["data"].get("attachments")
+                if isinstance(atts, list) and atts:
+                    att_summary = "; ".join(
+                        f"{a.get('server_path') or a.get('relative_path')} (sha256={a.get('sha256', '')})"
+                        for a in atts if isinstance(a, dict)
+                    )
+                    if att_summary:
+                        items.append({"role": "host", "text": f"Attached inputs for prior user message: {att_summary}"})
             elif event["type"] == "assistant.text":
                 item = {"role": "assistant", "text": event["data"]["text"]}
             else:

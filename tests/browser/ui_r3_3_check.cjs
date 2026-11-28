@@ -69,7 +69,10 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
       curatorNote.includes('BioHarness-Modules') && curatorNote.includes('Curator'),
       curatorNote);
 
-    // 3. Recall (FAST) -> T1 / T2 / T3 expansion -> Usage feedback
+    // 3. Recall (FAST) using dynamic trigger key -> T1 / T2 / T3 expansion -> Usage feedback
+    await page.getByTestId('bh-memory-cond-key').fill('research_area');
+    await page.getByTestId('bh-memory-cond-val').fill('plant_motif_evolution');
+    await page.getByTestId('bh-memory-add-cond-btn').click();
     await page.getByTestId('bh-memory-query-input').fill('DESeq2 biological replicates');
     await page.getByTestId('bh-memory-recall-submit').click();
     await page.getByTestId('bh-memory-cand-mem:ppgr-deseq2@1').waitFor({ timeout: 20000 });
@@ -128,8 +131,8 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     const resText = await page.getByTestId('bh-cap-resource-echo-mod').innerText();
     const computeText = await page.getByTestId('bh-cap-compute-disclosure').innerText();
 
-    check('Workspace SKILL.md shows Declared/Installed/Callable/Unused four-state badges',
-      skText.includes('已声明') && skText.includes('已安装') && skText.includes('可调用') && skText.includes('尚未使用'),
+    check('Workspace SKILL.md shows honest Declared/Installed/Advisory-doc/Unused badges (not Callable)',
+      skText.includes('已声明') && skText.includes('已安装') && skText.includes('按需读取') && !skText.includes('可调用') && skText.includes('尚未使用'),
       skText);
     check('Core [[resources]] + Web ledger distinguishes actually_used state for echo-mod',
       resText.includes('已声明') && resText.includes('已实际调用'),

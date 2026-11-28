@@ -52,6 +52,7 @@ export interface ModelOverride {
 
 export interface WorkspaceInputFile {
   name: string;
+  relative_path?: string;
   server_path: string;
   bytes: number;
   extension: string;
@@ -62,6 +63,13 @@ export interface WorkspaceInputFile {
   source_kind: 'uploaded_input' | 'workspace_file' | string;
   evidence_verified: boolean;
   note?: string;
+}
+
+export interface AttachmentRef {
+  path: string;
+  sha256?: string | null;
+  name?: string | null;
+  bytes?: number | null;
 }
 
 export interface WorkspaceInputsResponse {
@@ -664,6 +672,7 @@ export async function createConversation(
     scope?: NewScopeSelection;
     model_override?: ModelOverride;
     strategy?: RunStrategyOption['id'];
+    attachments?: AttachmentRef[];
   },
 ): Promise<{ conversation: WorkspaceConversation; run_id: string | null }> {
   const res = await hostFetch(conversationsPath(workspace), {
@@ -702,7 +711,11 @@ export async function startRun(
   workspace: string,
   conversationId: string,
   text?: string | null,
-  opts?: { model_override?: ModelOverride; strategy?: RunStrategyOption['id'] },
+  opts?: {
+    model_override?: ModelOverride;
+    strategy?: RunStrategyOption['id'];
+    attachments?: AttachmentRef[];
+  },
 ): Promise<{ run_id: string }> {
   const body: Record<string, unknown> = {};
   if (text !== undefined && text !== null) {
@@ -713,6 +726,9 @@ export async function startRun(
   }
   if (opts?.strategy) {
     body.strategy = opts.strategy;
+  }
+  if (opts?.attachments && opts.attachments.length > 0) {
+    body.attachments = opts.attachments;
   }
   const res = await hostFetch(
     conversationsPath(workspace, `/${encodeURIComponent(conversationId)}/runs`),
@@ -1001,11 +1017,30 @@ export function eventsToMessages(
     const seq = event.seq ?? 0;
     const text = typeof event.data.text === 'string' ? event.data.text : '';
     if (event.type === 'user.message') {
+      const rawAttachments = Array.isArray(event.data.attachments)
+        ? (event.data.attachments as Array<{
+            name?: string;
+            server_path?: string;
+            relative_path?: string;
+            sha256?: string;
+          }>)
+        : [];
+      const attachmentNote =
+        rawAttachments.length > 0
+          ? '\n\n---\n' +
+            rawAttachments
+              .map((att) => {
+                const label = att.name || att.relative_path || att.server_path || 'input';
+                const shortSha = att.sha256 ? ` · sha256:${att.sha256.slice(0, 12)}` : '';
+                return `📎 \`${label}\`${shortSha}`;
+              })
+              .join('  \n')
+          : '';
       rows.push({
         id: `e-${seq}`,
         isCreatedByUser: true,
         sender: 'User',
-        text,
+        text: text + attachmentNote,
         createdAt: event.at,
       });
     } else if (event.type === 'assistant.text') {
@@ -1407,7 +1442,7 @@ export interface MemoryDiagnoseMetrics {
   source_issues?: unknown[];
   exact_duplicate_group_count?: number;
   shared_source_group_count?: number;
-  context_trigger_keys?: string[];
+  context_trigger_keys?: string[] | Record<string, unknown>;
   use_feedback?: {
     events?: number;
     consumed?: number;
@@ -1534,7 +1569,8 @@ export interface CapabilitySkillItem {
   truncated?: boolean;
   declared: boolean;
   installed: boolean;
-  callable: boolean;
+  callable: boolean | null;
+  callable_note?: string;
   actually_used: boolean;
   use_count: number;
 }
@@ -1790,11 +1826,25 @@ export interface DomainModuleEntry {
   direct_model_api_gap_note?: string;
 }
 
+export interface DomainModuleRecentInvocation {
+  id: string;
+  conversation_id: string | null;
+  module_id: string;
+  operation: string;
+  state: string;
+  input: Record<string, unknown> | null;
+  error: { code?: string; message?: string } | null;
+  saved_artifact: WorkspaceInputFile | null;
+  at: string;
+}
+
 export interface DomainModulesResponse {
   service: string;
   workspace: string;
   observed_at: string;
+  upload_enabled?: boolean;
   modules: DomainModuleEntry[];
+  recent_invocations?: DomainModuleRecentInvocation[];
   workspace_files: {
     json: string[];
     templates: string[];
@@ -1859,6 +1909,9 @@ export interface LiteratureRunResponse {
   operation: 'search' | 'fetch';
   cli: string;
   result: Record<string, unknown>;
+  saved_artifact?: WorkspaceInputFile | null;
+  save_note?: string | null;
+  recorded_in_ledger?: boolean;
 }
 
 export interface StatisticsRecord {
@@ -1907,6 +1960,9 @@ export interface StatisticsReportBindingResponse {
     report_sha256?: string;
   } | null;
   rendered_markdown: string | null;
+  saved_artifact?: WorkspaceInputFile | null;
+  save_note?: string | null;
+  recorded_in_ledger?: boolean;
   error?: { code: string; message: string } | null;
   note: string;
 }
@@ -1924,6 +1980,9 @@ export interface ProteinRunResponse {
   cli: string;
   input_file: string;
   result: Record<string, unknown>;
+  saved_artifact?: WorkspaceInputFile | null;
+  save_note?: string | null;
+  recorded_in_ledger?: boolean;
 }
 
 export async function fetchDomainModules(workspace: string): Promise<DomainModulesResponse> {
@@ -1956,6 +2015,8 @@ export async function runLiteratureModule(
     iterations?: number;
     search_json_path?: string;
     lanes?: boolean;
+    save_output?: boolean;
+    conversation_id?: string;
   },
 ): Promise<LiteratureRunResponse> {
   const res = await hostFetch(
@@ -1976,6 +2037,8 @@ export async function runStatisticsReportBinding(
     records_path: string;
     template_path?: string;
     report_path?: string;
+    save_output?: boolean;
+    conversation_id?: string;
   },
 ): Promise<StatisticsReportBindingResponse> {
   const res = await hostFetch(
@@ -1999,6 +2062,8 @@ export async function runProteinModule(
     mode?: string;
     verify_files?: boolean;
     model_index?: number;
+    save_output?: boolean;
+    conversation_id?: string;
   },
 ): Promise<ProteinRunResponse> {
   const res = await hostFetch(

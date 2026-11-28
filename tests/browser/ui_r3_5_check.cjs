@@ -111,6 +111,9 @@ async function waitForFile(p, timeoutMs = 20000) {
     // 5. Open Memory & Capabilities -> Memory recall + T3 + feedback + Skills/Docs
     await page.getByTestId('bh-tab-capabilities').click();
     await page.getByTestId('bh-memory-callable-badge').waitFor({ timeout: 20000 });
+    await page.getByTestId('bh-memory-cond-key').fill('research_area');
+    await page.getByTestId('bh-memory-cond-val').fill('plant_motif_evolution');
+    await page.getByTestId('bh-memory-add-cond-btn').click();
     await page.getByTestId('bh-memory-query-input').fill('DESeq2 biological replicates');
     await page.getByTestId('bh-memory-recall-submit').click();
     await page.getByTestId('bh-memory-cand-mem:ppgr-deseq2@1').waitFor({ timeout: 15000 });

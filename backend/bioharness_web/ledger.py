@@ -55,6 +55,20 @@ CREATE TABLE IF NOT EXISTS events (
     at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_by_conversation ON events(conversation_id, seq);
+CREATE TABLE IF NOT EXISTS workspace_module_events (
+    id TEXT PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    conversation_id TEXT,
+    module_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    state TEXT NOT NULL,
+    input_json TEXT,
+    output_json TEXT,
+    error_json TEXT,
+    saved_artifact_json TEXT,
+    at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS module_events_by_workspace ON workspace_module_events(workspace, at DESC);
 """
 
 RUN_ENDED = ("FINISHED", "FAILED", "INTERRUPTED", "CANCELLED")
@@ -248,18 +262,151 @@ class Ledger:
     def operations(self, run_id: str) -> list[dict]:
         return self._all("SELECT * FROM operations WHERE run_id = ? ORDER BY started_at, id", run_id)
 
+    def record_module_operation(
+        self,
+        workspace: str,
+        *,
+        module_id: str,
+        operation: str,
+        state: str,
+        input_data: Any = None,
+        output_data: Any = None,
+        error_data: Any = None,
+        saved_artifact: dict[str, Any] | None = None,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a real professional-module CLI invocation in the existing technical ledger.
+
+        If `conversation_id` is supplied and belongs to `workspace`, also records a standard
+        `operations` + `operation.started`/`operation.finished` entry so `/w/executions` displays
+        the invocation with its domain output renderer without altering active chat run state.
+        """
+        assert state in OPERATION_ENDED
+        ev_id = new_id("mod")
+        at = _now()
+        bounded_in = bounded(input_data) if input_data is not None else None
+        bounded_out = bounded(output_data) if output_data is not None else None
+        bounded_err = bounded(error_data) if error_data is not None else None
+        valid_convo_id: str | None = None
+
+        with self._lock:
+            if conversation_id:
+                row = self._db.execute(
+                    "SELECT id FROM conversations WHERE id = ? AND workspace = ?",
+                    (conversation_id, workspace),
+                ).fetchone()
+                if row is not None:
+                    valid_convo_id = str(row["id"])
+
+            self._db.execute(
+                "INSERT INTO workspace_module_events "
+                "(id, workspace, conversation_id, module_id, operation, state, input_json, output_json, "
+                " error_json, saved_artifact_json, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ev_id,
+                    workspace,
+                    valid_convo_id,
+                    module_id,
+                    operation,
+                    state,
+                    json.dumps(bounded_in, ensure_ascii=False, default=str) if bounded_in is not None else None,
+                    json.dumps(bounded_out, ensure_ascii=False, default=str) if bounded_out is not None else None,
+                    json.dumps(bounded_err, ensure_ascii=False, default=str) if bounded_err is not None else None,
+                    json.dumps(saved_artifact, ensure_ascii=False, default=str) if saved_artifact is not None else None,
+                    at,
+                ),
+            )
+
+            if valid_convo_id is not None:
+                # Attach a completed non-running technical record under this conversation so
+                # /w/executions observes the real module call without emitting chat run.started/finished.
+                rec_run_id = new_id("run")
+                op_id = new_id("op")
+                self._db.execute(
+                    "INSERT INTO runs (id, conversation_id, state, started_at, ended_at, reason) "
+                    "VALUES (?, ?, 'FINISHED', ?, ?, ?)",
+                    (rec_run_id, valid_convo_id, at, at, f"module:{module_id}:{operation}"),
+                )
+                self._db.execute(
+                    "INSERT INTO operations (id, run_id, kind, name, state, started_at, ended_at) "
+                    "VALUES (?, ?, 'tool', ?, ?, ?, ?)",
+                    (op_id, rec_run_id, f"{module_id}:{operation}", state, at, at),
+                )
+                started_payload = {
+                    "operation_id": op_id,
+                    "kind": "tool",
+                    "name": f"{module_id}:{operation}",
+                    "server": module_id,
+                    "initiator": "user",
+                    "input": bounded_in,
+                }
+                finished_payload: dict[str, Any] = {
+                    "operation_id": op_id,
+                    "kind": "tool",
+                    "name": f"{module_id}:{operation}",
+                    "server": module_id,
+                    "state": state,
+                    "output": bounded_out,
+                    "error": bounded_err,
+                }
+                if saved_artifact is not None:
+                    finished_payload["saved_artifact"] = saved_artifact
+                self._db.execute(
+                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
+                    (valid_convo_id, rec_run_id, "operation.started", json.dumps(started_payload, ensure_ascii=False, default=str), at),
+                )
+                self._db.execute(
+                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
+                    (valid_convo_id, rec_run_id, "operation.finished", json.dumps(finished_payload, ensure_ascii=False, default=str), at),
+                )
+
+        return {
+            "id": ev_id,
+            "workspace": workspace,
+            "conversation_id": valid_convo_id,
+            "module_id": module_id,
+            "operation": operation,
+            "state": state,
+            "saved_artifact": saved_artifact,
+            "at": at,
+        }
+
+    def module_invocations(self, workspace: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._all(
+            "SELECT id, conversation_id, module_id, operation, state, input_json, error_json, "
+            "saved_artifact_json, at FROM workspace_module_events "
+            "WHERE workspace = ? ORDER BY rowid DESC LIMIT ?",
+            workspace,
+            max(1, min(limit, 100)),
+        )
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "id": r["id"],
+                "conversation_id": r["conversation_id"],
+                "module_id": r["module_id"],
+                "operation": r["operation"],
+                "state": r["state"],
+                "input": json.loads(r["input_json"]) if r["input_json"] else None,
+                "error": json.loads(r["error_json"]) if r["error_json"] else None,
+                "saved_artifact": json.loads(r["saved_artifact_json"]) if r["saved_artifact_json"] else None,
+                "at": r["at"],
+            })
+        return out
+
     def observed_module_usage(self, workspace: str) -> dict[str, Any]:
-        """Count actual observed tool/server invocations for this workspace from the technical ledger."""
+        """Count observed tool/module invocations in this workspace from the Web ledger."""
         tool_rows = self._all(
-            "SELECT o.name AS name, COUNT(*) AS cnt, MAX(o.started_at) AS last_at "
+            "SELECT o.name AS name, COUNT(*) AS cnt "
             "FROM operations o JOIN runs r ON r.id = o.run_id JOIN conversations c ON c.id = r.conversation_id "
             "WHERE c.workspace = ? AND o.kind = 'tool' GROUP BY o.name",
             workspace,
         )
-        tools = {row["name"]: int(row["cnt"]) for row in tool_rows}
+        tools = {str(row["name"]): int(row["cnt"]) for row in tool_rows}
         event_rows = self._all(
             "SELECT e.data AS data FROM events e JOIN conversations c ON c.id = e.conversation_id "
-            "WHERE c.workspace = ? AND e.type IN ('tool.started', 'module.tools') ORDER BY e.seq DESC LIMIT 500",
+            "WHERE c.workspace = ? AND e.type IN ('tool.started', 'operation.started', 'module.tools') "
+            "ORDER BY e.seq DESC LIMIT 500",
             workspace,
         )
         servers: dict[str, int] = {}
@@ -270,13 +417,33 @@ class Ledger:
                 continue
             if not isinstance(data, dict):
                 continue
+            if data.get("kind") and data.get("kind") != "tool":
+                continue
             srv = data.get("server")
             if isinstance(srv, str) and srv and "name" in data:
                 servers[srv] = servers.get(srv, 0) + 1
+
+        # Include workspace-level module invocations that were not already counted via a conversation op
+        mod_rows = self._all(
+            "SELECT module_id, operation, COUNT(*) AS cnt FROM workspace_module_events "
+            "WHERE workspace = ? AND conversation_id IS NULL GROUP BY module_id, operation",
+            workspace,
+        )
+        extra_calls = 0
+        for row in mod_rows:
+            mid = str(row["module_id"])
+            op = str(row["operation"])
+            cnt = int(row["cnt"])
+            extra_calls += cnt
+            servers[mid] = servers.get(mid, 0) + cnt
+            key = f"{mid}:{op}"
+            tools[key] = tools.get(key, 0) + cnt
+
         return {
             "servers": servers,
             "tools": tools,
             "total_tool_calls": sum(tools.values()),
+            "workspace_direct_module_calls": extra_calls,
         }
 
     # ---- events ----------------------------------------------------------

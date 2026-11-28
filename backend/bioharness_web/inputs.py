@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from .settings import Workspace
-from .sources import path_redactor
+import secrets
+from .sources import path_expander, path_redactor
 
 ALLOWED_UPLOAD_EXTENSIONS: frozenset[str] = frozenset({
     ".csv", ".tsv", ".txt", ".md",
@@ -141,7 +142,7 @@ def list_workspace_inputs(workspace: Workspace, *, max_upload_bytes: int = DEFAU
                 })
 
     if workspace.upload_root is not None:
-        scan_dir(workspace.upload_root, "uploaded_input", max_depth=2)
+        scan_dir(workspace.upload_root, "uploaded_input", max_depth=3)
     if not truncated:
         scan_dir(workspace.path, "workspace_file", max_depth=1)
 
@@ -250,4 +251,157 @@ def save_workspace_input(
         "source_kind": "uploaded_input",
         "evidence_verified": False,
         "note": "文件已保存到授权输入目录并计算 SHA-256；该文件尚未成为 Core 已核验科研证据，需在研究步骤提交后由 Core 核验。",
+    }
+
+
+MAX_ATTACHMENTS_PER_MESSAGE = 12
+
+
+def validate_attachments(
+    workspace: Workspace,
+    raw_items: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Validate structured user-attached workspace input files without altering the user's question.
+
+    Every path must resolve strictly inside `workspace.evidence_roots` (never `.bioharness`,
+    never following symlinks outside authorized roots). Returns redacted, verified metadata.
+    """
+    if not raw_items:
+        return []
+    if len(raw_items) > MAX_ATTACHMENTS_PER_MESSAGE:
+        raise InputError(
+            "TOO_MANY_ATTACHMENTS",
+            f"单条消息最多绑定 {MAX_ATTACHMENTS_PER_MESSAGE} 个研究资料附件。",
+            422,
+        )
+    expand = path_expander(workspace)
+    redact = path_redactor(workspace)
+    roots = [r.resolve() for r in workspace.evidence_roots]
+    ws_root = workspace.path.resolve()
+    validated: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+
+    for raw in raw_items:
+        raw_path = str(raw.get("path") or raw.get("server_path") or "").strip()
+        if not raw_path or any(ord(ch) < 32 for ch in raw_path):
+            raise InputError("ATTACHMENT_PATH_INVALID", "附件路径无效。", 422)
+        expanded = expand(raw_path)
+        if not isinstance(expanded, str):
+            raise InputError("ATTACHMENT_PATH_INVALID", "附件路径无效。", 422)
+        if os.path.isabs(expanded):
+            cand = Path(expanded)
+        else:
+            if "\\" in expanded or ".." in Path(expanded).parts:
+                raise InputError("ATTACHMENT_PATH_INVALID", "附件相对路径不允许包含上级目录。", 422)
+            cand = ws_root / expanded
+
+        # Reject symlinks on any path segment from its matching root
+        try:
+            resolved = cand.resolve(strict=True)
+        except OSError:
+            raise InputError("ATTACHMENT_NOT_FOUND", f"找不到所选附件：{raw_path}", 404) from None
+
+        matching_root = next((r for r in roots if resolved.is_relative_to(r)), None)
+        if matching_root is None or _is_under_state_dir(resolved, workspace) or not resolved.is_file():
+            raise InputError("ATTACHMENT_OUTSIDE_WORKSPACE", f"附件不在当前工作区授权范围内：{raw_path}", 403)
+
+        # Verify no symlink segment between matching_root and cand
+        rel_parts = cand.relative_to(matching_root).parts if cand.is_relative_to(matching_root) else ()
+        cur = matching_root
+        for seg in rel_parts:
+            cur = cur / seg
+            if cur.is_symlink():
+                raise InputError("ATTACHMENT_SYMLINK_REFUSED", "拒绝绑定符号链接附件。", 403)
+
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        content = resolved.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        expected_sha = raw.get("sha256")
+        if isinstance(expected_sha, str) and expected_sha.strip() and expected_sha.strip().lower() != digest:
+            raise InputError(
+                "ATTACHMENT_SHA_MISMATCH",
+                f"附件内容校验摘要已变化（{resolved.name}），请重新确认后再提交。",
+                409,
+            )
+        rel_to_ws = str(resolved.relative_to(ws_root)) if resolved.is_relative_to(ws_root) else resolved.name
+        validated.append({
+            "name": resolved.name,
+            "server_path": redact(str(resolved)),
+            "relative_path": rel_to_ws,
+            "bytes": len(content),
+            "sha256": digest,
+            "evidence_verified": False,
+        })
+    return validated
+
+
+def save_module_artifact(
+    workspace: Workspace,
+    module_id: str,
+    filename_hint: str,
+    data: bytes,
+) -> dict[str, Any] | None:
+    """Persist a deterministic module output under the workspace's authorized `upload_root`.
+
+    Returns None when the workspace is read-only (no `upload_root` configured).
+    Uses O_CREAT | O_EXCL | O_NOFOLLOW to prevent overwrites and symlink attacks.
+    """
+    if workspace.upload_root is None:
+        return None
+    safe_mod = sanitize_scope_segment(module_id)
+    if not safe_mod:
+        raise InputError("MODULE_ID_INVALID", "模块标识无效。", 422)
+    raw_name = Path(filename_hint).name.strip()
+    ext = Path(raw_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        ext = ".json"
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(raw_name).stem).strip("-._")[:48] or "artifact"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    unique_name = f"{stamp}-{secrets.token_hex(4)}-{stem}{ext}"
+
+    root = workspace.upload_root.resolve()
+    if workspace.upload_root.is_symlink() or not root.is_dir() or _is_under_state_dir(root, workspace):
+        raise InputError("UPLOAD_ROOT_INVALID", "授权目录不可用。", 500)
+
+    art_base = root / "module-artifacts"
+    target_dir = art_base / safe_mod
+    for d in (art_base, target_dir):
+        if d.exists() and d.is_symlink():
+            raise InputError("UPLOAD_SYMLINK_REJECTED", "产物目录包含符号链接，已拒绝写入。", 400)
+        d.mkdir(parents=True, exist_ok=True)
+    target_dir_resolved = target_dir.resolve()
+    if not target_dir_resolved.is_relative_to(root) or _is_under_state_dir(target_dir_resolved, workspace):
+        raise InputError("UPLOAD_PATH_OUTSIDE_ROOT", "产物目录超出授权根目录。", 400)
+
+    target = target_dir_resolved / unique_name
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(target), flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+    except BaseException:
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    resolved = target.resolve()
+    ws_root = workspace.path.resolve()
+    redact = path_redactor(workspace)
+    rel_to_ws = str(resolved.relative_to(ws_root)) if resolved.is_relative_to(ws_root) else unique_name
+    return {
+        "name": unique_name,
+        "module_id": safe_mod,
+        "server_path": redact(str(resolved)),
+        "relative_path": rel_to_ws,
+        "bytes": len(data),
+        "extension": ext,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source_kind": "module_artifact",
+        "evidence_verified": False,
     }

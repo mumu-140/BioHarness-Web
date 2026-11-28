@@ -46,7 +46,7 @@ import {
   startRun,
   uploadWorkspaceInput,
 } from './bioharness';
-import { formatBytes, useBhText } from './i18n';
+import { useBhText } from './i18n';
 import { useBioHarnessConversationEvents, useBioHarnessVersionStream } from './events';
 import { useBioHarnessWorkspace } from './workspace';
 import BioHarnessChatBanners from './BioHarnessChatBanners';
@@ -76,6 +76,8 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     setBranchSource,
     pendingScopeDraft,
     setPendingScopeDraft,
+    pendingAttachments,
+    clearPendingAttachments,
     openConversation,
     openNewResearch,
     getDraft,
@@ -154,6 +156,10 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     refetchOnWindowFocus: false,
   });
 
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${activeConversationId ?? 'new'}::${selectedRequestId ?? 'none'}::${workspaceScopeId ?? 'none'}`;
+  const contextKeyRef = useRef(contextKey);
+  contextKeyRef.current = contextKey;
+
   useEffect(() => {
     setScopeMode('none');
     setSelectedScopeId('');
@@ -161,7 +167,31 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     setParentScopeId('');
     setAttachedInputs([]);
     setUploadError(null);
+    setUploadingInput(false);
+    setInputsDrawerOpen(false);
   }, [workspace]);
+
+  useEffect(() => {
+    setAttachedInputs([]);
+    setUploadError(null);
+    setUploadingInput(false);
+  }, [activeConversationId, selectedRequestId, workspaceScopeId]);
+
+  useEffect(() => {
+    if (!pendingAttachments || pendingAttachments.length === 0) {
+      return;
+    }
+    setAttachedInputs((prev) => {
+      const merged = [...prev];
+      for (const item of pendingAttachments) {
+        if (!merged.some((x) => x.server_path === item.server_path)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+    clearPendingAttachments?.();
+  }, [pendingAttachments, clearPendingAttachments]);
 
   useEffect(() => {
     if (!isNew || selectedRequestId || !pendingScopeDraft) {
@@ -218,7 +248,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       return tr('请选择一个已有科研项目，或切换为独立问题。', 'Choose an existing scope or switch to No scope.');
     }
     if (scopeMode === 'new' && !newScopeId.trim()) {
-      return tr('请输入新项目/子项目标识（如 PPGR），或切换为独立问题。', 'Enter a new scope ID or switch to No scope.');
+      return tr('请输入新项目/子项目标识（如 project-a），或切换为独立问题。', 'Enter a new scope ID or switch to No scope.');
     }
     return null;
   }, [isNew, selectedRequestId, scopeMode, selectedScopeId, newScopeId, tr]);
@@ -251,11 +281,19 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       if (isActing) {
         return null;
       }
+      const snapKey = contextKeyRef.current;
       setIsActing(true);
       setProblem(null);
       try {
-        return await work();
+        const result = await work();
+        if (contextKeyRef.current !== snapKey) {
+          return null;
+        }
+        return result;
       } catch (err) {
+        if (contextKeyRef.current !== snapKey) {
+          return null;
+        }
         if (err instanceof BioHarnessApiError) {
           if (err.status === 401) {
             void queryClient.invalidateQueries({ queryKey: bhKeys.meta() });
@@ -315,17 +353,51 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     }
   }, [workspace, activeConversationId, activeRunId, cancelRequested, runAction]);
 
-  const handleContinueFromCore = useCallback(async () => {
-    if (!workspace || !service || !activeConversationId || activeRunId) {
-      return;
-    }
-    const res = await runAction(() => startRun(workspace, activeConversationId, null));
-    if (res) {
-      void queryClient.invalidateQueries({
-        queryKey: bhKeys.conversation(service, workspace, activeConversationId),
-      });
-    }
-  }, [workspace, service, activeConversationId, activeRunId, runAction, queryClient]);
+  const handleContinueFromCore = useCallback(
+    async (overrideStrategy?: RunStrategyOption['id']) => {
+      if (!workspace || !service || !activeConversationId || activeRunId) {
+        return;
+      }
+      const effectiveStrategy = overrideStrategy ?? selectedStrategy;
+      if (overrideStrategy) {
+        setSelectedStrategy(overrideStrategy);
+      }
+      const attachmentRefs =
+        attachedInputs.length > 0
+          ? attachedInputs.map((item) => ({
+              path: item.server_path,
+              sha256: item.sha256,
+              name: item.name,
+              bytes: item.bytes,
+            }))
+          : undefined;
+      const runOpts = {
+        ...(selectedModelOverride ? { model_override: selectedModelOverride } : {}),
+        ...(effectiveStrategy !== 'standard' ? { strategy: effectiveStrategy } : {}),
+        ...(attachmentRefs ? { attachments: attachmentRefs } : {}),
+      };
+      const res = await runAction(() =>
+        startRun(workspace, activeConversationId, null, runOpts),
+      );
+      if (res) {
+        setAttachedInputs([]);
+        void queryClient.invalidateQueries({
+          queryKey: bhKeys.conversation(service, workspace, activeConversationId),
+        });
+      }
+    },
+    [
+      workspace,
+      service,
+      activeConversationId,
+      activeRunId,
+      selectedModelOverride,
+      selectedStrategy,
+      attachedInputs,
+      runAction,
+      queryClient,
+    ],
+  );
 
   const composerBlocked =
     !runtimeEnabled ||
@@ -342,6 +414,9 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       if (!workspace || !service) {
         return;
       }
+      const snapKey = contextKeyRef.current;
+      const snapWs = workspace;
+      const snapSvc = service;
       setUploadingInput(true);
       setUploadError(null);
       try {
@@ -351,19 +426,27 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
             : scopeMode === 'new'
               ? newScopeId.trim() || parentScopeId || undefined
               : workspaceScopeId || undefined;
-        const uploaded = await uploadWorkspaceInput(workspace, file, activeScope);
+        const uploaded = await uploadWorkspaceInput(snapWs, file, activeScope);
+        void queryClient.invalidateQueries({ queryKey: bhKeys.inputs(snapSvc, snapWs) });
+        if (contextKeyRef.current !== snapKey) {
+          return;
+        }
         setAttachedInputs((prev) =>
           prev.some((item) => item.server_path === uploaded.server_path) ? prev : [...prev, uploaded],
         );
-        void queryClient.invalidateQueries({ queryKey: bhKeys.inputs(service, workspace) });
       } catch (err) {
+        if (contextKeyRef.current !== snapKey) {
+          return;
+        }
         if (err instanceof BioHarnessApiError) {
           setUploadError(`${err.code}: ${err.message}`);
         } else {
           setUploadError((err as Error)?.message || tr('上传失败，请重试。', 'Upload failed.'));
         }
       } finally {
-        setUploadingInput(false);
+        if (contextKeyRef.current === snapKey) {
+          setUploadingInput(false);
+        }
       }
     },
     [workspace, service, scopeMode, selectedScopeId, newScopeId, parentScopeId, workspaceScopeId, queryClient, tr],
@@ -375,20 +458,21 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       if (composerBlocked || !workspace || !service || !draftText.trim()) {
         return;
       }
-      const inputLines =
+      // Keep user's scientific question 100% verbatim; bind workspace input files separately.
+      const verbatimText = draftText;
+      const attachmentRefs =
         attachedInputs.length > 0
-          ? '\n\n[附带研究资料引用（未核验原始输入）]\n' +
-            attachedInputs
-              .map(
-                (item) =>
-                  `- ${item.server_path} (${formatBytes(item.bytes)}${item.sha256 ? `, sha256=${item.sha256}` : ''})`,
-              )
-              .join('\n')
-          : '';
-      const verbatimText = draftText + inputLines;
+          ? attachedInputs.map((item) => ({
+              path: item.server_path,
+              sha256: item.sha256,
+              name: item.name,
+              bytes: item.bytes,
+            }))
+          : undefined;
       const runOpts = {
         ...(selectedModelOverride ? { model_override: selectedModelOverride } : {}),
         ...(selectedStrategy !== 'standard' ? { strategy: selectedStrategy } : {}),
+        ...(attachmentRefs ? { attachments: attachmentRefs } : {}),
       };
       if (!activeConversationId) {
         let scope: NewScopeSelection | undefined;
@@ -606,6 +690,9 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
                           onAttachRequest={(id) => void handleAttachRequest(id)}
                           nowData={nowData}
                           activeRunId={activeRunId}
+                          lastFinishedState={runStatus.lastFinishedState}
+                          selectedStrategy={selectedStrategy}
+                          onContinueTask={(strat) => void handleContinueFromCore(strat)}
                           onInsertIntoDraft={insertIntoDraft}
                           onBranchFromDelivered={(src) => openNewResearch({ branchSource: src })}
                           isNew={isNew}

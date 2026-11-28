@@ -7,7 +7,7 @@
  * - Surfaces four-state Capabilities matrix (Declared / Installed / Callable / Actually Used).
  * - Preserves honest Curator / R4 Compute boundary disclosures without fabricating unavailable operations.
  */
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -58,19 +58,11 @@ import { useBioHarnessWorkspace } from './workspace';
 type CapabilitiesSubTab = 'memory' | 'capabilities' | 'documents' | 'modules';
 type DocRole = 'contract' | 'guide' | 'status' | 'findings_index';
 
-const RESEARCH_AREAS = [
-  'plant_motif_evolution',
-  'dap_seq',
-  'region_aware_enrichment',
-  'single_cell_enrichment',
-  'cohort_frequency',
-  'agent_benchmark',
-] as const;
-
 function FourStateBadges({
   declared,
   installed,
   callable,
+  callableNullLabel,
   actuallyUsed,
   useCount,
   zh,
@@ -78,6 +70,7 @@ function FourStateBadges({
   declared: boolean;
   installed: boolean;
   callable: boolean | null;
+  callableNullLabel?: string;
   actuallyUsed: boolean;
   useCount?: number;
   zh: boolean;
@@ -107,7 +100,7 @@ function FourStateBadges({
     <div className="flex flex-wrap items-center gap-1">
       {pill(declared, zh ? '已声明' : 'Declared', zh ? '未声明' : 'Not declared')}
       {pill(installed, zh ? '已安装' : 'Installed', zh ? '未安装' : 'Not installed')}
-      {pill(callable, zh ? '可调用' : 'Callable', zh ? '不可调用' : 'Uncallable', zh ? '未探测' : 'Unprobed')}
+      {pill(callable, zh ? '可调用' : 'Callable', zh ? '不可调用' : 'Uncallable', callableNullLabel ?? (zh ? '未探测' : 'Unprobed'))}
       {pill(
         actuallyUsed,
         zh ? `已实际调用${useCount ? ` (${useCount})` : ''}` : `Used${useCount ? ` (${useCount})` : ''}`,
@@ -139,6 +132,10 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     next.set('tab', nextTab);
     setSearchParams(next, { replace: true });
   };
+
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}`;
+  const contextKeyRef = useRef(contextKey);
+  contextKeyRef.current = contextKey;
 
   // --- Track last confirmed Memory health timestamp for calm 503 degradation ---
   const [lastConfirmedAt, setLastConfirmedAt] = useState<string | null>(null);
@@ -221,10 +218,10 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     }
   }, [memoryStatusQuery.data]);
 
-  // --- Memory Recall state ---
+  // --- Memory Recall state (domain-neutral, dynamically driven by Memory MCP metadata) ---
   const [recallQuery, setRecallQuery] = useState('');
   const [recallMode, setRecallMode] = useState<MemoryRecallMode>('FAST');
-  const [researchArea, setResearchArea] = useState<string>('plant_motif_evolution');
+  const [taskConditions, setTaskConditions] = useState<Array<{ key: string; value: string }>>([]);
   const [extraCondKey, setExtraCondKey] = useState('');
   const [extraCondVal, setExtraCondVal] = useState('');
   const [recallLimit, setRecallLimit] = useState<number>(6);
@@ -233,8 +230,10 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
 
   const buildTaskConditions = (): Record<string, string> => {
     const cond: Record<string, string> = {};
-    if (researchArea.trim()) {
-      cond.research_area = researchArea.trim();
+    for (const item of taskConditions) {
+      if (item.key.trim() && item.value.trim()) {
+        cond[item.key.trim()] = item.value.trim();
+      }
     }
     if (extraCondKey.trim() && extraCondVal.trim()) {
       cond[extraCondKey.trim()] = extraCondVal.trim();
@@ -247,14 +246,17 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       if (!workspace) {
         throw new Error('No workspace selected');
       }
-      return recallMemory(workspace, {
+      const snapKey = contextKeyRef.current;
+      const data = await recallMemory(workspace, {
         query: recallQuery.trim(),
         task_conditions: buildTaskConditions(),
         mode: recallMode,
         limit: recallLimit,
       });
+      return { snapKey, data };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ snapKey, data }) => {
+      if (contextKeyRef.current !== snapKey) return;
       setRecallResult(data);
       setRecallError(null);
       setLastConfirmedAt(new Date().toISOString());
@@ -267,19 +269,21 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
   // --- Memory Expand (T1 / T2 / T3) ---
   const [expandedDetail, setExpandedDetail] = useState<MemoryExpandResponse | null>(null);
   const [expandError, setExpandError] = useState<string | null>(null);
-
   const expandMutation = useMutation({
     mutationFn: async (vars: { memoryRef: string; detail: MemoryExpandDetail }) => {
       if (!workspace) {
         throw new Error('No workspace selected');
       }
-      return expandMemory(workspace, {
+      const snapKey = contextKeyRef.current;
+      const data = await expandMemory(workspace, {
         memory_ref: vars.memoryRef,
         task_conditions: buildTaskConditions(),
         detail: vars.detail,
       });
+      return { snapKey, data };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ snapKey, data }) => {
+      if (contextKeyRef.current !== snapKey) return;
       setExpandedDetail(data);
       setExpandError(null);
     },
@@ -295,26 +299,31 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       if (!workspace) {
         throw new Error('No workspace selected');
       }
+      const snapKey = contextKeyRef.current;
+      const snapSvc = service;
+      const snapWs = workspace;
       const eventId = `evt-web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const taskRef = selectedRequestId || `web-${workspace}`;
-      return reportMemoryUse(workspace, {
+      const data = await reportMemoryUse(workspace, {
         event_id: eventId,
         memory_ref: vars.memoryRef,
         task_ref: taskRef,
         stage: vars.stage,
         outcome: vars.outcome,
       });
+      return { snapKey, snapSvc, snapWs, data };
     },
-    onSuccess: (data, vars) => {
+    onSuccess: ({ snapKey, snapSvc, snapWs, data }, vars) => {
+      if (snapSvc && snapWs) {
+        void queryClient.invalidateQueries({ queryKey: bhKeys.memoryStatus(snapSvc, snapWs) });
+      }
+      if (contextKeyRef.current !== snapKey) return;
       setUsageNotice(
         tr(
           `已向 Memory MCP 上报 ${vars.stage} 反馈（${vars.memoryRef}）。`,
           `Reported ${vars.stage} feedback to Memory MCP (${vars.memoryRef}).`,
         ) + ` [${data.server}]`,
       );
-      if (service && workspace) {
-        void queryClient.invalidateQueries({ queryKey: bhKeys.memoryStatus(service, workspace) });
-      }
     },
     onError: (err) => {
       setUsageNotice(
@@ -330,7 +339,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
   const [sciMemoryId, setSciMemoryId] = useState('');
   const [sciT1Core, setSciT1Core] = useState('');
   const [sciT2Json, setSciT2Json] = useState('{"note": ""}');
-  const [sciCondJson, setSciCondJson] = useState('{"research_area": "plant_motif_evolution"}');
+  const [sciCondJson, setSciCondJson] = useState('{}');
   const [sciEvidJson, setSciEvidJson] = useState('[{"relative_path": "", "line": 1, "exact_excerpt": ""}]');
   const [proposeFeedback, setProposeFeedback] = useState<string | null>(null);
   const [proposeError, setProposeError] = useState<string | null>(null);
@@ -338,19 +347,23 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
   const proposeMutation = useMutation({
     mutationFn: async () => {
       if (!workspace) throw new Error('No workspace selected');
+      const snapKey = contextKeyRef.current;
+      const snapSvc = service;
+      const snapWs = workspace;
       const eventId = `evt-prop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       if (proposeKind === 'candidate') {
-        return proposeMemory(workspace, {
+        const res = await proposeMemory(workspace, {
           kind: 'candidate',
           event_id: eventId,
           summary: candSummary.trim(),
           evidence_locator: candLocator.trim() || undefined,
         });
+        return { snapKey, snapSvc, snapWs, res };
       }
       const parsedT2 = JSON.parse(sciT2Json) as Record<string, unknown>;
       const parsedCond = JSON.parse(sciCondJson) as Record<string, string>;
       const parsedEvid = JSON.parse(sciEvidJson) as Array<Record<string, unknown>>;
-      return proposeMemory(workspace, {
+      const res = await proposeMemory(workspace, {
         kind: 'scientific',
         event_id: eventId,
         memory_id: sciMemoryId.trim(),
@@ -359,8 +372,13 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
         required_conditions: parsedCond,
         evidence: parsedEvid,
       });
+      return { snapKey, snapSvc, snapWs, res };
     },
-    onSuccess: (res) => {
+    onSuccess: ({ snapKey, snapSvc, snapWs, res }) => {
+      if (snapSvc && snapWs) {
+        void queryClient.invalidateQueries({ queryKey: bhKeys.memoryStatus(snapSvc, snapWs) });
+      }
+      if (contextKeyRef.current !== snapKey) return;
       setProposeError(null);
       const status = String((res.result as Record<string, unknown>)?.status ?? 'UNREVIEWED_PENDING_IMPORT');
       setProposeFeedback(
@@ -371,9 +389,6 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       );
       setCandSummary('');
       setCandLocator('');
-      if (service && workspace) {
-        void queryClient.invalidateQueries({ queryKey: bhKeys.memoryStatus(service, workspace) });
-      }
     },
     onError: (err) => {
       setProposeFeedback(null);
@@ -381,10 +396,34 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     },
   });
 
+  // Reset local workbench state when workspace / scope / request changes so stale context never leaks
+  useEffect(() => {
+    setRecallResult(null);
+    setRecallError(null);
+    setExpandedDetail(null);
+    setExpandError(null);
+    setUsageNotice(null);
+    setProposeFeedback(null);
+    setProposeError(null);
+    setDocScopeOverride('');
+    setDocSelections({});
+    setAppliedDocSelections({});
+    setLastConfirmedAt(null);
+  }, [workspace, selectedScopeId, selectedRequestId]);
   const memData = memoryStatusQuery.data;
   const capsData = capabilitiesQuery.data;
   const diagnose = memData?.diagnose;
   const memStatus = memData?.status;
+  const triggerKeys = useMemo(() => {
+    const raw = diagnose?.context_trigger_keys as unknown;
+    if (Array.isArray(raw)) {
+      return raw.filter((k): k is string => typeof k === "string" && k.trim().length > 0);
+    }
+    if (raw && typeof raw === "object") {
+      return Object.keys(raw as Record<string, unknown>).filter((k) => k.trim().length > 0);
+    }
+    return [];
+  }, [diagnose?.context_trigger_keys]);
 
   return (
     <div className="bg-surface-canvas flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -650,7 +689,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
                       data-testid="bh-memory-query-input"
                       value={recallQuery}
                       onChange={(e) => setRecallQuery(e.target.value)}
-                      placeholder={tr('输入科研检索问题，例如 DESeq2 replicates...', 'Query scientific memory, e.g. DESeq2 replicates...')}
+                      placeholder={tr('输入科研检索问题或方法关键词…', 'Query scientific memory by topic or method…')}
                       className="flex-1 text-xs"
                     />
                     <Button
@@ -705,60 +744,93 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
 
                     <label className="space-y-1 text-[11px]">
                       <span className="text-text-tertiary block font-medium">
-                        {tr('任务条件: research_area', 'Condition: research_area')}
-                      </span>
-                      <select
-                        data-testid="bh-memory-research-area"
-                        value={researchArea}
-                        onChange={(e) => setResearchArea(e.target.value)}
-                        className="border-border-medium bg-surface-primary text-text-primary w-full rounded-lg border px-2 py-1.5 text-xs"
-                      >
-                        <option value="">{tr('（不限定）', '(none)')}</option>
-                        {RESEARCH_AREAS.map((area) => (
-                          <option key={area} value={area}>
-                            {area}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="space-y-1 text-[11px]">
-                      <span className="text-text-tertiary block font-medium">
-                        {tr('附加条件 Key（可选）', 'Extra condition key')}
+                        {tr('任务条件 Key（可选）', 'Task condition key (optional)')}
                       </span>
                       <Input
+                        data-testid="bh-memory-cond-key"
                         value={extraCondKey}
                         onChange={(e) => setExtraCondKey(e.target.value)}
-                        placeholder="e.g. species"
+                        placeholder={tr('例如 domain / method / organism', 'e.g. domain / method')}
                         className="h-8 text-xs"
                       />
                     </label>
-
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <label className="col-span-2 space-y-1 text-[11px]">
-                        <span className="text-text-tertiary block font-medium">
-                          {tr('条件 Value', 'Value')}
-                        </span>
+                    <label className="space-y-1 text-[11px]">
+                      <span className="text-text-tertiary block font-medium">
+                        {tr('条件 Value', 'Condition value')}
+                      </span>
+                      <div className="flex gap-1">
                         <Input
+                          data-testid="bh-memory-cond-val"
                           value={extraCondVal}
                           onChange={(e) => setExtraCondVal(e.target.value)}
-                          placeholder="arabidopsis"
-                          className="h-8 text-xs"
+                          placeholder={tr('输入对应条件值…', 'Enter value…')}
+                          className="h-8 flex-1 text-xs"
                         />
-                      </label>
-                      <label className="space-y-1 text-[11px]">
-                        <span className="text-text-tertiary block font-medium">Limit</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={recallLimit}
-                          onChange={(e) => setRecallLimit(Math.max(1, Math.min(20, Number(e.target.value) || 6)))}
-                          className="h-8 text-xs"
-                        />
-                      </label>
-                    </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          data-testid="bh-memory-add-cond-btn"
+                          disabled={!extraCondKey.trim() || !extraCondVal.trim()}
+                          onClick={() => {
+                            const k = extraCondKey.trim();
+                            const v = extraCondVal.trim();
+                            if (!k || !v) return;
+                            setTaskConditions((prev) => [...prev.filter((c) => c.key !== k), { key: k, value: v }]);
+                            setExtraCondKey('');
+                            setExtraCondVal('');
+                          }}
+                          className="h-8 shrink-0 px-2 text-[11px]"
+                        >
+                          {tr('添加', 'Add')}
+                        </Button>
+                      </div>
+                    </label>
+                    <label className="space-y-1 text-[11px]">
+                      <span className="text-text-tertiary block font-medium">Limit</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={recallLimit}
+                        onChange={(e) => setRecallLimit(Math.max(1, Math.min(20, Number(e.target.value) || 6)))}
+                        className="h-8 text-xs"
+                      />
+                    </label>
                   </div>
+                  {(triggerKeys.length > 0 || taskConditions.length > 0) && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      {taskConditions.map((c) => (
+                        <span
+                          key={c.key}
+                          data-testid={`bh-memory-cond-chip-${c.key}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-teal-500/15 px-2 py-0.5 font-mono text-teal-800 dark:text-teal-200"
+                        >
+                          {c.key}={c.value}
+                          <button
+                            type="button"
+                            onClick={() => setTaskConditions((prev) => prev.filter((x) => x.key !== c.key))}
+                            className="hover:text-text-primary ml-0.5"
+                            aria-label={`Remove ${c.key}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      {triggerKeys.map((triggerKey) => (
+                        <button
+                          key={triggerKey}
+                          type="button"
+                          data-testid={`bh-memory-trigger-key-${triggerKey}`}
+                          onClick={() => setExtraCondKey(triggerKey)}
+                          className="border-border-light bg-surface-secondary/50 text-text-secondary hover:bg-surface-hover rounded border px-1.5 py-0.5 font-mono text-[10px]"
+                          title={tr('来自当前 Memory 库的触发条件键，点击填入 Key', 'Observed trigger key in this Memory store')}
+                        >
+                          +{triggerKey}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </form>
 
                 {recallError && (
@@ -1291,6 +1363,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
                               declared={sk.declared}
                               installed={sk.installed}
                               callable={sk.callable}
+                              callableNullLabel={zh ? '按需读取 (文档)' : 'Advisory doc'}
                               actuallyUsed={sk.actually_used}
                               useCount={sk.use_count}
                               zh={zh}

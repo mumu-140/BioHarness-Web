@@ -61,6 +61,14 @@ class ModelOverride(BaseModel):
     model: str = Field(min_length=1, max_length=200)
 
 
+class AttachmentRefBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=1000)
+    sha256: str | None = Field(None, max_length=128)
+    name: str | None = Field(None, max_length=300)
+    bytes: int | None = None
+
+
 class NewConversation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str | None = Field(None, max_length=MAX_MESSAGE_CHARS)
@@ -68,6 +76,7 @@ class NewConversation(BaseModel):
     scope: Scope | None = None
     model_override: ModelOverride | None = None
     strategy: Literal["standard", "concise", "thorough"] | None = None
+    attachments: list[AttachmentRefBody] | None = None
 
 
 class NewRun(BaseModel):
@@ -75,6 +84,7 @@ class NewRun(BaseModel):
     text: str | None = Field(None, max_length=MAX_MESSAGE_CHARS)  # absent: resume from Core's state
     model_override: ModelOverride | None = None
     strategy: Literal["standard", "concise", "thorough"] | None = None
+    attachments: list[AttachmentRefBody] | None = None
 
 
 class Attach(BaseModel):
@@ -120,6 +130,8 @@ class LiteratureRunBody(BaseModel):
     iterations: int = Field(default=3, ge=1, le=10)
     search_json_path: str | None = None
     lanes: bool = True
+    save_output: bool = True
+    conversation_id: str | None = None
 
 
 class StatisticsReportBindingBody(BaseModel):
@@ -127,6 +139,8 @@ class StatisticsReportBindingBody(BaseModel):
     records_path: str
     template_path: str | None = None
     report_path: str | None = None
+    save_output: bool = True
+    conversation_id: str | None = None
 
 
 class ProteinRunBody(BaseModel):
@@ -144,6 +158,8 @@ class ProteinRunBody(BaseModel):
     mode: str | None = None
     verify_files: bool = False
     model_index: int | None = None
+    save_output: bool = True
+    conversation_id: str | None = None
 
 
 class MemoryProposeBody(BaseModel):
@@ -208,6 +224,15 @@ def create_runtime_router(
                 body.model_override.provider_id, body.model_override.model
             )
             override_pid = body.model_override.provider_id
+        validated_attachments: list[dict[str, object]] | None = None
+        if body.attachments:
+            try:
+                validated_attachments = inputs.validate_attachments(
+                    settings.workspaces[workspace_id],
+                    [a.model_dump(exclude_none=True) for a in body.attachments],
+                )
+            except inputs.InputError as err:
+                raise HTTPException(err.status, {"origin": "web", "code": err.code, "message": err.message}) from None
         conversation = runtime.create(workspace_id)
         run_id = None
         try:
@@ -223,6 +248,7 @@ def create_runtime_router(
                     model_override=resolved_override,
                     provider_id=override_pid,
                     strategy=body.strategy,
+                    attachments=validated_attachments,
                 )
         except RuntimeRefusal as error:
             runtime.ledger.discard_unused(conversation["id"])  # nothing was started for it
@@ -293,6 +319,15 @@ def create_runtime_router(
                 body.model_override.provider_id, body.model_override.model
             )
             override_pid = body.model_override.provider_id
+        validated_attachments: list[dict[str, object]] | None = None
+        if body.attachments:
+            try:
+                validated_attachments = inputs.validate_attachments(
+                    settings.workspaces[workspace_id],
+                    [a.model_dump(exclude_none=True) for a in body.attachments],
+                )
+            except inputs.InputError as err:
+                raise HTTPException(err.status, {"origin": "web", "code": err.code, "message": err.message}) from None
         text = body.text if body.text is not None and body.text.strip() else None
         try:
             return {
@@ -303,6 +338,7 @@ def create_runtime_router(
                     model_override=resolved_override,
                     provider_id=override_pid,
                     strategy=body.strategy,
+                    attachments=validated_attachments,
                 )
             }
         except RuntimeRefusal as error:
@@ -622,6 +658,9 @@ def create_router(
                 iterations=body.iterations,
                 search_json_path=body.search_json_path,
                 lanes=body.lanes,
+                save_output=body.save_output,
+                conversation_id=body.conversation_id,
+                ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:
             raise _http_error(error) from None
@@ -643,6 +682,9 @@ def create_router(
                 records_path=body.records_path,
                 template_path=body.template_path,
                 report_path=body.report_path,
+                save_output=body.save_output,
+                conversation_id=body.conversation_id,
+                ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:
             raise _http_error(error) from None
@@ -667,6 +709,9 @@ def create_router(
                 mode=body.mode,
                 verify_files=body.verify_files,
                 model_index=body.model_index,
+                save_output=body.save_output,
+                conversation_id=body.conversation_id,
+                ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:
             raise _http_error(error) from None

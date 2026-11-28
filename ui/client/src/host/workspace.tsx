@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { atom, useSetAtom } from 'jotai';
 import { Constants } from 'librechat-data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
-import type { BioHarnessMeta, EvidenceAnchor } from './bioharness';
+import type { BioHarnessMeta, EvidenceAnchor, WorkspaceInputFile } from './bioharness';
 import { bhKeys, fetchMeta } from './bioharness';
 
 export const settingsRequestedTabAtom = atom<string | null>(null);
@@ -57,6 +57,13 @@ export interface BioHarnessWorkspaceContextValue {
     tab?: 'memory' | 'capabilities' | 'documents' | 'modules';
   }) => void;
   stageTextInConversation: (opts: { conversationId: string | null; requestId: string | null; snippet: string }) => void;
+  pendingAttachments: WorkspaceInputFile[];
+  clearPendingAttachments: () => void;
+  attachFileToConversation: (opts: {
+    file: WorkspaceInputFile;
+    conversationId?: string | null;
+    requestId?: string | null;
+  }) => void;
   getDraft: (conversationKey: string) => string;
   setDraft: (conversationKey: string, text: string) => void;
   clearDraft: (conversationKey: string) => void;
@@ -140,7 +147,16 @@ export function BioHarnessWorkspaceProvider({
 
   const [branchSource, setBranchSource] = useState<BranchSourceRef | null>(null);
   const [pendingScopeDraft, setPendingScopeDraft] = useState<PendingScopeDraft | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<WorkspaceInputFile[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setPendingAttachments([]);
+  }, [workspace]);
+
+  const clearPendingAttachments = useCallback(() => {
+    setPendingAttachments([]);
+  }, []);
 
   useEffect(() => {
     if (
@@ -203,6 +219,8 @@ export function BioHarnessWorkspaceProvider({
         return;
       }
       setBranchSource(null);
+      setPendingScopeDraft(null);
+      setPendingAttachments([]);
       const next = new URLSearchParams();
       next.set('ws', ws);
       navigate(`/c/new?${next.toString()}`);
@@ -372,6 +390,28 @@ ${snippet}` : snippet;
     [getDraft, setDraft, openConversation, openNewResearch],
   );
 
+  const attachFileToConversation = useCallback(
+    ({
+      file,
+      conversationId,
+      requestId,
+    }: {
+      file: WorkspaceInputFile;
+      conversationId?: string | null;
+      requestId?: string | null;
+    }) => {
+      setPendingAttachments((prev) =>
+        prev.some((item) => item.server_path === file.server_path) ? prev : [...prev, file],
+      );
+      if (conversationId) {
+        openConversation(conversationId, { requestId: requestId ?? null });
+      } else {
+        openNewResearch({ requestId: requestId ?? null });
+      }
+    },
+    [openConversation, openNewResearch],
+  );
+
   const openCapabilitiesView = useCallback(
     (opts?: {
       requestId?: string | null;
@@ -440,6 +480,9 @@ ${snippet}` : snippet;
       openExecutionsView,
       openCapabilitiesView,
       stageTextInConversation,
+      pendingAttachments,
+      clearPendingAttachments,
+      attachFileToConversation,
       getDraft,
       setDraft,
       clearDraft,
@@ -467,6 +510,9 @@ ${snippet}` : snippet;
       openExecutionsView,
       openCapabilitiesView,
       stageTextInConversation,
+      pendingAttachments,
+      clearPendingAttachments,
+      attachFileToConversation,
       getDraft,
       setDraft,
       clearDraft,

@@ -6,7 +6,7 @@
  * - Literature (`bioharness-literature` search/fetch)
  * - Statistics (`bioharness-statistics-report-binding` records/tables/render/verify — NEVER recomputes in TS)
  * - Scientific Review (Core `plan_review` / `step.last_review` / `open_concerns` / rework — non-blocking)
- * - Protein Methods (`bioharness-protein-methods` 0.2.0 audit outputs)
+ * - Protein Methods (`bioharness-protein-methods` CLI audit outputs)
  */
 import React from 'react';
 import {

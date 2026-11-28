@@ -2,8 +2,8 @@
  * R3.4 Professional Scientific Modules Workbench seated inside `/w/capabilities?tab=modules`
  * (not upstream LibreChat code).
  */
-import React, { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import React, { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   BookOpen,
@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Dna,
   FileBarChart2,
+  Paperclip,
   RefreshCw,
   Scale,
   Search,
@@ -32,6 +33,7 @@ import {
   type ProteinRunResponse,
   type Snapshot,
   type StatisticsReportBindingResponse,
+  type WorkspaceInputFile,
 } from './bioharness';
 import {
   LiteratureDomainCard,
@@ -53,13 +55,28 @@ const PROTEIN_OPERATIONS: ProteinOperation[] = [
 
 export default function BioHarnessDomainModulesPanel() {
   const { tr } = useBhText();
+  const queryClient = useQueryClient();
   const {
     service,
     workspace,
     selectedRequestId,
     linkedConversationId,
     stageTextInConversation,
+    attachFileToConversation,
   } = useBioHarnessWorkspace();
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedRequestId ?? 'none'}`;
+  const contextKeyRef = useRef(contextKey);
+  contextKeyRef.current = contextKey;
+
+  const invalidateAfterModuleRun = (snapSvc: string | null, snapWs: string | null, snapConvo: string | null) => {
+    if (!snapSvc || !snapWs) return;
+    void queryClient.invalidateQueries({ queryKey: bhKeys.domainModules(snapSvc, snapWs) });
+    void queryClient.invalidateQueries({ queryKey: bhKeys.inputs(snapSvc, snapWs) });
+    void queryClient.invalidateQueries({ queryKey: ['bh', snapSvc, snapWs, 'capabilities'] });
+    if (snapConvo) {
+      void queryClient.invalidateQueries({ queryKey: ['bh', snapSvc, snapWs, 'invocations', snapConvo] });
+    }
+  };
 
   const modulesQuery = useQuery<DomainModulesResponse>({
     queryKey: bhKeys.domainModules(service ?? 'svc', workspace ?? ''),
@@ -76,7 +93,7 @@ export default function BioHarnessDomainModulesPanel() {
     }),
     queryFn: () => fetchView<NowData>(workspace!, 'now', { request_id: selectedRequestId ?? undefined }),
     enabled: Boolean(service && workspace && selectedRequestId),
-    staleTime: 10_000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -87,28 +104,42 @@ export default function BioHarnessDomainModulesPanel() {
   const [litErr, setLitErr] = useState<string | null>(null);
   const [litQuestion, setLitQuestion] = useState('');
   const [litRunResult, setLitRunResult] = useState<Record<string, unknown> | null>(null);
-
+  const [litSavedArtifact, setLitSavedArtifact] = useState<WorkspaceInputFile | null>(null);
   const litInspectMutation = useMutation({
-    mutationFn: (vars: { path: string; offset: number }) =>
-      inspectLiteratureArtifact(workspace!, { path: vars.path, offset: vars.offset, limit: 10 }),
-    onSuccess: (res) => {
+    mutationFn: async (vars: { path: string; offset: number }) => {
+      const snapKey = contextKeyRef.current;
+      const res = await inspectLiteratureArtifact(workspace!, { path: vars.path, offset: vars.offset, limit: 10 });
+      return { snapKey, res };
+    },
+    onSuccess: ({ snapKey, res }) => {
+      if (contextKeyRef.current !== snapKey) return;
       setLitData(res);
       setLitOffset(res.offset);
       setLitErr(null);
     },
     onError: (err) => setLitErr(err instanceof Error ? err.message : String(err)),
   });
-
   const litRunMutation = useMutation({
-    mutationFn: () =>
-      runLiteratureModule(workspace!, {
+    mutationFn: async () => {
+      const snapKey = contextKeyRef.current;
+      const snapSvc = service;
+      const snapWs = workspace;
+      const snapConvo = linkedConversationId;
+      const res = await runLiteratureModule(workspace!, {
         operation: 'search',
         question: litQuestion.trim(),
         maximum: 10,
         iterations: 2,
-      }),
-    onSuccess: (res) => {
+        save_output: true,
+        conversation_id: linkedConversationId ?? undefined,
+      });
+      return { snapKey, snapSvc, snapWs, snapConvo, res };
+    },
+    onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
+      invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
+      if (contextKeyRef.current !== snapKey) return;
       setLitRunResult(res.result);
+      setLitSavedArtifact(res.saved_artifact ?? null);
       setLitErr(null);
     },
     onError: (err) => setLitErr(err instanceof Error ? err.message : String(err)),
@@ -120,18 +151,40 @@ export default function BioHarnessDomainModulesPanel() {
   const [statTemplatePath, setStatTemplatePath] = useState('');
   const [statReportPath, setStatReportPath] = useState('');
   const [statResult, setStatResult] = useState<StatisticsReportBindingResponse | null>(null);
+  const [lastStatSavedArtifact, setLastStatSavedArtifact] = useState<WorkspaceInputFile | null>(null);
   const [statErr, setStatErr] = useState<string | null>(null);
-
   const statMutation = useMutation({
-    mutationFn: () =>
-      runStatisticsReportBinding(workspace!, {
-        action: statAction,
-        records_path: statRecordsPath.trim(),
-        template_path: statTemplatePath.trim() || undefined,
-        report_path: statReportPath.trim() || undefined,
-      }),
-    onSuccess: (res) => {
+    mutationFn: async (override?: {
+      action?: 'inspect' | 'render' | 'verify';
+      records_path?: string;
+      template_path?: string;
+      report_path?: string;
+    }) => {
+      const snapKey = contextKeyRef.current;
+      const snapSvc = service;
+      const snapWs = workspace;
+      const snapConvo = linkedConversationId;
+      const act = override?.action ?? statAction;
+      const rec = (override?.records_path ?? statRecordsPath).trim();
+      const tpl = (override?.template_path ?? statTemplatePath).trim() || undefined;
+      const rep = (override?.report_path ?? statReportPath).trim() || undefined;
+      const res = await runStatisticsReportBinding(workspace!, {
+        action: act,
+        records_path: rec,
+        template_path: tpl,
+        report_path: rep,
+        save_output: true,
+        conversation_id: linkedConversationId ?? undefined,
+      });
+      return { snapKey, snapSvc, snapWs, snapConvo, res };
+    },
+    onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
+      invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
+      if (contextKeyRef.current !== snapKey) return;
       setStatResult(res);
+      if (res.saved_artifact) {
+        setLastStatSavedArtifact(res.saved_artifact);
+      }
       setStatErr(null);
     },
     onError: (err) => setStatErr(err instanceof Error ? err.message : String(err)),
@@ -144,22 +197,62 @@ export default function BioHarnessDomainModulesPanel() {
   const [protMapPath, setProtMapPath] = useState('');
   const [protResult, setProtResult] = useState<ProteinRunResponse | null>(null);
   const [protErr, setProtErr] = useState<string | null>(null);
-
   const protMutation = useMutation({
-    mutationFn: () =>
-      runProteinModule(workspace!, {
+    mutationFn: async () => {
+      const snapKey = contextKeyRef.current;
+      const snapSvc = service;
+      const snapWs = workspace;
+      const snapConvo = linkedConversationId;
+      const res = await runProteinModule(workspace!, {
         operation: protOp,
         input_path: protInputPath.trim(),
         reference_path: protRefPath.trim() || undefined,
         mapping_path: protMapPath.trim() || undefined,
-      }),
-    onSuccess: (res) => {
+        save_output: true,
+        conversation_id: linkedConversationId ?? undefined,
+      });
+      return { snapKey, snapSvc, snapWs, snapConvo, res };
+    },
+    onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
+      invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
+      if (contextKeyRef.current !== snapKey) return;
       setProtResult(res);
       setProtErr(null);
     },
     onError: (err) => setProtErr(err instanceof Error ? err.message : String(err)),
   });
 
+  // Reset module selections and results on workspace change to guarantee strict isolation
+  useEffect(() => {
+    setLitPath('');
+    setLitOffset(0);
+    setLitData(null);
+    setLitErr(null);
+    setLitQuestion('');
+    setLitRunResult(null);
+    setLitSavedArtifact(null);
+    setStatAction('render');
+    setStatRecordsPath('');
+    setStatTemplatePath('');
+    setStatReportPath('');
+    setStatResult(null);
+    setLastStatSavedArtifact(null);
+    setStatErr(null);
+    setProtOp('structure-inventory');
+    setProtInputPath('');
+    setProtRefPath('');
+    setProtMapPath('');
+    setProtResult(null);
+    setProtErr(null);
+  }, [workspace]);
+
+  const isLinkedDelivered = !nowQuery.data?.ok || nowQuery.data.data?.phase === 'DELIVERED';
+  const attachArtifact = (file: WorkspaceInputFile) =>
+    attachFileToConversation?.({
+      file,
+      conversationId: isLinkedDelivered ? null : linkedConversationId,
+      requestId: isLinkedDelivered ? null : selectedRequestId,
+    });
   const stageSnippet = (snippet: string) =>
     stageTextInConversation({
       conversationId: linkedConversationId,
@@ -357,6 +450,29 @@ export default function BioHarnessDomainModulesPanel() {
             onStageText={stageSnippet}
           />
         )}
+        {litSavedArtifact && (
+          <div
+            data-testid="bh-lit-saved-artifact"
+            className="border-border-light bg-surface-secondary/30 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px]"
+          >
+            <span className="font-mono">
+              {tr('已落盘产物：', 'Saved artifact: ')}
+              {litSavedArtifact.relative_path ?? litSavedArtifact.server_path}
+              {litSavedArtifact.sha256 ? ` (sha256:${litSavedArtifact.sha256.slice(0, 12)})` : ''}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="bh-lit-attach-artifact-btn"
+              onClick={() => attachArtifact(litSavedArtifact)}
+              className="h-7 gap-1 px-2 text-[11px]"
+            >
+              <Paperclip className="h-3 w-3" aria-hidden="true" />
+              <span>{tr('附加到对话输入', 'Attach to conversation')}</span>
+            </Button>
+          </div>
+        )}
         {litRunResult && (
           <LiteratureDomainCard
             data={litRunResult as Partial<LiteratureInspectResponse>}
@@ -460,7 +576,7 @@ export default function BioHarnessDomainModulesPanel() {
               (statAction === 'verify' && !statReportPath) ||
               statMutation.isLoading
             }
-            onClick={() => statMutation.mutate()}
+            onClick={() => statMutation.mutate(undefined)}
             className="text-xs"
           >
             {statMutation.isLoading ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
@@ -472,6 +588,61 @@ export default function BioHarnessDomainModulesPanel() {
             </span>
           )}
         </div>
+        {(statResult?.saved_artifact ?? lastStatSavedArtifact) && (() => {
+          const activeArtifact = (statResult?.saved_artifact ?? lastStatSavedArtifact)!;
+          return (
+            <div
+              data-testid="bh-stat-saved-artifact"
+              className="border-border-light bg-surface-secondary/30 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px]"
+            >
+              <div className="min-w-0">
+                <div className="text-text-primary font-medium">
+                  {tr('渲染产物已持久化并记入技术账本', 'Artifact persisted & recorded in ledger')}
+                </div>
+                <div className="text-text-tertiary truncate font-mono text-[10px]">
+                  {activeArtifact.relative_path ?? activeArtifact.server_path}
+                  {activeArtifact.sha256 ? ` · sha256:${activeArtifact.sha256.slice(0, 12)}` : ''}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {statResult?.action === 'render' && activeArtifact.relative_path && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    data-testid="bh-stat-verify-saved-btn"
+                    disabled={statMutation.isLoading}
+                    onClick={() => {
+                      const savedPath = activeArtifact.relative_path!;
+                      setStatAction('verify');
+                      setStatReportPath(savedPath);
+                      statMutation.mutate({
+                        action: 'verify',
+                        records_path: statResult.records_file,
+                        template_path: statResult.template_file ?? statTemplatePath,
+                        report_path: savedPath,
+                      });
+                    }}
+                    className="h-7 px-2 text-[11px]"
+                  >
+                    {tr('立即核验此产物 (verify)', 'Verify saved artifact')}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="bh-stat-attach-artifact-btn"
+                  onClick={() => attachArtifact(activeArtifact)}
+                  className="h-7 gap-1 px-2 text-[11px]"
+                >
+                  <Paperclip className="h-3 w-3" aria-hidden="true" />
+                  <span>{tr('附加到对话输入', 'Attach to conversation')}</span>
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
 
         {statResult && <StatisticsDomainCard data={statResult} onStageText={stageSnippet} />}
       </section>
@@ -630,6 +801,33 @@ export default function BioHarnessDomainModulesPanel() {
             {protErr}
           </div>
         )}
+        {protResult?.saved_artifact && (
+          <div
+            data-testid="bh-protein-saved-artifact"
+            className="border-border-light bg-surface-secondary/30 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px]"
+          >
+            <div className="min-w-0">
+              <div className="text-text-primary font-medium">
+                {tr('审计产物已持久化并记入技术账本', 'Audit artifact persisted & recorded in ledger')}
+              </div>
+              <div className="text-text-tertiary truncate font-mono text-[10px]">
+                {protResult.saved_artifact.relative_path ?? protResult.saved_artifact.server_path}
+                {protResult.saved_artifact.sha256 ? ` · sha256:${protResult.saved_artifact.sha256.slice(0, 12)}` : ''}
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="bh-protein-attach-artifact-btn"
+              onClick={() => attachArtifact(protResult.saved_artifact!)}
+              className="h-7 gap-1 px-2 text-[11px]"
+            >
+              <Paperclip className="h-3 w-3" aria-hidden="true" />
+              <span>{tr('附加到对话输入', 'Attach to conversation')}</span>
+            </Button>
+          </div>
+        )}
         {protResult && (
           <ProteinMethodsDomainCard
             operation={protResult.operation}
@@ -639,6 +837,63 @@ export default function BioHarnessDomainModulesPanel() {
           />
         )}
       </section>
+
+      {/* Persisted Technical Ledger Module Invocations */}
+      {data?.recent_invocations && data.recent_invocations.length > 0 && (
+        <section
+          data-testid="bh-domain-recent-invocations"
+          className="border-border-light bg-surface-primary space-y-2 rounded-xl border p-4 text-xs"
+        >
+          <h3 className="text-text-primary text-sm font-semibold">
+            {tr('最近专业模块执行记录（技术账本）', 'Recent Professional Module Executions (Ledger)')}
+          </h3>
+          <div className="space-y-1.5">
+            {data.recent_invocations.slice(0, 10).map((inv) => (
+              <div
+                key={inv.id}
+                data-testid={`bh-domain-invocation-${inv.module_id}-${inv.operation}`}
+                className="border-border-light bg-surface-secondary/20 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-2"
+              >
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-text-primary font-mono font-semibold">
+                      {inv.module_id}:{inv.operation}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
+                        inv.state === 'SUCCEEDED'
+                          ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-200'
+                      }`}
+                    >
+                      {inv.state}
+                    </span>
+                    <span className="text-text-tertiary font-mono text-[10px]">{inv.at}</span>
+                  </div>
+                  {inv.saved_artifact && (
+                    <div className="text-text-tertiary truncate font-mono text-[10px]">
+                      {inv.saved_artifact.relative_path ?? inv.saved_artifact.server_path}
+                      {inv.saved_artifact.sha256 ? ` (sha256:${inv.saved_artifact.sha256.slice(0, 12)})` : ''}
+                    </div>
+                  )}
+                </div>
+                {inv.saved_artifact && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => attachArtifact(inv.saved_artifact!)}
+                    className="h-7 gap-1 px-2 text-[11px]"
+                  >
+                    <Paperclip className="h-3 w-3" aria-hidden="true" />
+                    <span>{tr('附加', 'Attach')}</span>
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 5. Honest Non-Runnable / Reference Domain Modules Disclosure */}
       {nonRunnableMods.length > 0 && (
