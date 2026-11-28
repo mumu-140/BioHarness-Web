@@ -48,7 +48,7 @@ import {
 } from './bioharness';
 import { useBhText } from './i18n';
 import { useBioHarnessConversationEvents, useBioHarnessVersionStream } from './events';
-import { useBioHarnessWorkspace } from './workspace';
+import { useBioHarnessWorkspace, useOperationContextRef } from './workspace';
 import BioHarnessChatBanners from './BioHarnessChatBanners';
 import BioHarnessComposer from './BioHarnessComposer';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
@@ -160,8 +160,9 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   });
 
   const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${activeConversationId ?? 'new'}::${selectedRequestId ?? 'none'}::${workspaceScopeId ?? 'none'}`;
-  const contextKeyRef = useRef(contextKey);
-  contextKeyRef.current = contextKey;
+  const scopeIntent = activeConversationId || selectedRequestId ? null :
+    [scopeMode, selectedScopeId, newScopeId.trim(), parentScopeId];
+  const contextKeyRef = useOperationContextRef(JSON.stringify([contextKey, scopeIntent]));
   const continuationKey =
     activeConversationId ??
     (selectedRequestId
@@ -170,6 +171,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
         ? `scope:${workspaceScopeId}`
         : 'new');
   const hydratedContextRef = useRef<string>('');
+  const skipContinuationWriteRef = useRef(false);
   const userEditedRunOptsRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -178,15 +180,18 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     setNewScopeId('');
     setParentScopeId('');
     setInputsDrawerOpen(false);
-  }, [workspace, selectedRequestId]);
+  }, [workspace, selectedRequestId, workspaceScopeId, activeConversationId]);
 
   // Restore per-context continuation draft (model override, strategy, staged attachments) across reload
   // while strictly isolating different workspaces, projects, requests, and conversations.
   useEffect(() => {
     hydratedContextRef.current = contextKey;
+    // The other effect in this render still sees the previous owner's state.
+    skipContinuationWriteRef.current = true;
     userEditedRunOptsRef.current = false;
     setUploadError(null);
     setUploadingInput(false);
+    setIsActing(false);
     const saved = getContinuationDraft?.(continuationKey) ?? null;
     if (saved) {
       setSelectedModelOverride(saved.modelOverride);
@@ -233,6 +238,10 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   // Persist current context's model override, strategy, and staged attachments for reload continuation.
   useEffect(() => {
     if (hydratedContextRef.current !== contextKey) {
+      return;
+    }
+    if (skipContinuationWriteRef.current) {
+      skipContinuationWriteRef.current = false;
       return;
     }
     setContinuationDraft?.(continuationKey, {
@@ -376,7 +385,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
         }
         return null;
       } finally {
-        setIsActing(false);
+        if (contextKeyRef.current === snapKey) setIsActing(false);
       }
     },
     [isActing, queryClient],
@@ -783,13 +792,13 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
                           onClearBranchSource={() => setBranchSource(null)}
                           scopes={scopes}
                           scopeMode={scopeMode}
-                          onScopeModeChange={setScopeMode}
+                          onScopeModeChange={(value) => { if (value !== scopeMode) { setUploadError(null); setUploadingInput(false); setIsActing(false); } setScopeMode(value); }}
                           selectedScopeId={selectedScopeId}
-                          onSelectedScopeIdChange={setSelectedScopeId}
+                          onSelectedScopeIdChange={(value) => { if (value !== selectedScopeId) { setUploadError(null); setUploadingInput(false); setIsActing(false); } setSelectedScopeId(value); }}
                           newScopeId={newScopeId}
-                          onNewScopeIdChange={setNewScopeId}
+                          onNewScopeIdChange={(value) => { if (value !== newScopeId) { setUploadError(null); setUploadingInput(false); setIsActing(false); } setNewScopeId(value); }}
                           parentScopeId={parentScopeId}
-                          onParentScopeIdChange={setParentScopeId}
+                          onParentScopeIdChange={(value) => { if (value !== parentScopeId) { setUploadError(null); setUploadingInput(false); setIsActing(false); } setParentScopeId(value); }}
                           scopeProblem={scopeProblem}
                         />
                       </>

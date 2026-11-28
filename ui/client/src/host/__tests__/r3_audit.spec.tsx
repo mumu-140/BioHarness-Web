@@ -7,7 +7,7 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen } from '@testing-library/react';
 import BioHarnessChatBanners from '../BioHarnessChatBanners';
 import BioHarnessCapabilitiesRoute from '../BioHarnessCapabilitiesRoute';
 import * as bioharnessApi from '../bioharness';
@@ -184,5 +184,18 @@ describe('R3 post-audit frontend regressions', () => {
     const sk = await screen.findByTestId('bh-cap-skill-qc-guide');
     expect(sk.textContent).not.toContain('可调用');
     expect(sk.textContent).toMatch(/Advisory doc|按需读取/);
+  });
+});
+
+describe('R3 owner generation', () => {
+  it('invalidates a response from an earlier visit to the same project', () => {
+    const { result, rerender } = renderHook(
+      ({ key }) => workspaceCtx.useOperationContextRef(key), { initialProps: { key: 'A' } },
+    );
+    const first = result.current.current;
+    rerender({ key: 'B' });
+    expect(result.current.current).not.toBe(first);
+    rerender({ key: 'A' });
+    expect(result.current.current).not.toBe(first);
   });
 });

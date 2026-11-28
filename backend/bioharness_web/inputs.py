@@ -266,7 +266,6 @@ _READABLE_TEXT_EXTENSIONS: frozenset[str] = frozenset({
 })
 MAX_ATTACHMENT_EXCERPT_CHARS = 8_000
 MAX_ATTACHMENT_TOTAL_CHARS = 16_000
-_OMITTED_MARKER = "\n\n…… 中间内容已省略 ……\n\n"
 
 
 def _resolve_attachment_path(workspace: Workspace, raw_path: str) -> Path:
@@ -300,20 +299,34 @@ def _resolve_attachment_path(workspace: Workspace, raw_path: str) -> Path:
     return resolved
 
 
-def _hash_fd_bounded(fd: int, size_bytes: int) -> str | None:
-    """Stream SHA-256 from an already-opened descriptor up to evidence.HASH_LIMIT_BYTES."""
-    if size_bytes > evidence.HASH_LIMIT_BYTES:
-        return None
+def _capture_fd_bounded(fd: int, prefix_limit: int = 0) -> tuple[str | None, bytes, int]:
+    """Hash and capture the same bounded stream; never reread mutable source bytes.
+
+    A growing, shrinking or otherwise changed file has no verified digest. The
+    prefix is at most the caller's small text budget, not a full dataset copy.
+    """
+    before = os.fstat(fd)
+    if before.st_size > evidence.HASH_LIMIT_BYTES:
+        return None, b"", before.st_size
     os.lseek(fd, 0, os.SEEK_SET)
     hasher = hashlib.sha256()
-    remaining = evidence.HASH_LIMIT_BYTES + 1
-    while remaining > 0:
-        chunk = os.read(fd, min(65536, remaining))
+    prefix = bytearray()
+    total = 0
+    while total <= evidence.HASH_LIMIT_BYTES:
+        chunk = os.read(fd, min(65536, evidence.HASH_LIMIT_BYTES + 1 - total))
         if not chunk:
             break
+        total += len(chunk)
+        if total > evidence.HASH_LIMIT_BYTES:
+            return None, b"", os.fstat(fd).st_size
         hasher.update(chunk)
-        remaining -= len(chunk)
-    return hasher.hexdigest()
+        if len(prefix) < prefix_limit:
+            prefix.extend(chunk[:prefix_limit - len(prefix)])
+    after = os.fstat(fd)
+    identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    if total != before.st_size or identity(before) != identity(after):
+        return None, b"", after.st_size
+    return hasher.hexdigest(), bytes(prefix), total
 
 
 def validate_attachments(
@@ -350,18 +363,14 @@ def validate_attachments(
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode):
                 raise InputError("ATTACHMENT_OUTSIDE_WORKSPACE", f"附件不是常规文件：{raw_path}", 403)
-            digest = _hash_fd_bounded(fd, st.st_size)
+            digest, _, observed_size = _capture_fd_bounded(fd)
+        except OSError:
+            raise InputError("ATTACHMENT_READ_FAILED", "附件读取失败。", 409) from None
         finally:
             os.close(fd)
         expected_sha = raw.get("sha256")
         if isinstance(expected_sha, str) and expected_sha.strip():
-            if digest is None:
-                raise InputError(
-                    "ATTACHMENT_TOO_LARGE_FOR_HASH",
-                    f"附件 {resolved.name} 超过在线校验大小上限，无法核验指定 SHA-256。",
-                    413,
-                )
-            if expected_sha.strip().lower() != digest:
+            if digest is not None and expected_sha.strip().lower() != digest:
                 raise InputError(
                     "ATTACHMENT_SHA_MISMATCH",
                     f"附件内容校验摘要已变化（{resolved.name}），请重新确认后再提交。",
@@ -372,9 +381,11 @@ def validate_attachments(
             "name": resolved.name,
             "server_path": redact(str(resolved)),
             "relative_path": rel_to_ws,
-            "bytes": st.st_size,
+            "bytes": observed_size,
             "extension": resolved.suffix.lower(),
-            "sha256": digest,
+            # Retain an explicitly recorded identity even when this host cannot
+            # verify a large file. It remains a reference, not verified content.
+            "sha256": digest or (expected_sha.strip().lower() if isinstance(expected_sha, str) and expected_sha.strip() else None),
             "hash_skipped": digest is None,
             "file_identity": "MATCHES_RECORD" if digest is not None else "NOT_CHECKED",
             "evidence_verified": False,
@@ -423,99 +434,52 @@ def read_attachment_for_model(
             "note": "附件无法以安全常规文件打开（符号链接或路径不再受权）。",
         }
 
+    max_chars = max(0, min(max_chars, MAX_ATTACHMENT_EXCERPT_CHARS))
+    ext = resolved.suffix.lower()
+    fmt = evidence._format_for(resolved.name)
+    prefix_limit = min(max_chars * 4, 32_000) if ext in _READABLE_TEXT_EXTENSIONS else 16
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
-            return {
-                **base_info,
-                "file_identity": "UNAVAILABLE",
-                "readable": False,
-                "error_code": "ATTACHMENT_NOT_REGULAR",
-                "note": "附件不是常规文件。",
-            }
-        current_sha = _hash_fd_bounded(fd, st.st_size)
-        if recorded_sha_str is not None:
-            if current_sha is None:
-                return {
-                    **base_info,
-                    "bytes": st.st_size,
-                    "file_identity": "NOT_CHECKED",
-                    "readable": False,
-                    "note": "文件超过在线哈希核验上限（64 MiB），未向模型注入内容。",
-                }
-            if current_sha != recorded_sha_str:
-                return {
-                    **base_info,
-                    "bytes": st.st_size,
-                    "current_sha256": current_sha,
-                    "file_identity": "DIFFERS_FROM_RECORD",
-                    "readable": False,
-                    "note": "附件文件内容自提交后已发生变化（SHA-256 不一致），已拒绝向模型提供漂移内容。",
-                }
-            file_identity = "MATCHES_RECORD"
-        else:
-            file_identity = "MATCHES_RECORD" if current_sha is not None else "NOT_CHECKED"
-
-        ext = resolved.suffix.lower()
-        fmt = evidence._format_for(resolved.name)
-        if ext not in _READABLE_TEXT_EXTENSIONS:
-            os.lseek(fd, 0, os.SEEK_SET)
-            magic = os.read(fd, 16)
-            extra: dict[str, Any] = {}
-            if ext == ".pdf":
-                extra["pdf_header_valid"] = magic.startswith(b"%PDF-")
-            return {
-                **base_info,
-                "bytes": st.st_size,
-                "sha256": current_sha,
-                "extension": ext,
-                "format": "binary",
-                "file_identity": file_identity,
-                "readable": False,
-                "content_mode": "binary_metadata_only",
-                **extra,
-                "note": "二进制附件已核验文件身份与摘要，未将原始二进制流注入模型上下文。",
-            }
-
-        # Bounded safe read directly from the verified descriptor
-        byte_budget = max(1024, min(max_chars * 4, 65536))
-        os.lseek(fd, 0, os.SEEK_SET)
-        if st.st_size <= byte_budget:
-            raw_bytes = os.read(fd, st.st_size)
-            truncated_bytes = False
-        else:
-            head_n = int(byte_budget * 0.7)
-            tail_n = max(256, byte_budget - head_n)
-            head_bytes = os.read(fd, head_n)
-            os.lseek(fd, max(head_n, st.st_size - tail_n), os.SEEK_SET)
-            tail_bytes = os.read(fd, tail_n)
-            raw_bytes = head_bytes + _OMITTED_MARKER.encode("utf-8") + tail_bytes
-            truncated_bytes = True
+            return {**base_info, "file_identity": "UNAVAILABLE", "readable": False,
+                    "error_code": "ATTACHMENT_NOT_REGULAR", "note": "附件不是常规文件。"}
+        if recorded_sha_str is None:
+            return {**base_info, "bytes": st.st_size, "file_identity": "NOT_CHECKED",
+                    "readable": False, "note": "附件没有已记录摘要，仅提供文件引用。"}
+        current_sha, captured, size = _capture_fd_bounded(fd, prefix_limit)
+    except OSError:
+        return {**base_info, "file_identity": "UNAVAILABLE", "readable": False,
+                "error_code": "ATTACHMENT_READ_FAILED", "note": "附件读取失败。"}
     finally:
         os.close(fd)
 
-    decoded = raw_bytes.decode("utf-8", errors="replace").replace("\x00", "")
-    redacted_text = redact(decoded)
-    truncated = truncated_bytes
-    if len(redacted_text) > max_chars:
-        keep_head = int(max_chars * 0.7)
-        keep_tail = max(128, max_chars - keep_head - len(_OMITTED_MARKER))
-        redacted_text = redacted_text[:keep_head] + _OMITTED_MARKER + redacted_text[-keep_tail:]
-        truncated = True
+    if current_sha is None:
+        return {**base_info, "bytes": size, "file_identity": "NOT_CHECKED", "readable": False,
+                "note": "文件超出在线核验范围或读取时发生变化，仅提供文件引用。"}
+    if current_sha != recorded_sha_str:
+        return {**base_info, "bytes": size, "current_sha256": current_sha,
+                "file_identity": "DIFFERS_FROM_RECORD", "readable": False,
+                "note": "附件内容与提交时的 SHA-256 不一致，未提供漂移内容。"}
+    verified = {**base_info, "bytes": size, "sha256": current_sha,
+                "extension": ext, "file_identity": "MATCHES_RECORD"}
+    if ext not in _READABLE_TEXT_EXTENSIONS:
+        return {**verified, "format": "binary", "readable": False,
+                "content_mode": "binary_metadata_only",
+                **({"pdf_header_valid": captured.startswith(b"%PDF-")} if ext == ".pdf" else {}),
+                "note": "二进制附件已核验摘要，仅提供文件引用。"}
+    if max_chars == 0:
+        return {**verified, "format": fmt, "readable": False,
+                "note": "本次附件摘录预算已用完，仅提供已核验的文件引用。"}
 
-    return {
-        **base_info,
-        "bytes": st.st_size,
-        "sha256": current_sha,
-        "extension": ext,
-        "format": fmt,
-        "file_identity": file_identity,
-        "readable": True,
-        "truncated": truncated,
-        "chars_read": len(redacted_text),
-        "lines_included": len(redacted_text.splitlines()),
-        "excerpt": redacted_text,
-    }
+    # The prefix came from the very stream whose full SHA-256 matched. It is
+    # only an excerpt, never a parsed full table, sequence collection or report.
+    decoded = captured.decode("utf-8", errors="replace").replace("\x00", "")
+    redacted_text = redact(decoded)
+    truncated = len(captured) < size or len(redacted_text) > max_chars
+    redacted_text = redacted_text[:max_chars]
+    return {**verified, "format": fmt, "readable": True, "truncated": truncated,
+            "chars_read": len(redacted_text), "lines_included": len(redacted_text.splitlines()),
+            "excerpt": redacted_text}
 
 
 def save_module_artifact(

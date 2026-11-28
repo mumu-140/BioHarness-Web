@@ -2,7 +2,7 @@
  * Explicit BioHarness service/workspace/request/scope/conversation identity and unsent draft preservation
  * (not upstream LibreChat code).
  */
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { atom, useSetAtom } from 'jotai';
@@ -81,6 +81,17 @@ export interface BioHarnessWorkspaceContextValue {
 }
 
 const BioHarnessWorkspaceContext = createContext<BioHarnessWorkspaceContextValue | null>(null);
+
+/** A response from a previous visit to the same owner is still stale (A -> B -> A). */
+export function useOperationContextRef(key: string) {
+  const owner = useRef({ key, epoch: 0 });
+  const token = useRef(JSON.stringify([key, 0]));
+  if (owner.current.key !== key) {
+    owner.current = { key, epoch: owner.current.epoch + 1 };
+    token.current = JSON.stringify([key, owner.current.epoch]);
+  }
+  return token;
+}
 
 const DRAFT_PREFIX = 'bh:draft:v1:';
 const CONT_PREFIX = 'bh:cont:v1:';
@@ -204,6 +215,10 @@ export function BioHarnessWorkspaceProvider({
   const [pendingScopeDraft, setPendingScopeDraft] = useState<PendingScopeDraft | null>(null);
   const [pendingAttachmentsBox, setPendingAttachmentsBox] = useState<{
     workspace: string;
+    service: string | null;
+    conversationId: string | null;
+    requestId: string | null;
+    scopeId: string | null;
     files: WorkspaceInputFile[];
   } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -213,8 +228,14 @@ export function BioHarnessWorkspaceProvider({
   }, [workspace]);
 
   const pendingAttachments = useMemo(
-    () => (pendingAttachmentsBox && pendingAttachmentsBox.workspace === workspace ? pendingAttachmentsBox.files : []),
-    [pendingAttachmentsBox, workspace],
+    () => (pendingAttachmentsBox &&
+      pendingAttachmentsBox.workspace === workspace &&
+      pendingAttachmentsBox.service === service &&
+      pendingAttachmentsBox.conversationId === linkedConversationId &&
+      pendingAttachmentsBox.requestId === selectedRequestId &&
+      pendingAttachmentsBox.scopeId === selectedScopeId
+      ? pendingAttachmentsBox.files : []),
+    [pendingAttachmentsBox, workspace, service, linkedConversationId, selectedRequestId, selectedScopeId],
   );
 
   const clearPendingAttachments = useCallback(() => {
@@ -485,12 +506,19 @@ ${snippet}` : snippet;
       if (!workspace) {
         return;
       }
+      const target = {
+        workspace, service, conversationId: conversationId ?? null,
+        requestId: requestId ?? null, scopeId: conversationId ? selectedScopeId : null,
+      };
       setPendingAttachmentsBox((prev) => {
-        const base = prev && prev.workspace === workspace ? prev.files : [];
+        const sameTarget = prev && prev.workspace === target.workspace &&
+          prev.service === target.service && prev.conversationId === target.conversationId &&
+          prev.requestId === target.requestId && prev.scopeId === target.scopeId;
+        const base = sameTarget ? prev.files : [];
         const nextFiles = base.some((item) => item.server_path === file.server_path)
           ? base
           : [...base, file];
-        return { workspace, files: nextFiles };
+        return { ...target, files: nextFiles };
       });
       if (conversationId) {
         openConversation(conversationId, { requestId: requestId ?? null });
@@ -498,7 +526,7 @@ ${snippet}` : snippet;
         openNewResearch({ requestId: requestId ?? null });
       }
     },
-    [workspace, openConversation, openNewResearch],
+    [workspace, service, selectedScopeId, openConversation, openNewResearch],
   );
 
   const openCapabilitiesView = useCallback(

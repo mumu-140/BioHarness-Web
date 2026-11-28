@@ -1721,6 +1721,7 @@ export async function fetchMemoryStatus(workspace: string): Promise<MemoryOvervi
 export async function recallMemory(
   workspace: string,
   body: {
+    server?: string;
     query: string;
     task_conditions?: Record<string, string>;
     mode: MemoryRecallMode;
@@ -1738,6 +1739,7 @@ export async function recallMemory(
 export async function expandMemory(
   workspace: string,
   body: {
+    server?: string;
     memory_ref: string;
     task_conditions?: Record<string, string>;
     detail: MemoryExpandDetail;
@@ -1754,6 +1756,7 @@ export async function expandMemory(
 export async function reportMemoryUse(
   workspace: string,
   body: {
+    server?: string;
     event_id: string;
     memory_ref: string;
     task_ref: string;

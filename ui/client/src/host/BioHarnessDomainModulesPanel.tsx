@@ -2,7 +2,7 @@
  * R3.4 Professional Scientific Modules Workbench seated inside `/w/capabilities?tab=modules`
  * (not upstream LibreChat code).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -42,7 +42,7 @@ import {
   StatisticsDomainCard,
 } from './BioHarnessDomainRenderers';
 import { useBhText } from './i18n';
-import { useBioHarnessWorkspace } from './workspace';
+import { useBioHarnessWorkspace, useOperationContextRef } from './workspace';
 
 const PROTEIN_OPERATIONS: ProteinOperation[] = [
   'structure-inventory',
@@ -65,9 +65,8 @@ export default function BioHarnessDomainModulesPanel() {
     stageTextInConversation,
     attachFileToConversation,
   } = useBioHarnessWorkspace();
-  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}`;
-  const contextKeyRef = useRef(contextKey);
-  contextKeyRef.current = contextKey;
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}::${linkedConversationId ?? 'none'}`;
+  const contextKeyRef = useOperationContextRef(contextKey);
   const wrapScopedError = (snapKey: string, err: unknown) => {
     const wrapped = err instanceof Error ? err : new Error(String(err));
     (wrapped as Error & { __bhSnapKey?: string }).__bhSnapKey = snapKey;
@@ -114,6 +113,7 @@ export default function BioHarnessDomainModulesPanel() {
   const [litErr, setLitErr] = useState<string | null>(null);
   const [litQuestion, setLitQuestion] = useState('');
   const [litRunResult, setLitRunResult] = useState<Record<string, unknown> | null>(null);
+  const [litSaveNote, setLitSaveNote] = useState<string | null>(null);
   const [litSavedArtifact, setLitSavedArtifact] = useState<WorkspaceInputFile | null>(null);
   const [litSavedPdfs, setLitSavedPdfs] = useState<WorkspaceInputFile[]>([]);
   const litInspectMutation = useMutation({
@@ -163,6 +163,7 @@ export default function BioHarnessDomainModulesPanel() {
       invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
       if (contextKeyRef.current !== snapKey) return;
       setLitRunResult(res.result);
+      setLitSaveNote(res.save_note ?? null);
       setLitSavedArtifact(res.saved_artifact ?? null);
       setLitSavedPdfs(res.saved_pdfs ?? []);
       setLitErr(null);
@@ -278,6 +279,7 @@ export default function BioHarnessDomainModulesPanel() {
     setLitRunResult(null);
     setLitSavedArtifact(null);
     setLitSavedPdfs([]);
+    setLitSaveNote(null);
     setStatAction('render');
     setStatRecordsPath('');
     setStatTemplatePath('');
@@ -291,7 +293,7 @@ export default function BioHarnessDomainModulesPanel() {
     setProtMapPath('');
     setProtResult(null);
     setProtErr(null);
-  }, [workspace, selectedScopeId, selectedRequestId]);
+  }, [contextKey]);
 
   const isLinkedDelivered = !nowQuery.data?.ok || nowQuery.data.data?.phase === 'DELIVERED';
   const attachArtifact = (file: WorkspaceInputFile) =>
@@ -497,6 +499,7 @@ export default function BioHarnessDomainModulesPanel() {
             onStageText={stageSnippet}
           />
         )}
+        {litSaveNote && <p role="status" className="text-sm text-text-secondary">{litSaveNote}</p>}
         {litSavedArtifact && (
           <div
             data-testid="bh-lit-saved-artifact"
@@ -691,6 +694,7 @@ export default function BioHarnessDomainModulesPanel() {
           );
         })()}
 
+        {statResult?.save_note && <p role="status" className="text-sm text-text-secondary">{statResult.save_note}</p>}
         {statResult && <StatisticsDomainCard data={statResult} onStageText={stageSnippet} />}
       </section>
 

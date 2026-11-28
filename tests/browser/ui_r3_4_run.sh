@@ -94,7 +94,7 @@ PDB
 # 4. Seed Web ledger with a real observed protein-methods output for Execution Inspector test
 PM_OUT="$(bioharness-protein-methods structure-inventory "$WS/helix.pdb")"
 LEDGER="$WORK/ledger.sqlite3"
-"$REPO/.venv/bin/python" - "$LEDGER" "$PM_OUT" <<'PYLEDGER'
+"$REPO/.venv/bin/python" - "$LEDGER" "$PM_OUT" <<'PYLEDGER' || exit 1
 import json, sys
 from pathlib import Path
 from bioharness_web.ledger import Ledger
@@ -105,7 +105,7 @@ op = l.start_operation(r, "tool", "structure-inventory")
 l.append(c["id"], r, "operation.started", {"operation_id": op, "kind": "tool", "name": "structure-inventory", "server": "protein-methods", "input": {"input": "helix.pdb"}})
 l.end_operation(op, "SUCCEEDED")
 l.append(c["id"], r, "operation.finished", {"operation_id": op, "kind": "tool", "name": "structure-inventory", "server": "protein-methods", "state": "SUCCEEDED", "output": json.loads(sys.argv[2])})
-l.end_run(r, "COMPLETED")
+l.end_run(r, "FINISHED")
 l.close()
 PYLEDGER
 

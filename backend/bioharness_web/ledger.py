@@ -334,8 +334,10 @@ class Ledger:
                 if row is None:
                     raise ValueError(f"conversation {conversation_id} does not belong to workspace {workspace}")
                 valid_convo_id = str(row["id"])
-                if not resolved_req_id and row["request_id"]:
-                    resolved_req_id = str(row["request_id"])
+                bound_request = str(row["request_id"]) if row["request_id"] else None
+                if resolved_req_id is not None and resolved_req_id != bound_request:
+                    raise ValueError("module request does not match the conversation's bound request")
+                resolved_req_id = bound_request
 
             db.execute(
                 "INSERT INTO workspace_module_events "

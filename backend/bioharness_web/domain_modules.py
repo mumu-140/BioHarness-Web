@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import stat
 import os
 import re
 import shutil
@@ -22,11 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import inputs
+from . import evidence, inputs
 from .cli import CliRunner, ToolError
 from .ledger import Ledger
 from .settings import Settings, Workspace
 from .sources import path_redactor
+
+log = logging.getLogger(__name__)
 
 _MAX_INSPECT_BYTES = 4 * 1024 * 1024
 _MAX_SCAN_FILES = 100
@@ -210,6 +214,19 @@ def resolve_workspace_file(workspace: Workspace, rel_path: str) -> Path:
     if not resolved.is_relative_to(ws_root) or not resolved.is_file():
         raise DomainModuleError("FILE_OUTSIDE_WORKSPACE", "目标文件不在授权工作区内。", 403)
     return resolved
+
+
+def _read_inspection_bytes(workspace: Workspace, path: Path, *, size_code: str = "BUNDLE_TOO_LARGE") -> bytes:
+    fd = evidence._open_checked(workspace, path)
+    if fd is None:
+        raise DomainModuleError("FILE_UNAVAILABLE", "文件无法在授权范围内安全读取。", 403)
+    with os.fdopen(fd, "rb") as fh:
+        if os.fstat(fh.fileno()).st_size > _MAX_INSPECT_BYTES:
+            raise DomainModuleError(size_code, "结构化产物超过 4 MB 在线审阅上限。", 413)
+        data = fh.read(_MAX_INSPECT_BYTES + 1)
+    if len(data) > _MAX_INSPECT_BYTES:
+        raise DomainModuleError(size_code, "结构化产物超过 4 MB 在线审阅上限。", 413)
+    return data
 
 
 def list_workspace_module_files(workspace: Workspace) -> dict[str, list[str]]:
@@ -504,7 +521,7 @@ def inspect_literature_artifact(
 ) -> dict[str, Any]:
     """Read and paginate a real bioharness-literature search.json or downloads.json artifact."""
     resolved = resolve_workspace_file(workspace, rel_path)
-    raw = resolved.read_bytes()
+    raw = _read_inspection_bytes(workspace, resolved, size_code="ARTIFACT_TOO_LARGE")
     if len(raw) > _MAX_INSPECT_BYTES:
         raise DomainModuleError("ARTIFACT_TOO_LARGE", "文献 JSON 文件超过 4 MB 浏览上限。", 413)
     try:
@@ -572,68 +589,112 @@ def _persist_literature_pdfs(
     payload: dict[str, Any],
     *,
     max_upload_bytes: int,
+    save_output: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Persist downloaded PDFs from `bioharness-literature fetch` into authorized `upload_root`
-    and rewrite payload/downloads.json entries so saved paths point to durable artifacts instead
-    of ephemeral `/tmp` directories."""
-    if workspace.upload_root is None or not out_dir.is_dir():
-        return [], payload
+    """Preserve the exact file named by each module-owned download record.
 
-    out_root = out_dir.resolve()
-    saved_pdfs: list[dict[str, Any]] = []
-    by_name: dict[str, dict[str, Any]] = {}
-    by_rel: dict[str, dict[str, Any]] = {}
-    by_abs: dict[str, dict[str, Any]] = {}
-
-    for pdf_path in sorted(out_root.rglob("*.pdf"), key=lambda p: str(p).lower()):
-        if pdf_path.is_symlink() or not pdf_path.is_file():
-            continue
-        try:
-            resolved = pdf_path.resolve(strict=True)
-        except OSError:
-            continue
-        if not resolved.is_relative_to(out_root):
-            continue
-        try:
-            st = resolved.stat()
-        except OSError:
-            continue
-        if st.st_size <= 0 or st.st_size > max_upload_bytes:
-            continue
-        try:
-            raw_pdf = resolved.read_bytes()
-        except OSError:
-            continue
-        saved = inputs.save_module_artifact(workspace, "literature", resolved.name, raw_pdf)
-        if saved is None:
-            continue
-        saved_pdfs.append(saved)
-        rel_str = str(resolved.relative_to(out_root))
-        by_name[resolved.name] = saved
-        by_rel[rel_str] = saved
-        by_abs[str(resolved)] = saved
-
-    if not saved_pdfs:
-        return [], payload
-
+    Download success and host retention are independent. Never substitute a
+    same-named file, alter a DOI, or advertise a soon-to-be-deleted temp path.
+    """
     updated = json.loads(json.dumps(payload, ensure_ascii=False))
     entries = updated.get("entries")
+    saved_pdfs: list[dict[str, Any]] = []
+    saved_by_path: dict[Path, dict[str, Any]] = {}
+    retained, not_retained = 0, 0
+    output_available = out_dir.is_dir() and not out_dir.is_symlink()
+    out_root = out_dir.resolve() if output_available else out_dir.absolute()
+    requested = save_output and workspace.upload_root is not None
     if isinstance(entries, list):
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
             raw_file = entry.get("file") or entry.get("pdf_path") or entry.get("path")
-            matched = None
-            if isinstance(raw_file, str) and raw_file.strip():
-                rf = raw_file.strip()
-                matched = by_abs.get(rf) or by_rel.get(rf) or by_name.get(Path(rf).name)
-            if matched is not None:
-                entry["file"] = matched["server_path"]
-                entry["relative_path"] = matched["relative_path"]
-                entry["sha256"] = matched["sha256"]
-                entry["bytes"] = matched["bytes"]
-                entry["saved_artifact"] = matched
+            # Keep the scientific module's original status and identity.
+            # A downloaded entry with no usable file is a retention failure.
+            if not raw_file and entry.get("status") != "downloaded":
+                continue
+            saved = None
+            reason = "NOT_REQUESTED" if not save_output else "NO_UPLOAD_ROOT"
+            if requested:
+                reason = "FILE_NOT_RETAINED"
+                try:
+                    if not output_available:
+                        raise ValueError("OUTPUT_DIRECTORY_UNAVAILABLE")
+                    if not isinstance(raw_file, str) or not raw_file.strip():
+                        raise ValueError("DOWNLOAD_PATH_MISSING")
+                    candidate = Path(raw_file)
+                    if not candidate.is_absolute():
+                        candidate = out_root / candidate
+                    if ".." in candidate.parts or not candidate.is_relative_to(out_root):
+                        raise ValueError("DOWNLOAD_PATH_OUTSIDE_OUTPUT")
+                    cur = out_root
+                    for part in candidate.relative_to(out_root).parts:
+                        cur = cur / part
+                        if cur.is_symlink():
+                            raise ValueError("DOWNLOAD_SYMLINK")
+                    resolved = candidate.resolve(strict=True)
+                    if not resolved.is_relative_to(out_root) or resolved.suffix.lower() != ".pdf":
+                        raise ValueError("DOWNLOAD_PATH_INVALID")
+                    if resolved in saved_by_path:
+                        prior = saved_by_path[resolved]
+                        if entry.get("sha256") and entry["sha256"] != prior["sha256"]:
+                            raise ValueError("DOWNLOAD_SHA_MISMATCH")
+                        if isinstance(entry.get("bytes"), int) and entry["bytes"] != prior["bytes"]:
+                            raise ValueError("DOWNLOAD_SIZE_MISMATCH")
+                        saved = prior
+                    else:
+                        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                        with os.fdopen(fd, "rb") as fh:
+                            st = os.fstat(fh.fileno())
+                            opened = Path(os.readlink(f"/proc/self/fd/{fh.fileno()}"))
+                            if opened != resolved or not stat.S_ISREG(st.st_mode):
+                                raise ValueError("DOWNLOAD_PATH_CHANGED")
+                            if not 0 < st.st_size <= max_upload_bytes:
+                                raise ValueError("DOWNLOAD_SIZE_LIMIT")
+                            data = fh.read(max_upload_bytes + 1)
+                            end = os.fstat(fh.fileno())
+                            if len(data) != st.st_size or end.st_mtime_ns != st.st_mtime_ns or end.st_ctime_ns != st.st_ctime_ns:
+                                raise ValueError("DOWNLOAD_CHANGED")
+                        digest = hashlib.sha256(data).hexdigest()
+                        if not data.startswith(b"%PDF-"):
+                            raise ValueError("DOWNLOAD_NOT_PDF")
+                        if entry.get("sha256") and entry["sha256"] != digest:
+                            raise ValueError("DOWNLOAD_SHA_MISMATCH")
+                        if isinstance(entry.get("bytes"), int) and entry["bytes"] != len(data):
+                            raise ValueError("DOWNLOAD_SIZE_MISMATCH")
+                        saved = inputs.save_module_artifact(workspace, "literature", resolved.name, data)
+                        if saved is not None:
+                            saved_by_path[resolved] = saved
+                            saved_pdfs.append(saved)
+                except ValueError as exc:
+                    reason = str(exc)
+                except (OSError, inputs.InputError):
+                    reason = "DOWNLOAD_READ_OR_SAVE_FAILED"
+            # Remove all ephemeral aliases, even when the output was not retained.
+            for key in ("file", "pdf_path", "path", "relative_path", "saved_artifact"):
+                entry.pop(key, None)
+            if saved is not None:
+                retained += 1
+                entry.update(file=saved["server_path"], relative_path=saved["relative_path"],
+                             sha256=saved["sha256"], bytes=saved["bytes"], saved_artifact=saved,
+                             retention_status="RETAINED")
+            else:
+                not_retained += 1
+                entry.update(file=None, retention_status="NOT_RETAINED", retention_reason=reason)
+    reported = updated.get("downloaded_identifiers")
+    unmapped = max(0, reported - retained - not_retained) if isinstance(reported, int) else 0
+    not_retained += unmapped
     updated["saved_pdfs"] = saved_pdfs
+    updated["retention"] = {
+        "status": ("NOT_REQUESTED" if not save_output else
+                   "NO_UPLOAD_ROOT" if not requested else
+                   "MANIFEST_UNAVAILABLE" if not isinstance(entries, list) else
+                   "PARTIAL" if not_retained and retained else
+                   "NOT_RETAINED" if not_retained else "COMPLETE"),
+        "retained_identifiers": retained,
+        "not_retained_identifiers": not_retained,
+        "unmapped_identifiers": unmapped,
+    }
     return saved_pdfs, updated
 
 
@@ -690,9 +751,11 @@ async def run_literature_cli(
         except ValueError as exc:
             raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-lit-"))
-    os.chmod(tmpdir, 0o700)
+    tmpdir = None
+    cleanup = False
     try:
+        tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-lit-"))
+        os.chmod(tmpdir, 0o700)
         out_dir = tmpdir / "out"
         if operation == "search":
             argv = [
@@ -724,7 +787,7 @@ async def run_literature_cli(
             if ledger is not None and ledger_ev_id is not None:
                 ledger.finish_module_operation(
                     ledger_ev_id,
-                    state="FAILED",
+                    state="UNKNOWN" if exc.code in {"TOOL_TIMEOUT", "TOOL_BAD_OUTPUT", "TOOL_OUTPUT_TOO_LARGE"} else "FAILED",
                     error_data={"code": exc.code, "message": redact(exc.message)},
                 )
             raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
@@ -746,37 +809,53 @@ async def run_literature_cli(
         saved_artifact = None
         save_note = None
         final_payload = payload
-
-        if save_output:
-            if workspace.upload_root is None:
-                save_note = "当前工作区未配置可写授权目录（upload_root），检索/下载结果与 PDF 仅本次返回未落盘。"
+        if operation == "fetch":
+            art_file = out_dir / "downloads.json"
+            raw_downloads = payload
+            if not out_dir.is_symlink() and art_file.is_file() and not art_file.is_symlink():
+                try:
+                    with art_file.open("rb") as fh:
+                        raw = fh.read(_MAX_INSPECT_BYTES + 1)
+                    if len(raw) <= _MAX_INSPECT_BYTES:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            raw_downloads = parsed
+                except (OSError, ValueError):
+                    pass
+            saved_pdfs, final_payload = _persist_literature_pdfs(
+                workspace, out_dir, raw_downloads,
+                max_upload_bytes=settings.max_upload_bytes, save_output=save_output)
+            retention = final_payload["retention"]
+            if retention["status"] == "MANIFEST_UNAVAILABLE":
+                save_note = "模块未返回可核对的下载条目，不能确认 PDF 完整留存。"
+            elif retention["not_retained_identifiers"]:
+                save_note = (f"PDF 留存 {retention['retained_identifiers']} 项，"
+                             f"未留存 {retention['not_retained_identifiers']} 项；"
+                             "下载成功与实际留存是不同状态。")
+            if save_output and workspace.upload_root is not None:
+                art_bytes = (json.dumps(redact(final_payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                saved_artifact = inputs.save_module_artifact(workspace, "literature", "downloads.json", art_bytes)
+            # A failed requested retention leaves only this invocation's
+            # private temporary output available for operator recovery.
+            cleanup = not save_output or workspace.upload_root is None or (
+                retention["status"] == "COMPLETE" and saved_artifact is not None)
+        elif save_output and workspace.upload_root is not None:
+            art_file = out_dir / "search.json"
+            if not out_dir.is_symlink() and art_file.is_file() and not art_file.is_symlink():
+                with art_file.open("rb") as fh:
+                    art_bytes = fh.read(_MAX_INSPECT_BYTES + 1)
+                if len(art_bytes) > _MAX_INSPECT_BYTES:
+                    raise DomainModuleError("ARTIFACT_TOO_LARGE", "文献检索清单超出在线留存上限。", 413)
             else:
-                if operation == "fetch":
-                    art_file = out_dir / "downloads.json"
-                    raw_downloads = payload
-                    if art_file.is_file() and not art_file.is_symlink():
-                        try:
-                            parsed = json.loads(art_file.read_text(encoding="utf-8"))
-                            if isinstance(parsed, dict):
-                                raw_downloads = parsed
-                        except (OSError, json.JSONDecodeError):
-                            pass
-                    saved_pdfs, final_payload = _persist_literature_pdfs(
-                        workspace,
-                        out_dir,
-                        raw_downloads,
-                        max_upload_bytes=settings.max_upload_bytes,
-                    )
-                    art_bytes = (json.dumps(redact(final_payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-                    saved_artifact = inputs.save_module_artifact(workspace, "literature", "downloads.json", art_bytes)
-                else:
-                    art_file = out_dir / "search.json"
-                    art_bytes = (
-                        art_file.read_bytes()
-                        if art_file.is_file() and not art_file.is_symlink()
-                        else (json.dumps(redact(payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-                    )
-                    saved_artifact = inputs.save_module_artifact(workspace, "literature", "search.json", art_bytes)
+                art_bytes = (json.dumps(redact(payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            saved_artifact = inputs.save_module_artifact(workspace, "literature", "search.json", art_bytes)
+            cleanup = saved_artifact is not None
+        else:
+            cleanup = True
+        if save_output and workspace.upload_root is None:
+            save_note = "；".join(x for x in (save_note, "当前工作区未配置可写授权目录，结果未落盘。") if x)
+        if not cleanup:
+            save_note = "；".join(x for x in (save_note, "本次临时产物保留供管理员核对，未声明已完整保存。") if x)
 
         recorded = False
         if ledger is not None and ledger_ev_id is not None:
@@ -797,8 +876,19 @@ async def run_literature_cli(
             "save_note": save_note,
             "recorded_in_ledger": recorded,
         })
+    except inputs.InputError as exc:
+        raise DomainModuleError(exc.code, exc.message, exc.status) from None
+    except OSError:
+        raise DomainModuleError("ARTIFACT_IO_FAILED", "文献产物读取或保存失败。", 500) from None
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(ledger_ev_id, state="UNKNOWN",
+                error_data={"code": "MODULE_OUTCOME_UNKNOWN", "message": "模块执行或产物留存未完整记录。"})
+        if tmpdir is not None:
+            if cleanup or not save_output or workspace.upload_root is None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            else:
+                log.warning("Literature output retained for operator reconciliation: operation=%s path=%s", ledger_ev_id, tmpdir)
 
 
 async def run_statistics_report_binding(
@@ -822,7 +912,7 @@ async def run_statistics_report_binding(
         raise DomainModuleError("INVALID_ACTION", "仅支持 inspect / render / verify 操作。", 422)
 
     records_abs = resolve_workspace_file(workspace, records_path)
-    raw_bytes = records_abs.read_bytes()
+    raw_bytes = _read_inspection_bytes(workspace, records_abs)
     if len(raw_bytes) > _MAX_INSPECT_BYTES:
         raise DomainModuleError("BUNDLE_TOO_LARGE", "统计结果包超过 4 MB 上限。", 413)
     try:
@@ -891,9 +981,10 @@ async def run_statistics_report_binding(
         except ValueError as exc:
             raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-stat-"))
-    os.chmod(tmpdir, 0o700)
+    tmpdir = None
     try:
+        tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-stat-"))
+        os.chmod(tmpdir, 0o700)
         if action == "render":
             out_report = tmpdir / "rendered_report.md"
             argv = [
@@ -920,7 +1011,7 @@ async def run_statistics_report_binding(
             if ledger is not None and ledger_ev_id is not None:
                 ledger.finish_module_operation(
                     ledger_ev_id,
-                    state="FAILED",
+                    state="UNKNOWN" if exc.code in {"TOOL_TIMEOUT", "TOOL_BAD_OUTPUT", "TOOL_OUTPUT_TOO_LARGE"} else "FAILED",
                     error_data={"code": exc.code, "message": redact(exc.message)},
                 )
             raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
@@ -995,8 +1086,8 @@ async def run_statistics_report_binding(
             except ValueError:
                 pass
         is_binding_mismatch = (
-            "REPORT_BINDING_FAIL" in stderr_text
-            or (isinstance(parsed_err_json, dict) and str(parsed_err_json.get("status") or "").upper() == "FAIL")
+            any(line.startswith("REPORT_BINDING_FAIL:") for line in stderr_text.splitlines())
+            or (isinstance(parsed_err_json, dict) and parsed_err_json.get("code") == "REPORT_BINDING_FAIL")
         )
         if is_binding_mismatch:
             err_msg = stderr_text or stdout_text or f"{Path(settings.statistics_cli).name} reported binding mismatch"
@@ -1031,8 +1122,16 @@ async def run_statistics_report_binding(
                 error_data={"code": "TOOL_FAILED", "cli_exit_code": returncode, "message": cli_err_msg},
             )
         raise DomainModuleError("TOOL_FAILED", cli_err_msg, 502, {"cli_exit_code": returncode})
+    except inputs.InputError as exc:
+        raise DomainModuleError(exc.code, exc.message, exc.status) from None
+    except OSError:
+        raise DomainModuleError("ARTIFACT_IO_FAILED", "统计产物读取或保存失败。", 500) from None
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(ledger_ev_id, state="UNKNOWN",
+                error_data={"code": "MODULE_OUTCOME_UNKNOWN", "message": "模块执行或产物留存未完整记录。"})
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 async def run_protein_methods_cli(
@@ -1110,47 +1209,56 @@ async def run_protein_methods_cli(
             raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
 
     try:
-        result = await runner.run_json(argv, timeout=min(120.0, settings.module_tool_timeout_seconds))
-        if not isinstance(result, dict):
-            raise ToolError("TOOL_BAD_OUTPUT", "bioharness-protein-methods did not return a JSON object")
-    except ToolError as exc:
+        try:
+            result = await runner.run_json(argv, timeout=min(120.0, settings.module_tool_timeout_seconds))
+            if not isinstance(result, dict):
+                raise ToolError("TOOL_BAD_OUTPUT", "bioharness-protein-methods did not return a JSON object")
+        except ToolError as exc:
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
+                    state="UNKNOWN" if exc.code in {"TOOL_TIMEOUT", "TOOL_BAD_OUTPUT", "TOOL_OUTPUT_TOO_LARGE"} else "FAILED",
+                    error_data={"code": exc.code, "message": redact(exc.message)},
+                )
+            raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
+
+        saved_artifact = None
+        save_note = None
+        if save_output:
+            art_bytes = (json.dumps(redact(result), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            saved_artifact = inputs.save_module_artifact(
+                workspace,
+                "protein-methods",
+                f"{Path(input_path).stem}-{operation}.json",
+                art_bytes,
+            )
+            if saved_artifact is None:
+                save_note = "当前工作区未配置可写授权目录（upload_root），审计结果仅本次返回未落盘。"
+
+        recorded = False
         if ledger is not None and ledger_ev_id is not None:
             ledger.finish_module_operation(
                 ledger_ev_id,
-                state="FAILED",
-                error_data={"code": exc.code, "message": redact(exc.message)},
+                state="SUCCEEDED" if result.get("status") != "not_evaluable" else "FAILED",
+                output_data=redact(result),
+                saved_artifact=saved_artifact,
             )
-        raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
+            recorded = True
 
-    saved_artifact = None
-    save_note = None
-    if save_output:
-        art_bytes = (json.dumps(redact(result), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-        saved_artifact = inputs.save_module_artifact(
-            workspace,
-            "protein-methods",
-            f"{Path(input_path).stem}-{operation}.json",
-            art_bytes,
-        )
-        if saved_artifact is None:
-            save_note = "当前工作区未配置可写授权目录（upload_root），审计结果仅本次返回未落盘。"
-
-    recorded = False
-    if ledger is not None and ledger_ev_id is not None:
-        ledger.finish_module_operation(
-            ledger_ev_id,
-            state="SUCCEEDED" if result.get("status") != "not_evaluable" else "FAILED",
-            output_data=redact(result),
-            saved_artifact=saved_artifact,
-        )
-        recorded = True
-
-    return redact({
-        "operation": operation,
-        "cli": Path(settings.protein_cli).name,
-        "input_file": input_path.strip(),
-        "result": result,
-        "saved_artifact": saved_artifact,
-        "save_note": save_note,
-        "recorded_in_ledger": recorded,
-    })
+        return redact({
+            "operation": operation,
+            "cli": Path(settings.protein_cli).name,
+            "input_file": input_path.strip(),
+            "result": result,
+            "saved_artifact": saved_artifact,
+            "save_note": save_note,
+            "recorded_in_ledger": recorded,
+        })
+    except inputs.InputError as exc:
+        raise DomainModuleError(exc.code, exc.message, exc.status) from None
+    except OSError:
+        raise DomainModuleError("ARTIFACT_IO_FAILED", "蛋白分析产物保存失败。", 500) from None
+    finally:
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(ledger_ev_id, state="UNKNOWN",
+                error_data={"code": "MODULE_OUTCOME_UNKNOWN", "message": "模块执行或产物留存未完整记录。"})

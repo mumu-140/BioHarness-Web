@@ -7,7 +7,7 @@
  * - Surfaces four-state Capabilities matrix (Declared / Installed / Callable / Actually Used).
  * - Preserves honest Curator / R4 Compute boundary disclosures without fabricating unavailable operations.
  */
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -53,7 +53,7 @@ import {
   type TreeData,
 } from './bioharness';
 import { formatCompactTime, useBhText } from './i18n';
-import { useBioHarnessWorkspace } from './workspace';
+import { useBioHarnessWorkspace, useOperationContextRef } from './workspace';
 
 type CapabilitiesSubTab = 'memory' | 'capabilities' | 'documents' | 'modules';
 type DocRole = 'contract' | 'guide' | 'status' | 'findings_index';
@@ -133,9 +133,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     setSearchParams(next, { replace: true });
   };
 
-  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}`;
-  const contextKeyRef = useRef(contextKey);
-  contextKeyRef.current = contextKey;
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}::${linkedConversationId ?? 'none'}`;
 
   // --- Track last confirmed Memory health timestamp for calm 503 degradation ---
   const [lastConfirmedAt, setLastConfirmedAt] = useState<string | null>(null);
@@ -227,6 +225,8 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
   const [recallLimit, setRecallLimit] = useState<number>(6);
   const [recallResult, setRecallResult] = useState<MemoryRecallResponse | null>(null);
   const [recallError, setRecallError] = useState<string | null>(null);
+  const recallInputKey = JSON.stringify([recallQuery, recallMode, taskConditions, extraCondKey, extraCondVal, recallLimit]);
+  const contextKeyRef = useOperationContextRef(JSON.stringify([contextKey, recallInputKey]));
 
   const buildTaskConditions = (): Record<string, string> => {
     const cond: Record<string, string> = {};
@@ -260,6 +260,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       try {
         const data = await recallMemory(workspace, {
           query: recallQuery.trim(),
+          server: memoryStatusQuery.data?.server ?? undefined,
           task_conditions: buildTaskConditions(),
           mode: recallMode,
           limit: recallLimit,
@@ -293,6 +294,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       try {
         const data = await expandMemory(workspace, {
           memory_ref: vars.memoryRef,
+          server: recallResult?.server ?? undefined,
           task_conditions: buildTaskConditions(),
           detail: vars.detail,
         });
@@ -328,6 +330,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
         const data = await reportMemoryUse(workspace, {
           event_id: eventId,
           memory_ref: vars.memoryRef,
+          server: recallResult?.server ?? expandedDetail?.server ?? undefined,
           task_ref: taskRef,
           stage: vars.stage,
           outcome: vars.outcome,
@@ -346,7 +349,9 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
         tr(
           `已向 Memory MCP 上报 ${vars.stage} 反馈（${vars.memoryRef}）。`,
           `Reported ${vars.stage} feedback to Memory MCP (${vars.memoryRef}).`,
-        ) + ` [${data.server}]`,
+        ) + ` [${data.server}]` + (!selectedRequestId
+          ? tr('（工作区级手动反馈，未绑定科研请求）', ' (workspace-level manual feedback, not bound to a research request)')
+          : ''),
       );
     },
     onError: (err) => {
@@ -426,6 +431,14 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     },
   });
 
+  useEffect(() => {
+    setRecallResult(null);
+    setRecallError(null);
+    setExpandedDetail(null);
+    setExpandError(null);
+    setUsageNotice(null);
+  }, [recallInputKey]);
+
   // Reset local workbench state when workspace / scope / request changes so stale context never leaks
   useEffect(() => {
     setRecallResult(null);
@@ -439,7 +452,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     setDocSelections({});
     setAppliedDocSelections({});
     setLastConfirmedAt(null);
-  }, [workspace, selectedScopeId, selectedRequestId]);
+  }, [contextKey]);
   const memData = memoryStatusQuery.data;
   const capsData = capabilitiesQuery.data;
   const diagnose = memData?.diagnose;

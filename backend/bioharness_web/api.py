@@ -94,6 +94,7 @@ class Attach(BaseModel):
 
 class MemoryRecallBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    server: str | None = Field(default=None, max_length=128)
     query: str = Field(min_length=1, max_length=2000)
     task_conditions: dict[str, str] | None = None
     mode: Literal["FAST", "STANDARD", "DEEP"] = "FAST"
@@ -102,6 +103,7 @@ class MemoryRecallBody(BaseModel):
 
 class MemoryExpandBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    server: str | None = Field(default=None, max_length=128)
     memory_ref: str = Field(min_length=1, max_length=200)
     task_conditions: dict[str, str] | None = None
     detail: Literal["T1", "T2", "T3"] = "T2"
@@ -109,6 +111,7 @@ class MemoryExpandBody(BaseModel):
 
 class MemoryReportUseBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    server: str | None = Field(default=None, max_length=128)
     event_id: str = Field(min_length=1, max_length=128)
     memory_ref: str = Field(min_length=1, max_length=128)
     task_ref: str = Field(min_length=1, max_length=128)
@@ -233,7 +236,8 @@ def create_runtime_router(
         validated_attachments: list[dict[str, object]] | None = None
         if body.attachments:
             try:
-                validated_attachments = inputs.validate_attachments(
+                validated_attachments = await asyncio.to_thread(
+                    inputs.validate_attachments,
                     settings.workspaces[workspace_id],
                     [a.model_dump(exclude_none=True) for a in body.attachments],
                 )
@@ -328,7 +332,8 @@ def create_runtime_router(
         validated_attachments: list[dict[str, object]] | None = None
         if body.attachments:
             try:
-                validated_attachments = inputs.validate_attachments(
+                validated_attachments = await asyncio.to_thread(
+                    inputs.validate_attachments,
                     settings.workspaces[workspace_id],
                     [a.model_dump(exclude_none=True) for a in body.attachments],
                 )
@@ -518,6 +523,7 @@ def create_router(
                     "mode": body.mode,
                     "limit": body.limit,
                 },
+                server=body.server,
             )
             return {"server": server, "mode": body.mode, "result": payload}
         except capabilities.CapabilityError as exc:
@@ -542,6 +548,7 @@ def create_router(
                     "task_conditions": body.task_conditions or {},
                     "detail": body.detail,
                 },
+                server=body.server,
             )
             return {"server": server, "detail": body.detail, "result": payload}
         except capabilities.CapabilityError as exc:
@@ -566,7 +573,7 @@ def create_router(
             args["outcome"] = body.outcome
         try:
             server, payload, _ = await capabilities.call_memory_tool(
-                settings, ws, "memory_report_use", args
+                settings, ws, "memory_report_use", args, server=body.server
             )
             return {"server": server, "result": payload}
         except capabilities.CapabilityError as exc:
@@ -649,11 +656,67 @@ def create_router(
                 {"origin": "bioharness-module-literature", "code": exc.code, "message": exc.message, "detail": exc.detail},
             ) from None
 
+    async def module_owner(ws, body) -> tuple[dict, str | None]:
+        """Resolve a requested owner through the existing ledger and public owner views.
+
+        A wrong conversation/request is a binding error, not a scientific gate.
+        If a projection is unavailable, run the independent module with only
+        the identity we can verify and tell the user about the unbound result.
+        """
+        cid, req, scope = body.conversation_id, body.request_id, body.scope_id
+        note = None
+        if cid:
+            conversation = runtime.ledger.conversation(cid) if runtime is not None else None
+            if not conversation or conversation["workspace"] != ws.id:
+                raise HTTPException(404, {"origin": "web", "code": "CONVERSATION_UNKNOWN",
+                                         "message": "conversation is not in this workspace"})
+            bound = conversation["request_id"]
+            if req and req != bound:
+                raise HTTPException(409, {"origin": "web", "code": "MODULE_OWNER_MISMATCH",
+                                         "message": "request does not match the bound conversation"})
+            req = bound
+        if req:
+            try:
+                now = await sources.raw(ws, "now", {"request_id": req})
+            except ToolError:
+                now = None
+            if isinstance(now, dict) and now.get("ok") is True and now.get("request_id") == req:
+                ctx = now.get("scope_context")
+                actual_scope = ctx.get("scope_id") if isinstance(ctx, dict) else None
+                if scope and scope != actual_scope:
+                    note = "所选项目与该请求的实际归属不同，已采用请求的真实归属。"
+                scope = actual_scope
+            else:
+                # A conversation's existing binding is trusted; an arbitrary
+                # request or scope supplied by the browser is not.
+                if not cid:
+                    req = None
+                scope = None
+                note = "当前科研归属无法完整核实；本次独立模块操作仅记录已确认的归属。"
+        elif scope:
+            try:
+                ctx = await sources.raw(ws, "context", {"scope_id": scope})
+            except ToolError:
+                ctx = None
+            shared = ctx.get("shared") if isinstance(ctx, dict) and ctx.get("ok") is True else None
+            actual = shared.get("scope") if isinstance(shared, dict) else None
+            if not isinstance(actual, dict) or actual.get("scope_id") != scope:
+                scope = None
+                note = "当前项目归属无法核实；本次独立模块操作保留为工作区级记录。"
+        return {"conversation_id": cid, "request_id": req, "scope_id": scope}, note
+
+    def with_module_owner(result: dict, owner: dict, note: str | None) -> dict:
+        result["owner_binding"] = owner
+        if note:
+            result["save_note"] = "；".join(x for x in (result.get("save_note"), note) if x)
+        return result
+
     @router.post("/workspaces/{workspace_id}/modules/literature/run")
     async def literature_run(workspace_id: str, body: LiteratureRunBody):
         try:
             ws = sources.workspace(workspace_id)
-            return await domain_modules.run_literature_cli(
+            owner, owner_note = await module_owner(ws, body)
+            result = await domain_modules.run_literature_cli(
                 settings=settings,
                 runner=sources.runner,
                 workspace=ws,
@@ -665,11 +728,10 @@ def create_router(
                 search_json_path=body.search_json_path,
                 lanes=body.lanes,
                 save_output=body.save_output,
-                conversation_id=body.conversation_id,
-                request_id=body.request_id,
-                scope_id=body.scope_id,
+                **owner,
                 ledger=runtime.ledger if runtime is not None else None,
             )
+            return with_module_owner(result, owner, owner_note)
         except UnknownWorkspace as error:
             raise _http_error(error) from None
         except domain_modules.DomainModuleError as exc:
@@ -682,7 +744,8 @@ def create_router(
     async def statistics_report_binding(workspace_id: str, body: StatisticsReportBindingBody):
         try:
             ws = sources.workspace(workspace_id)
-            return await domain_modules.run_statistics_report_binding(
+            owner, owner_note = await module_owner(ws, body)
+            result = await domain_modules.run_statistics_report_binding(
                 settings=settings,
                 runner=sources.runner,
                 workspace=ws,
@@ -691,11 +754,10 @@ def create_router(
                 template_path=body.template_path,
                 report_path=body.report_path,
                 save_output=body.save_output,
-                conversation_id=body.conversation_id,
-                request_id=body.request_id,
-                scope_id=body.scope_id,
+                **owner,
                 ledger=runtime.ledger if runtime is not None else None,
             )
+            return with_module_owner(result, owner, owner_note)
         except UnknownWorkspace as error:
             raise _http_error(error) from None
         except domain_modules.DomainModuleError as exc:
@@ -708,7 +770,8 @@ def create_router(
     async def protein_run(workspace_id: str, body: ProteinRunBody):
         try:
             ws = sources.workspace(workspace_id)
-            return await domain_modules.run_protein_methods_cli(
+            owner, owner_note = await module_owner(ws, body)
+            result = await domain_modules.run_protein_methods_cli(
                 settings=settings,
                 runner=sources.runner,
                 workspace=ws,
@@ -720,11 +783,10 @@ def create_router(
                 verify_files=body.verify_files,
                 model_index=body.model_index,
                 save_output=body.save_output,
-                conversation_id=body.conversation_id,
-                request_id=body.request_id,
-                scope_id=body.scope_id,
+                **owner,
                 ledger=runtime.ledger if runtime is not None else None,
             )
+            return with_module_owner(result, owner, owner_note)
         except UnknownWorkspace as error:
             raise _http_error(error) from None
         except domain_modules.DomainModuleError as exc:

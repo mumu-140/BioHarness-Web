@@ -616,3 +616,161 @@ def test_final4_preserve_real_cli_error_codes_and_no_speculative_inference(tmp_p
         )
         assert r.status_code == 502, r.text
         assert r.json()["detail"]["code"] == "TOOL_FAILED"
+
+def test_correctness_attachment_digest_and_excerpt_are_one_stream(tmp_path, monkeypatch):
+    """Reproduces C16 without relying on a race timing or production file."""
+    import os
+    from bioharness_web import inputs
+    path = tmp_path / "counts.csv"
+    before = b"G1,10,20\n"
+    after = b"G1,10,99\n"
+    path.write_bytes(before)
+    ws = Workspace(id="demo", path=tmp_path, evidence_roots=(tmp_path,))
+    digest = hashlib.sha256(before).hexdigest()
+    original = inputs._capture_fd_bounded
+
+    def change_after_capture(fd, prefix_limit=0):
+        result = original(fd, prefix_limit)
+        path.write_bytes(after)
+        return result
+
+    monkeypatch.setattr(inputs, "_capture_fd_bounded", change_after_capture)
+    result = inputs.read_attachment_for_model(
+        ws, {"server_path": "$WORKSPACE/counts.csv", "sha256": digest}, max_chars=8_000)
+    assert result["file_identity"] == "MATCHES_RECORD"
+    assert result["excerpt"] == before.decode()
+    assert result["sha256"] == digest
+
+    monkeypatch.setattr(inputs, "_capture_fd_bounded", original)
+    monkeypatch.setattr(inputs.evidence, "HASH_LIMIT_BYTES", 4)
+    result = inputs.read_attachment_for_model(ws, {"server_path": "$WORKSPACE/counts.csv", "sha256": None})
+    assert result["file_identity"] == "NOT_CHECKED" and not result["readable"]
+    assert "excerpt" not in result
+
+    # Grow a file after its initial stat, while hashing: no partial digest.
+    path.write_bytes(b"abcd")
+    fd = os.open(path, os.O_RDONLY)
+    read = os.read
+    try:
+        def grow(f, size):
+            chunk = read(f, size)
+            if f == fd and chunk:
+                with path.open("ab") as fh:
+                    fh.write(b"x")
+            return chunk
+        monkeypatch.setattr(inputs.os, "read", grow)
+        digest, prefix, _ = original(fd, 4)
+        assert digest is None and prefix == b""
+    finally:
+        os.close(fd)
+
+
+def test_correctness_attachment_budget_and_large_reference(tmp_path, monkeypatch):
+    from bioharness_web import inputs
+    path = tmp_path / "large.csv"
+    data = b"g,a,b\n" * 4000
+    path.write_bytes(data)
+    ws = Workspace(id="demo", path=tmp_path, evidence_roots=(tmp_path,))
+    attachment = {"server_path": "$WORKSPACE/large.csv", "sha256": hashlib.sha256(data).hexdigest()}
+    verified = inputs.read_attachment_for_model(ws, attachment, max_chars=16000)
+    assert verified["truncated"] and verified["chars_read"] <= 8000
+    exhausted = inputs.read_attachment_for_model(ws, attachment, max_chars=0)
+    assert exhausted["file_identity"] == "MATCHES_RECORD" and not exhausted["readable"]
+    monkeypatch.setattr(inputs.evidence, "HASH_LIMIT_BYTES", 10)
+    bound = inputs.validate_attachments(ws, [attachment])[0]
+    assert bound["hash_skipped"] and bound["file_identity"] == "NOT_CHECKED"
+    assert bound["sha256"] == attachment["sha256"]
+    assert not inputs.read_attachment_for_model(ws, bound)["readable"]
+
+
+def test_correctness_literature_exact_paths_and_partial_retention(tmp_path):
+    from bioharness_web import domain_modules
+    ws_root = tmp_path / "workspace"
+    upload = ws_root / "inputs"
+    upload.mkdir(parents=True)
+    ws = Workspace(id="demo", path=ws_root, evidence_roots=(ws_root,), upload_root=upload)
+    output = tmp_path / "output"
+    for sub, data in (("a", b"%PDF-1.4\nA"), ("b", b"%PDF-1.4\nB")):
+        (output / sub).mkdir(parents=True)
+        (output / sub / "same.pdf").write_bytes(data)
+    data_a = (output / "a/same.pdf").read_bytes()
+    data_b = (output / "b/same.pdf").read_bytes()
+    payload = {"downloaded_identifiers": 4, "entries": [
+        {"identifier": "a", "status": "downloaded", "file": "a/same.pdf", "sha256": hashlib.sha256(data_a).hexdigest()},
+        {"identifier": "b", "status": "downloaded", "file": "b/same.pdf", "sha256": hashlib.sha256(data_b).hexdigest()},
+        {"identifier": "missing", "status": "downloaded", "file": "missing/same.pdf"},
+        {"identifier": "wrong-digest", "status": "downloaded", "file": "a/same.pdf", "sha256": "0" * 64},
+    ]}
+    saved, result = domain_modules._persist_literature_pdfs(ws, output, payload, max_upload_bytes=100)
+    assert len(saved) == 2 and result["retention"]["status"] == "PARTIAL"
+    assert result["retention"]["retained_identifiers"] == 2
+    assert result["retention"]["not_retained_identifiers"] == 2
+    assert result["entries"][0]["sha256"] != result["entries"][1]["sha256"]
+    assert result["entries"][2]["file"] is None and result["entries"][3]["file"] is None
+    assert result["downloaded_identifiers"] == 4
+    assert payload["entries"][2]["file"] == "missing/same.pdf"
+    _, absent = domain_modules._persist_literature_pdfs(ws, output, {"ok": True}, max_upload_bytes=100)
+    assert absent["retention"]["status"] == "MANIFEST_UNAVAILABLE"
+
+
+def test_correctness_module_owner_validation(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from bioharness_web import domain_modules
+    from bioharness_web.ledger import Ledger
+    from bioharness_web.sources import Sources
+    led = Ledger(":memory:")
+    try:
+        convo = led.create_conversation("demo", "request-A")
+        with pytest.raises(ValueError, match="bound request"):
+            led.start_module_operation("demo", module_id="statistics", operation="render",
+                                       conversation_id=convo["id"], request_id="request-B")
+        assert not led.module_invocations("demo")
+    finally:
+        led.close()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    settings = Settings(service_id="owner-test", workspaces={"demo": Workspace(id="demo", path=ws, evidence_roots=(ws,))},
+                        access_token=TOKEN)
+    raw = AsyncMock(return_value=None)
+    call = AsyncMock(return_value={"status": "INSPECTED_ONLY"})
+    monkeypatch.setattr(Sources, "raw", raw)
+    monkeypatch.setattr(domain_modules, "run_statistics_report_binding", call)
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/api/workspaces/demo/modules/statistics/report-binding", headers=HEADERS,
+                               json={"action": "inspect", "records_path": "r.json",
+                                     "request_id": "unverified-request", "scope_id": "unverified-scope"})
+        assert response.status_code == 200
+        assert response.json()["owner_binding"] == {"conversation_id": None, "request_id": None, "scope_id": None}
+        assert response.json()["save_note"]
+        assert call.call_args.kwargs["request_id"] is None
+        raw.return_value = {"ok": True, "request_id": "real-request", "scope_context": {"scope_id": "actual-scope"}}
+        response = client.post("/api/workspaces/demo/modules/statistics/report-binding", headers=HEADERS,
+                               json={"action": "inspect", "records_path": "r.json",
+                                     "request_id": "real-request", "scope_id": "wrong-scope"})
+        assert response.status_code == 200
+        assert response.json()["owner_binding"]["scope_id"] == "actual-scope"
+
+
+def test_correctness_memory_source_is_not_silently_replaced(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from bioharness_web import capabilities
+    from bioharness_web.cli import ToolError
+    ws = Workspace(id="demo", path=tmp_path, evidence_roots=(tmp_path,))
+    settings = SimpleNamespace(mcp_servers={"memory-a": ["a"], "memory-b": ["b"]},
+                               tool_timeout_seconds=5, tool_env_passthrough=(), module_tool_timeout_seconds=5)
+    specs = [SimpleNamespace(name="memory_recall"), SimpleNamespace(name="memory_status"),
+             SimpleNamespace(name="memory_expand")]
+    async def list_tools(argv, **kwargs):
+        if argv[0] == "a":
+            raise ToolError("TOOL_UNAVAILABLE", "a unavailable")
+        return specs
+    monkeypatch.setattr(capabilities.mcp_tools, "list_tools", list_tools)
+    call = AsyncMock(return_value={"structured_content": {"memory_ref": "mem@1"}})
+    monkeypatch.setattr(capabilities.mcp_tools, "call_tool", call)
+    with pytest.raises(capabilities.CapabilityError):
+        asyncio.run(capabilities.call_memory_tool(settings, ws, "memory_expand", {"memory_ref": "mem@1"}, server="memory-a"))
+    assert call.await_count == 0
+    name, _, _ = asyncio.run(capabilities.call_memory_tool(settings, ws, "memory_expand", {"memory_ref": "mem@1"}, server="memory-b"))
+    assert name == "memory-b" and call.await_count == 1

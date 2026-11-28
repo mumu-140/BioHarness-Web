@@ -114,13 +114,16 @@ async def discover_mcp_servers(
 async def resolve_memory_server(
     settings: Settings,
     workspace: Workspace,
+    server: str | None = None,
 ) -> tuple[str, list[str], set[str]] | None:
-    """Find an explicitly configured MCP server that actually exposes Memory tools."""
+    """Find a configured Memory MCP service, retaining an explicitly selected identity."""
     candidates = sorted(
         settings.mcp_servers.items(),
         key=lambda item: (0 if "memory" in item[0].lower() else 1, item[0]),
     )
     for server_name, raw_argv in candidates:
+        if server is not None and server_name != server:
+            continue
         argv = _mcp_argv(raw_argv, workspace)
         try:
             specs = await mcp_tools.list_tools(
@@ -142,8 +145,10 @@ async def call_memory_tool(
     workspace: Workspace,
     tool_name: str,
     arguments: dict[str, Any],
+    *,
+    server: str | None = None,
 ) -> tuple[str, dict[str, Any], set[str]]:
-    resolved = await resolve_memory_server(settings, workspace)
+    resolved = await resolve_memory_server(settings, workspace, server)
     if resolved is None:
         raise CapabilityError(
             "MEMORY_MCP_UNAVAILABLE",
@@ -168,7 +173,8 @@ async def call_memory_tool(
             cwd=str(workspace.path),
         )
     except ToolError as exc:
-        raise CapabilityError(exc.code, exc.message, 502) from None
+        raise CapabilityError(exc.code, exc.message,
+                              504 if exc.code == "TOOL_TIMEOUT" else 503 if exc.code == "TOOL_UNAVAILABLE" else 502) from None
     payload = _parse_mcp_payload(raw)
     if raw.get("is_error"):
         msg = str(payload.get("raw_text") or payload.get("message") or raw.get("text") or f"{tool_name} failed")
