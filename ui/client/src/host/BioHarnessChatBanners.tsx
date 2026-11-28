@@ -7,6 +7,7 @@ import { AlertTriangle, Check, Copy, GitBranch, HelpCircle, Link2, RefreshCw } f
 import { Button } from '@librechat/client';
 import type { ConversationStateResponse, NowData, TreeScopeNode } from './bioharness';
 import type { BranchSourceRef } from './workspace';
+import { useBhText } from './i18n';
 
 export interface BioHarnessChatBannersProps {
   problem: string | null;
@@ -34,6 +35,8 @@ export interface BioHarnessChatBannersProps {
   onSelectedScopeIdChange: (id: string) => void;
   newScopeId: string;
   onNewScopeIdChange: (id: string) => void;
+  parentScopeId?: string;
+  onParentScopeIdChange?: (id: string) => void;
   scopeProblem: string | null;
 }
 
@@ -63,8 +66,11 @@ const BioHarnessChatBanners = memo(function BioHarnessChatBanners({
   onSelectedScopeIdChange,
   newScopeId,
   onNewScopeIdChange,
+  parentScopeId = '',
+  onParentScopeIdChange,
   scopeProblem,
 }: BioHarnessChatBannersProps) {
+  const { tr } = useBhText();
   const [manualAttachId, setManualAttachId] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -372,70 +378,107 @@ const BioHarnessChatBanners = memo(function BioHarnessChatBanners({
       {isNew && !selectedRequestId && runtimeEnabled && (
         <fieldset
           data-testid="bh-scope-selector"
-          className="border-border-light bg-surface-primary/60 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2"
+          className="border-border-light bg-surface-primary/60 space-y-2 rounded-xl border px-3 py-2.5 text-xs"
         >
           <legend className="text-text-tertiary px-1 text-[11px] font-medium">
-            Scope for new request
+            {tr('科研项目归属（随首条真实科学问题建立或关联）', 'Research project / scope for new request')}
           </legend>
-          <label className="text-text-primary inline-flex items-center gap-1.5">
-            <input
-              type="radio"
-              name="bh-scope-mode"
-              checked={scopeMode === 'none'}
-              onChange={() => onScopeModeChange('none')}
-            />
-            <span>No scope</span>
-          </label>
-          {scopes.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
             <label className="text-text-primary inline-flex items-center gap-1.5">
               <input
                 type="radio"
                 name="bh-scope-mode"
-                checked={scopeMode === 'existing'}
-                onChange={() => {
-                  onScopeModeChange('existing');
-                  if (!selectedScopeId && scopes[0]) {
-                    onSelectedScopeIdChange(scopes[0].scope_id);
-                  }
-                }}
+                checked={scopeMode === 'none'}
+                onChange={() => onScopeModeChange('none')}
               />
-              <span>Existing:</span>
-              <select
-                aria-label="Existing scope"
-                disabled={scopeMode !== 'existing'}
-                value={selectedScopeId}
-                onChange={(e) => onSelectedScopeIdChange(e.target.value)}
-                className="border-border-medium bg-surface-primary rounded border px-1.5 py-0.5 font-mono text-xs disabled:opacity-50"
-              >
-                {scopes.map((s) => (
-                  <option key={s.scope_id} value={s.scope_id}>
-                    {s.scope_id}
-                  </option>
-                ))}
-              </select>
+              <span>{tr('独立问题（不归入项目）', 'Unscoped request')}</span>
             </label>
+            {scopes.length > 0 && (
+              <label className="text-text-primary inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="bh-scope-mode"
+                  checked={scopeMode === 'existing'}
+                  onChange={() => {
+                    onScopeModeChange('existing');
+                    if (!selectedScopeId && scopes[0]) {
+                      onSelectedScopeIdChange(scopes[0].scope_id);
+                    }
+                  }}
+                />
+                <span>{tr('已有项目/子项目：', 'Existing project:')}</span>
+                <select
+                  aria-label={tr('已有项目', 'Existing scope')}
+                  data-testid="bh-existing-scope-select"
+                  disabled={scopeMode !== 'existing'}
+                  value={selectedScopeId}
+                  onChange={(e) => onSelectedScopeIdChange(e.target.value)}
+                  className="border-border-medium bg-surface-primary max-w-[200px] rounded border px-1.5 py-0.5 font-mono text-xs disabled:opacity-50"
+                >
+                  {scopes.map((s) => (
+                    <option key={s.scope_id} value={s.scope_id}>
+                      {s.path && s.path.length > 1 ? s.path.join(' / ') : s.scope_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="text-text-primary inline-flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="bh-scope-mode"
+                checked={scopeMode === 'new'}
+                onChange={() => onScopeModeChange('new')}
+              />
+              <span>{parentScopeId ? tr('新建子项目：', 'New sub-project:') : tr('新建项目：', 'New project:')}</span>
+              <input
+                type="text"
+                aria-label={tr('新项目或子项目标识', 'New scope ID')}
+                data-testid="bh-new-scope-input"
+                disabled={scopeMode !== 'new'}
+                value={newScopeId}
+                onChange={(e) => onNewScopeIdChange(e.target.value)}
+                placeholder={parentScopeId ? tr('如 transcriptome', 'e.g. transcriptome') : tr('如 PPGR', 'e.g. PPGR')}
+                className="border-border-medium bg-surface-primary w-36 rounded border px-1.5 py-0.5 font-mono text-xs disabled:opacity-50"
+              />
+            </label>
+          </div>
+          {scopeMode === 'new' && (
+            <div className="border-border-light flex flex-wrap items-center gap-2 border-t pt-2 text-[11px]">
+              {scopes.length > 0 && onParentScopeIdChange && (
+                <label className="text-text-secondary inline-flex items-center gap-1.5">
+                  <span>{tr('上级项目（可选，留空为根项目）：', 'Parent project (optional):')}</span>
+                  <select
+                    aria-label={tr('上级项目', 'Parent scope')}
+                    data-testid="bh-parent-scope-select"
+                    value={parentScopeId}
+                    onChange={(e) => onParentScopeIdChange(e.target.value)}
+                    className="border-border-medium bg-surface-primary max-w-[220px] rounded border px-1.5 py-0.5 font-mono text-[11px]"
+                  >
+                    <option value="">{tr('无（创建为根项目）', 'None (root project)')}</option>
+                    {scopes.map((s) => (
+                      <option key={s.scope_id} value={s.scope_id}>
+                        {s.path && s.path.length > 1 ? s.path.join(' / ') : s.scope_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <span className="text-text-tertiary">
+                {parentScopeId
+                  ? tr(
+                      `归属路径：${parentScopeId} / ${newScopeId.trim() || '〈子项目〉'} · Core 将以您下方输入的真实首条科学问题建立该子项目。`,
+                      `Path: ${parentScopeId} / ${newScopeId.trim() || '<sub-project>'} · Core creates this sub-project on your first real scientific question below.`,
+                    )
+                  : tr(
+                      'Core 以真实首条科学问题声明科研项目，不创建空占位项目。',
+                      'Core declares a project from your first real scientific question — no empty placeholder projects.',
+                    )}
+              </span>
+            </div>
           )}
-          <label className="text-text-primary inline-flex items-center gap-1.5">
-            <input
-              type="radio"
-              name="bh-scope-mode"
-              checked={scopeMode === 'new'}
-              onChange={() => onScopeModeChange('new')}
-            />
-            <span>New scope:</span>
-            <input
-              type="text"
-              aria-label="New scope ID"
-              data-testid="bh-new-scope-input"
-              disabled={scopeMode !== 'new'}
-              value={newScopeId}
-              onChange={(e) => onNewScopeIdChange(e.target.value)}
-              placeholder="scope-id"
-              className="border-border-medium bg-surface-primary w-32 rounded border px-1.5 py-0.5 font-mono text-xs disabled:opacity-50"
-            />
-          </label>
           {scopeProblem && (
-            <span className="text-text-destructive text-[11px]" role="alert">
+            <span className="text-text-destructive block text-[11px]" role="alert">
               {scopeProblem}
             </span>
           )}

@@ -30,15 +30,62 @@ export class BioHarnessApiError extends Error {
   }
 }
 
+export interface AvailableModelOption {
+  provider_id: string;
+  provider_name: string;
+  model: string;
+}
+
+export interface RunStrategyOption {
+  id: 'standard' | 'concise' | 'thorough';
+  label: string;
+  label_en: string;
+  max_turns: number;
+  context_chars: number;
+  description: string;
+}
+
+export interface ModelOverride {
+  provider_id: string;
+  model: string;
+}
+
+export interface WorkspaceInputFile {
+  name: string;
+  server_path: string;
+  bytes: number;
+  extension: string;
+  modified_at?: string;
+  uploaded_at?: string;
+  sha256?: string;
+  scope_id?: string | null;
+  source_kind: 'uploaded_input' | 'workspace_file' | string;
+  evidence_verified: boolean;
+  note?: string;
+}
+
+export interface WorkspaceInputsResponse {
+  workspace: string;
+  upload_enabled: boolean;
+  upload_disabled_reason: string | null;
+  max_upload_bytes: number;
+  allowed_extensions: string[];
+  files: WorkspaceInputFile[];
+  truncated: boolean;
+}
+
 export interface BioHarnessMeta {
   service: string;
   workspaces: string[];
+  workspace_details?: Record<string, { upload_enabled: boolean }>;
   poll_interval_seconds: number;
   tools: Record<string, { command: string; found: boolean }>;
   runtime: {
     enabled: boolean;
     model: string | null;
     module_tool_servers: string[];
+    available_models?: AvailableModelOption[];
+    strategies?: RunStrategyOption[];
   };
 }
 
@@ -47,7 +94,11 @@ export interface WorkspaceConversation {
   workspace: string;
   request_id: string | null;
   created_at: string;
+  updated_at?: string | null;
+  first_message?: string | null;
   last_run_state?: string | null;
+  last_model?: string | null;
+  last_strategy?: string | null;
 }
 
 export interface OpenRequest {
@@ -501,6 +552,8 @@ export const bhKeys = {
     ['bh', service, workspace, 'invocations', conversationId, before ?? 'latest'] as const,
   modules: (service: string, workspace: string, conversationId: string) =>
     ['bh', service, workspace, 'modules', conversationId] as const,
+  inputs: (service: string, workspace: string) =>
+    ['bh', service, workspace, 'inputs'] as const,
   evidencePreview: (service: string, workspace: string, anchor: EvidenceAnchor) =>
     [
       'bh',
@@ -583,7 +636,13 @@ export async function fetchConversations(workspace: string): Promise<WorkspaceCo
 
 export async function createConversation(
   workspace: string,
-  body: { text?: string; request_id?: string; scope?: NewScopeSelection },
+  body: {
+    text?: string;
+    request_id?: string;
+    scope?: NewScopeSelection;
+    model_override?: ModelOverride;
+    strategy?: RunStrategyOption['id'];
+  },
 ): Promise<{ conversation: WorkspaceConversation; run_id: string | null }> {
   const res = await hostFetch(conversationsPath(workspace), {
     method: 'POST',
@@ -621,8 +680,18 @@ export async function startRun(
   workspace: string,
   conversationId: string,
   text?: string | null,
+  opts?: { model_override?: ModelOverride; strategy?: RunStrategyOption['id'] },
 ): Promise<{ run_id: string }> {
-  const body = text !== undefined && text !== null ? { text } : {};
+  const body: Record<string, unknown> = {};
+  if (text !== undefined && text !== null) {
+    body.text = text;
+  }
+  if (opts?.model_override) {
+    body.model_override = opts.model_override;
+  }
+  if (opts?.strategy) {
+    body.strategy = opts.strategy;
+  }
   const res = await hostFetch(
     conversationsPath(workspace, `/${encodeURIComponent(conversationId)}/runs`),
     {
@@ -632,6 +701,32 @@ export async function startRun(
     },
   );
   return parseJsonOrError(res);
+}
+
+export async function fetchWorkspaceInputs(workspace: string): Promise<WorkspaceInputsResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/inputs`);
+  return parseJsonOrError<WorkspaceInputsResponse>(res);
+}
+
+export async function uploadWorkspaceInput(
+  workspace: string,
+  file: File,
+  scopeId?: string | null,
+): Promise<WorkspaceInputFile> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/octet-stream',
+    'X-BioHarness-Filename': encodeURIComponent(file.name),
+  };
+  if (scopeId && scopeId.trim()) {
+    headers['X-BioHarness-Scope'] = encodeURIComponent(scopeId.trim());
+  }
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/inputs`, {
+    method: 'POST',
+    headers,
+    body: file,
+  });
+  return parseJsonOrError<WorkspaceInputFile>(res);
 }
 
 export async function cancelRun(

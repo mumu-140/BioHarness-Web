@@ -18,6 +18,7 @@ import type {
 } from './bioharness';
 import { bhKeys, fetchConversations, fetchInvocations, fetchModules } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
+import { formatOpKindLabel, formatOpStateLabel, useBhText } from './i18n';
 import { assertObservationOwner, resolveBoundConversation } from './scientificViews';
 import { useBioHarnessConversationEvents } from './events';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
@@ -92,6 +93,7 @@ function PayloadBlock({ label, value }: { label: string; value: unknown }) {
 }
 
 const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
+  const { zh, tr } = useBhText();
   const { meta, service, workspace, selectedRequestId, linkedConversationId } =
     useBioHarnessWorkspace();
   const runtimeEnabled = meta?.runtime?.enabled === true;
@@ -231,14 +233,14 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                         {selectedItem.name}
                       </h1>
                       <span className="bg-surface-hover text-text-secondary rounded px-2 py-0.5 text-xs">
-                        {selectedItem.kind}
+                        {formatOpKindLabel(selectedItem.kind, zh)}
                       </span>
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-medium ${
                           STATE_BADGE[selectedItem.state] ?? 'bg-surface-hover text-text-secondary'
                         }`}
                       >
-                        {selectedItem.state}
+                        {formatOpStateLabel(selectedItem.state, zh)}
                       </span>
                     </div>
                   </div>
@@ -336,7 +338,7 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                 >
                   {STATE_OPTIONS.map((st) => (
                     <option key={st} value={st}>
-                      State: {st}
+                      {tr(`状态：${formatOpStateLabel(st, true)}`, `State: ${st}`)}
                     </option>
                   ))}
                 </select>
@@ -390,8 +392,8 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                         className="border-border-light bg-surface-primary hover:bg-surface-hover/50 flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-xs transition-colors"
                       >
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="bg-surface-hover text-text-secondary shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]">
-                            {item.kind}
+                          <span className="bg-surface-hover text-text-secondary shrink-0 rounded px-1.5 py-0.5 text-[10px]">
+                            {formatOpKindLabel(item.kind, zh)}
                           </span>
                           <span className="text-text-primary truncate font-mono font-medium">
                             {item.name}
@@ -408,7 +410,7 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                               STATE_BADGE[item.state] ?? 'bg-surface-hover text-text-secondary'
                             }`}
                           >
-                            {item.state}
+                            {formatOpStateLabel(item.state, zh)}
                           </span>
                           <span className="text-text-tertiary font-mono text-[10px]">
                             {item.started_at}

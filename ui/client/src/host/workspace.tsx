@@ -18,6 +18,12 @@ export interface BranchSourceRef {
   scopeId: string | null;
 }
 
+export interface PendingScopeDraft {
+  mode: 'none' | 'existing' | 'new';
+  scopeId?: string;
+  parentId?: string;
+}
+
 export interface BioHarnessWorkspaceContextValue {
   meta: BioHarnessMeta | undefined;
   metaLoading: boolean;
@@ -30,10 +36,17 @@ export interface BioHarnessWorkspaceContextValue {
   linkedConversationId: string | null;
   branchSource: BranchSourceRef | null;
   setBranchSource: (next: BranchSourceRef | null) => void;
+  pendingScopeDraft: PendingScopeDraft | null;
+  setPendingScopeDraft: (next: PendingScopeDraft | null) => void;
   selectWorkspace: (ws: string) => void;
   selectScope: (scopeId: string | null) => void;
   openConversation: (conversationId: string, opts?: { requestId?: string | null; scopeId?: string | null }) => void;
-  openNewResearch: (opts?: { requestId?: string | null; scopeId?: string | null; branchSource?: BranchSourceRef | null }) => void;
+  openNewResearch: (opts?: {
+    requestId?: string | null;
+    scopeId?: string | null;
+    branchSource?: BranchSourceRef | null;
+    scopeDraft?: PendingScopeDraft | null;
+  }) => void;
   openWorkflowView: (opts?: { requestId?: string | null; conversationId?: string | null; stepId?: string | null; scopeId?: string | null }) => void;
   openEvidenceView: (opts?: { requestId?: string | null; conversationId?: string | null; anchor?: EvidenceAnchor | null; scopeId?: string | null }) => void;
   openExecutionsView: (opts?: { requestId?: string | null; conversationId?: string | null; scopeId?: string | null }) => void;
@@ -119,6 +132,7 @@ export function BioHarnessWorkspaceProvider({
     extractRouteConversationId(location.pathname) ?? (searchParams.get('convo') || null);
 
   const [branchSource, setBranchSource] = useState<BranchSourceRef | null>(null);
+  const [pendingScopeDraft, setPendingScopeDraft] = useState<PendingScopeDraft | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -225,8 +239,14 @@ export function BioHarnessWorkspaceProvider({
   );
 
   const openNewResearch = useCallback(
-    (opts?: { requestId?: string | null; scopeId?: string | null; branchSource?: BranchSourceRef | null }) => {
+    (opts?: {
+      requestId?: string | null;
+      scopeId?: string | null;
+      branchSource?: BranchSourceRef | null;
+      scopeDraft?: PendingScopeDraft | null;
+    }) => {
       setBranchSource(opts?.branchSource ?? null);
+      setPendingScopeDraft(opts?.scopeDraft ?? null);
       const next = new URLSearchParams();
       if (workspace) {
         next.set('ws', workspace);
@@ -363,6 +383,8 @@ ${snippet}` : snippet;
       linkedConversationId,
       branchSource,
       setBranchSource,
+      pendingScopeDraft,
+      setPendingScopeDraft,
       selectWorkspace,
       selectScope,
       openConversation,
@@ -387,6 +409,7 @@ ${snippet}` : snippet;
       selectedScopeId,
       linkedConversationId,
       branchSource,
+      pendingScopeDraft,
       selectWorkspace,
       selectScope,
       openConversation,

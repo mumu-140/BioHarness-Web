@@ -39,6 +39,9 @@ const APPROVED_API: Array<{ method: string; path: RegExp }> = [
   { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/evidence-content$/ },
   { method: 'HEAD', path: /^\/api\/workspaces\/[^/]+\/evidence-content$/ },
   { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/evidence-table$/ },
+  /* R3.2: Restricted research-input upload & authorized workspace file listing */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/inputs$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/inputs$/ },
 ];
 
 export const NOT_PROVIDED = 'NOT_PROVIDED_BY_HOST';

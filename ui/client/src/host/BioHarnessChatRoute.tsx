@@ -20,10 +20,14 @@ import AppChatSurface from '~/components/Chat/Surface';
 import store from '~/store';
 import type {
   ConversationStateResponse,
+  ModelOverride,
   NewScopeSelection,
   NowData,
+  RunStrategyOption,
   Snapshot,
   TreeData,
+  WorkspaceInputFile,
+  WorkspaceInputsResponse,
 } from './bioharness';
 import {
   BIOHARNESS_ENDPOINT,
@@ -38,8 +42,11 @@ import {
   extractTreeScopes,
   fetchConversationState,
   fetchView,
+  fetchWorkspaceInputs,
   startRun,
+  uploadWorkspaceInput,
 } from './bioharness';
+import { formatBytes, useBhText } from './i18n';
 import { useBioHarnessConversationEvents, useBioHarnessVersionStream } from './events';
 import { useBioHarnessWorkspace } from './workspace';
 import BioHarnessChatBanners from './BioHarnessChatBanners';
@@ -58,6 +65,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   const enterToSend = useRecoilValue(store.enterToSend);
   const maximizeChatSpace = useRecoilValue(store.maximizeChatSpace);
 
+  const { tr } = useBhText();
   const {
     meta,
     service,
@@ -66,6 +74,8 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     selectedScopeId: workspaceScopeId,
     branchSource,
     setBranchSource,
+    pendingScopeDraft,
+    setPendingScopeDraft,
     openConversation,
     openNewResearch,
     getDraft,
@@ -128,12 +138,44 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   const [scopeMode, setScopeMode] = useState<'none' | 'existing' | 'new'>('none');
   const [selectedScopeId, setSelectedScopeId] = useState('');
   const [newScopeId, setNewScopeId] = useState('');
+  const [parentScopeId, setParentScopeId] = useState('');
+  const [selectedModelOverride, setSelectedModelOverride] = useState<ModelOverride | null>(null);
+  const [selectedStrategy, setSelectedStrategy] = useState<RunStrategyOption['id']>('standard');
+  const [attachedInputs, setAttachedInputs] = useState<WorkspaceInputFile[]>([]);
+  const [uploadingInput, setUploadingInput] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [inputsDrawerOpen, setInputsDrawerOpen] = useState(false);
+
+  const inputsQuery = useQuery<WorkspaceInputsResponse>({
+    queryKey: bhKeys.inputs(service ?? 'svc', workspace ?? ''),
+    queryFn: () => fetchWorkspaceInputs(workspace!),
+    enabled: Boolean(service && workspace && inputsDrawerOpen),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+  });
 
   useEffect(() => {
     setScopeMode('none');
     setSelectedScopeId('');
     setNewScopeId('');
+    setParentScopeId('');
+    setAttachedInputs([]);
+    setUploadError(null);
   }, [workspace]);
+
+  useEffect(() => {
+    if (!isNew || selectedRequestId || !pendingScopeDraft) {
+      return;
+    }
+    setScopeMode(pendingScopeDraft.mode);
+    if (pendingScopeDraft.mode === 'existing' && pendingScopeDraft.scopeId) {
+      setSelectedScopeId(pendingScopeDraft.scopeId);
+    } else if (pendingScopeDraft.mode === 'new') {
+      setNewScopeId(pendingScopeDraft.scopeId ?? '');
+      setParentScopeId(pendingScopeDraft.parentId ?? '');
+    }
+    setPendingScopeDraft?.(null);
+  }, [isNew, selectedRequestId, pendingScopeDraft, setPendingScopeDraft]);
 
   const runStatus = useMemo(
     () => deriveRunStatus(log.events, stateQuery.data?.active_run?.id),
@@ -173,13 +215,13 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       return null;
     }
     if (scopeMode === 'existing' && !selectedScopeId) {
-      return 'Choose an existing scope or switch to No scope.';
+      return tr('请选择一个已有科研项目，或切换为独立问题。', 'Choose an existing scope or switch to No scope.');
     }
     if (scopeMode === 'new' && !newScopeId.trim()) {
-      return 'Enter a new scope ID or switch to No scope.';
+      return tr('请输入新项目/子项目标识（如 PPGR），或切换为独立问题。', 'Enter a new scope ID or switch to No scope.');
     }
     return null;
-  }, [isNew, selectedRequestId, scopeMode, selectedScopeId, newScopeId]);
+  }, [isNew, selectedRequestId, scopeMode, selectedScopeId, newScopeId, tr]);
 
   const messages: TMessage[] = useMemo(() => {
     if (!activeConversationId) {
@@ -295,34 +337,92 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     needsExplicitRequestStart ||
     scopeProblem !== null;
 
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      if (!workspace || !service) {
+        return;
+      }
+      setUploadingInput(true);
+      setUploadError(null);
+      try {
+        const activeScope =
+          scopeMode === 'existing'
+            ? selectedScopeId || undefined
+            : scopeMode === 'new'
+              ? newScopeId.trim() || parentScopeId || undefined
+              : workspaceScopeId || undefined;
+        const uploaded = await uploadWorkspaceInput(workspace, file, activeScope);
+        setAttachedInputs((prev) =>
+          prev.some((item) => item.server_path === uploaded.server_path) ? prev : [...prev, uploaded],
+        );
+        void queryClient.invalidateQueries({ queryKey: bhKeys.inputs(service, workspace) });
+      } catch (err) {
+        if (err instanceof BioHarnessApiError) {
+          setUploadError(`${err.code}: ${err.message}`);
+        } else {
+          setUploadError((err as Error)?.message || tr('上传失败，请重试。', 'Upload failed.'));
+        }
+      } finally {
+        setUploadingInput(false);
+      }
+    },
+    [workspace, service, scopeMode, selectedScopeId, newScopeId, parentScopeId, workspaceScopeId, queryClient, tr],
+  );
+
   const handleSubmitText = useCallback(
     async (event?: React.FormEvent) => {
       event?.preventDefault();
       if (composerBlocked || !workspace || !service || !draftText.trim()) {
         return;
       }
-      const verbatimText = draftText;
-
+      const inputLines =
+        attachedInputs.length > 0
+          ? '\n\n[附带研究资料引用（未核验原始输入）]\n' +
+            attachedInputs
+              .map(
+                (item) =>
+                  `- ${item.server_path} (${formatBytes(item.bytes)}${item.sha256 ? `, sha256=${item.sha256}` : ''})`,
+              )
+              .join('\n')
+          : '';
+      const verbatimText = draftText + inputLines;
+      const runOpts = {
+        ...(selectedModelOverride ? { model_override: selectedModelOverride } : {}),
+        ...(selectedStrategy !== 'standard' ? { strategy: selectedStrategy } : {}),
+      };
       if (!activeConversationId) {
         let scope: NewScopeSelection | undefined;
         if (scopeMode === 'existing') {
           scope = { id: selectedScopeId };
         } else if (scopeMode === 'new') {
-          scope = { id: newScopeId.trim(), create: true };
+          scope = {
+            id: newScopeId.trim(),
+            create: true,
+            ...(parentScopeId ? { parent_id: parentScopeId } : {}),
+          };
         }
         const created = await runAction(() =>
-          createConversation(workspace, { text: verbatimText, ...(scope ? { scope } : {}) }),
+          createConversation(workspace, {
+            text: verbatimText,
+            ...(scope ? { scope } : {}),
+            ...runOpts,
+          }),
         );
         if (created) {
           clearDraft(draftKey);
+          setAttachedInputs([]);
           setBranchSource(null);
           void queryClient.invalidateQueries({ queryKey: bhKeys.conversations(service, workspace) });
+          void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
           openConversation(created.conversation.id, { requestId: created.conversation.request_id });
         }
       } else {
-        const res = await runAction(() => startRun(workspace, activeConversationId, verbatimText));
+        const res = await runAction(() =>
+          startRun(workspace, activeConversationId, verbatimText, runOpts),
+        );
         if (res) {
           clearDraft(draftKey);
+          setAttachedInputs([]);
           void queryClient.invalidateQueries({
             queryKey: bhKeys.conversation(service, workspace, activeConversationId),
           });
@@ -334,10 +434,14 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       workspace,
       service,
       draftText,
+      attachedInputs,
+      selectedModelOverride,
+      selectedStrategy,
       activeConversationId,
       scopeMode,
       selectedScopeId,
       newScopeId,
+      parentScopeId,
       runAction,
       clearDraft,
       draftKey,
@@ -402,16 +506,16 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   );
 
   const placeholder = !runtimeEnabled
-    ? 'Native model runtime is not enabled — configure a model in Settings → Models'
+    ? tr('原生模型运行时未启用 — 请前往“设置 → 模型配置”完成服务端模型配置', 'Native model runtime is not enabled — configure a model in Settings → Models')
     : isDelivered
-      ? 'This request is delivered — start a new research question for follow-up work'
+      ? tr('该科研请求已交付 — 请新建科研问题开展后续探索', 'This request is delivered — start a new research question for follow-up work')
       : isUnknownBegin
-        ? 'Reconcile the request binding above before sending another message'
+        ? tr('请先完成上方的请求核对与绑定，再发送新消息', 'Reconcile the request binding above before sending another message')
         : needsExplicitRequestStart
-          ? 'Start a conversation for the selected request above first'
+          ? tr('请先点击上方按钮为所选科研请求开启对话', 'Start a conversation for the selected request above first')
           : activeConversationId
-            ? 'Reply, or send the exact Core confirmation phrase…'
-            : 'Enter your scientific question (sent verbatim to Core)…';
+            ? tr('继续回复，或按 Core 提示输入精确确认指令…', 'Reply, or send the exact Core confirmation phrase…')
+            : tr('输入您的真实科学问题（将原样提交给 BioHarness Core）…', 'Enter your scientific question (sent verbatim to Core)…');
 
   const headerSlot = (
     <BioHarnessRequestHeader
@@ -435,12 +539,18 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
       data-testid="bh-landing"
     >
       <h2 className="text-text-primary text-2xl font-semibold tracking-tight">
-        BioHarness Research Workspace
+        {tr('BioHarness 科研工作台', 'BioHarness Research Workspace')}
       </h2>
-      <p className="text-text-secondary mt-2 max-w-lg text-sm">
+      <p className="text-text-secondary mt-2 max-w-lg text-sm leading-relaxed">
         {runtimeEnabled
-          ? 'Submit a scientific question verbatim to BioHarness Core, or select an existing workspace conversation or open request from the sidebar.'
-          : 'Native model runtime is not currently enabled. Open Settings → Models to configure a provider, or inspect workspace state from the sidebar.'}
+          ? tr(
+              '在下方输入真实科学问题以开启研究或建立科研项目；也可点击“资料”附带小型 CSV/TSV/FASTA/PDF 或引用服务器授权数据。',
+              'Submit a scientific question verbatim to BioHarness Core, or select an existing workspace conversation or open request from the sidebar.',
+            )
+          : tr(
+              '当前原生模型运行时未启用。请前往“设置 → 模型配置”查看服务配置，或从左侧边栏浏览已有科研项目与请求。',
+              'Native model runtime is not currently enabled. Open Settings → Models to configure a provider, or inspect workspace state from the sidebar.',
+            )}
       </p>
     </div>
   );
@@ -508,6 +618,8 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
                           onSelectedScopeIdChange={setSelectedScopeId}
                           newScopeId={newScopeId}
                           onNewScopeIdChange={setNewScopeId}
+                          parentScopeId={parentScopeId}
+                          onParentScopeIdChange={setParentScopeId}
                           scopeProblem={scopeProblem}
                         />
                       </>
@@ -536,10 +648,32 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
                         composerBlocked={composerBlocked}
                         isActing={isActing}
                         isNewConversation={!activeConversationId}
-                        activeRunId={activeRunId}
-                        cancelRequested={cancelRequested}
-                        activeModel={activeModel}
-                      />
+                      activeRunId={activeRunId}
+                      cancelRequested={cancelRequested}
+                      activeModel={activeModel}
+                      availableModels={meta?.runtime?.available_models ?? []}
+                      selectedModelOverride={selectedModelOverride}
+                      onSelectModelOverride={setSelectedModelOverride}
+                      strategies={meta?.runtime?.strategies ?? []}
+                      selectedStrategy={selectedStrategy}
+                      onSelectStrategy={setSelectedStrategy}
+                      inputsState={inputsQuery.data ?? null}
+                      inputsLoading={inputsQuery.isLoading}
+                      attachedInputs={attachedInputs}
+                      onAttachInput={(item) =>
+                        setAttachedInputs((prev) =>
+                          prev.some((x) => x.server_path === item.server_path) ? prev : [...prev, item],
+                        )
+                      }
+                      onRemoveAttachedInput={(serverPath) =>
+                        setAttachedInputs((prev) => prev.filter((x) => x.server_path !== serverPath))
+                      }
+                      onUploadFile={handleUploadFile}
+                      uploadingInput={uploadingInput}
+                      uploadError={uploadError}
+                      onClearUploadError={() => setUploadError(null)}
+                      onInputsDrawerOpenChange={setInputsDrawerOpen}
+                    />
                     )}
                   />
                 </MessageSurfaceContext.Provider>

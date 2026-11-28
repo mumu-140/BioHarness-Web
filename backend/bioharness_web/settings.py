@@ -21,6 +21,8 @@ class Workspace:
     # Directories from which evidence file previews may be read. The workspace
     # itself comes first; Core state under .bioharness is never previewed.
     evidence_roots: tuple[Path, ...]
+    # Optional explicitly authorized writable directory inside evidence_roots for small research inputs.
+    upload_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ class Settings:
     poll_interval_seconds: float = 5.0
     tool_timeout_seconds: float = 60.0
     evidence_preview_max_bytes: int = 131072
+    max_upload_bytes: int = 20 * 1024 * 1024
     # ---- native runtime (W2); disabled unless a model and a ledger are configured ----
     model: ModelSettings | None = None
     ledger_path: Path | None = None
@@ -92,6 +95,9 @@ class Settings:
         preview_max_bytes = int(get("EVIDENCE_PREVIEW_MAX_BYTES", "131072"))
         if preview_max_bytes < 4096:
             raise ValueError("evidence preview max bytes must be >= 4096")
+        max_upload_bytes = int(get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+        if max_upload_bytes < 4096 or max_upload_bytes > 100 * 1024 * 1024:
+            raise ValueError("BIOHARNESS_WEB_MAX_UPLOAD_BYTES must be between 4096 and 104857600")
 
         model_values = {name: get("MODEL_" + name) for name in ("BASE_URL", "API_KEY", "NAME")}
         ledger = get("LEDGER")
@@ -126,6 +132,7 @@ class Settings:
             port=int(get("PORT", "8080")),
             poll_interval_seconds=poll,
             evidence_preview_max_bytes=preview_max_bytes,
+            max_upload_bytes=max_upload_bytes,
         )
 
 
@@ -157,17 +164,34 @@ def parse_workspaces(raw: str) -> dict[str, Workspace]:
         if not _ID.fullmatch(workspace_id):
             raise ValueError(f"workspace id '{workspace_id}' is not a short identifier")
         spec = {"path": value} if isinstance(value, str) else value
-        if not isinstance(spec, dict) or set(spec) - {"path", "evidence_roots"}:
+        if not isinstance(spec, dict) or set(spec) - {"path", "evidence_roots", "upload_root"}:
             raise ValueError(f"workspace '{workspace_id}' must be a path or an object")
         path = _directory(spec.get("path"), f"workspace '{workspace_id}' path")
         extra = spec.get("evidence_roots", [])
         if not isinstance(extra, list):
             raise ValueError(f"workspace '{workspace_id}' evidence_roots must be a list")
-        roots = [path] + [
+        roots = tuple(dict.fromkeys([path] + [
             _directory(item, f"workspace '{workspace_id}' evidence root") for item in extra
-        ]
+        ]))
+        upload_root = None
+        if spec.get("upload_root") is not None:
+            raw_upload = spec.get("upload_root")
+            if not isinstance(raw_upload, str) or not os.path.isabs(raw_upload):
+                raise ValueError(f"workspace '{workspace_id}' upload_root must be an absolute directory path")
+            raw_path = Path(raw_upload)
+            if raw_path.is_symlink():
+                raise ValueError(f"workspace '{workspace_id}' upload_root cannot be a symlink")
+            candidate = _directory(raw_upload, f"workspace '{workspace_id}' upload_root")
+            state_dir = (path / ".bioharness").resolve()
+            if candidate == state_dir or candidate.is_relative_to(state_dir):
+                raise ValueError(f"workspace '{workspace_id}' upload_root cannot be under .bioharness")
+            if not any(candidate == r or candidate.is_relative_to(r) for r in roots):
+                raise ValueError(
+                    f"workspace '{workspace_id}' upload_root must reside within configured evidence_roots"
+                )
+            upload_root = candidate
         workspaces[workspace_id] = Workspace(
-            id=workspace_id, path=path, evidence_roots=tuple(dict.fromkeys(roots))
+            id=workspace_id, path=path, evidence_roots=roots, upload_root=upload_root
         )
     return workspaces
 

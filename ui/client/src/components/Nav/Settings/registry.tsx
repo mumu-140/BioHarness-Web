@@ -911,9 +911,29 @@ const bioHarnessEntries: SettingEntry[] = [
   },
 ];
 
+/* BioHarness: changed from LibreChat v0.8.9. Exclude donor controls that have no real behavior
+ * on the BioHarness host (such as client image resize, paste-as-file, steering during run, fork,
+ * temporary chat, and donor @command menus) so settings never advertise inactive capabilities (UX-13). */
+export const HOST_UNAVAILABLE_SETTING_IDS: ReadonlySet<string> = new Set([
+  'duringRunDefaultAction',
+  'clientImageResize',
+  'pasteLongTextAsFile',
+  'saveBadgesState',
+  'atCommand',
+  'usernameDisplay',
+  'showThinking',
+  'modularChat',
+  'defaultTemporaryChat',
+  'forkSettings',
+  'chatDirection',
+  'clockFormat',
+  'weekStart',
+]);
+
 export const registry: SettingEntry[] = [
   ...bioHarnessEntries,
   ...allEntries.filter(
-    (entry) => !HOST_UNAVAILABLE_TABS.has(entry.tab),
+    (entry) =>
+      !HOST_UNAVAILABLE_TABS.has(entry.tab) && !HOST_UNAVAILABLE_SETTING_IDS.has(entry.id),
   ),
 ];

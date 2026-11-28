@@ -155,7 +155,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     const convoReload = await page.goto(deliveredUrl, { waitUntil: 'load' });
     await page.getByTestId('bh-hitl-delivered').waitFor({ timeout: 20000 });
     await page.waitForTimeout(800);
-    const verbatimOccurrences = (await bodyText()).split(verbatimQ).length - 1;
+    const verbatimOccurrences = (await page.locator('main').innerText()).split(verbatimQ).length - 1;
     check('C2 deep-link reload on /c/:id returns 200 and replays transcript without duplicates',
       convoReload.status() === 200 && verbatimOccurrences === 1,
       `status=${convoReload.status()} occurrences=${verbatimOccurrences}`);

@@ -21,7 +21,47 @@ from .cli import ToolError
 from .core import MODEL_TOOLS, MUTATING, CoreHost
 from .ledger import Ledger, RunActive
 from .provider import ModelClient, ProviderError, ToolCall, ToolSpec
-from .settings import Settings, Workspace
+from .settings import ModelSettings, Settings, Workspace
+
+
+def run_strategies(settings: Settings) -> list[dict[str, Any]]:
+    """Real host execution-budget strategies (never alter Core's five-call mainline or evidence rules)."""
+    base_turns = max(1, int(settings.max_model_turns_per_run))
+    base_chars = max(10_000, int(settings.model_context_chars))
+    return [
+        {
+            "id": "standard",
+            "label": "标准预算",
+            "label_en": "Standard",
+            "max_turns": base_turns,
+            "context_chars": base_chars,
+            "description": "默认宿主轮次与上下文预算，保持 Core 五调用主线与全部证据要求不变。",
+        },
+        {
+            "id": "concise",
+            "label": "快速紧凑",
+            "label_en": "Concise",
+            "max_turns": min(12, base_turns),
+            "context_chars": min(80_000, base_chars),
+            "description": "收紧单次运行的宿主轮次与上下文窗口，适合轻量问题与快速排查；不跳过 Core 规则或证据核验，与 Memory FAST/STANDARD 检索独立。",
+        },
+        {
+            "id": "thorough",
+            "label": "深度扩展",
+            "label_en": "Thorough",
+            "max_turns": min(60, max(base_turns, 60)),
+            "context_chars": max(base_chars, 320_000),
+            "description": "提高单次运行的宿主工具/模型轮次与上下文预算，适合多步分析与综合；不改变 Core 五调用或科学审查边界。",
+        },
+    ]
+
+
+def resolve_strategy_budget(settings: Settings, strategy_id: str | None) -> dict[str, Any]:
+    strategies = {item["id"]: item for item in run_strategies(settings)}
+    chosen = strategy_id or "standard"
+    if chosen not in strategies:
+        raise RuntimeRefusal("STRATEGY_INVALID", f"不支持的运行预算策略: {chosen}", 422)
+    return strategies[chosen]
 from .evidence import path_permitted
 from .sources import Sources, path_expander, path_redactor
 
@@ -259,7 +299,10 @@ class Runtime:
 
     # ---- runs --------------------------------------------------------------
     def start_run(self, workspace_id: str, conversation_id: str, text: str | None,
-                  scope: dict | None = None) -> str:
+                  scope: dict | None = None, *,
+                  model_override: ModelSettings | None = None,
+                  provider_id: str | None = None,
+                  strategy: str | None = None) -> str:
         conversation = self._conversation(workspace_id, conversation_id)
         if self.ledger.active_run(conversation_id) or conversation_id in self._attaching:
             raise RuntimeRefusal("RUN_ACTIVE", "a run is already in progress for this conversation")
@@ -280,12 +323,16 @@ class Runtime:
         elif self.ledger.running_elsewhere(workspace_id, conversation["request_id"], conversation_id):
             raise RuntimeRefusal("REQUEST_BUSY",
                                  "another conversation of this service is working on this request now")
+        budget = resolve_strategy_budget(self.settings, strategy)
         try:
             run_id = self.ledger.start_run(conversation_id)
         except RunActive:
             raise RuntimeRefusal("RUN_ACTIVE", "a run is already in progress for this conversation") from None
         self._cancels[run_id] = asyncio.Event()
-        task = asyncio.get_running_loop().create_task(self._run(conversation, run_id, text, scope))
+        task = asyncio.get_running_loop().create_task(
+            self._run(conversation, run_id, text, scope, model_override=model_override,
+                      provider_id=provider_id, budget=budget)
+        )
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: (self._tasks.pop(run_id, None), self._cancels.pop(run_id, None),
                                               self._module_tools.pop(run_id, None)))
@@ -311,15 +358,30 @@ class Runtime:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     # ---- one run -----------------------------------------------------------
-    async def _run(self, conversation: dict, run_id: str, text: str | None, scope: dict | None) -> None:
+    async def _run(self, conversation: dict, run_id: str, text: str | None, scope: dict | None, *,
+                   model_override: ModelSettings | None = None,
+                   provider_id: str | None = None,
+                   budget: dict[str, Any] | None = None) -> None:
         conversation_id = conversation["id"]
         workspace = self._workspace(conversation)
-        run_model = self.model.snapshot() if hasattr(self.model, "snapshot") else self.model
+        if model_override is not None:
+            run_model = ModelClient(model_override)
+        else:
+            run_model = self.model.snapshot() if hasattr(self.model, "snapshot") else self.model
+        active_budget = budget or resolve_strategy_budget(self.settings, None)
         self._secrets(run_model.settings.api_key)
         state, reason = "FAILED", "internal error"
-        self._emit(conversation_id, run_id, "run.started", {"model": run_model.settings.name})
+        started_payload: dict[str, Any] = {
+            "model": run_model.settings.name,
+            "strategy": active_budget["id"],
+            "max_turns": active_budget["max_turns"],
+            "context_chars": active_budget["context_chars"],
+        }
+        if provider_id:
+            started_payload["provider_id"] = provider_id
+        self._emit(conversation_id, run_id, "run.started", started_payload)
         try:
-            await self._conduct(conversation, workspace, run_id, text, scope, run_model)
+            await self._conduct(conversation, workspace, run_id, text, scope, run_model, active_budget)
             state, reason = "FINISHED", "the turn ended"
         except _Stop as stop:
             state, reason = stop.state, stop.reason
@@ -337,7 +399,11 @@ class Runtime:
             raise _Stop("CANCELLED", "cancelled at the user's request")
 
     async def _conduct(self, conversation: dict, workspace: Workspace, run_id: str,
-                       text: str | None, scope: dict | None, run_model: ModelClient) -> None:
+                       text: str | None, scope: dict | None, run_model: ModelClient,
+                       budget: dict[str, Any] | None = None) -> None:
+        active_budget = budget or resolve_strategy_budget(self.settings, None)
+        max_turns = int(active_budget["max_turns"])
+        context_chars = int(active_budget["context_chars"])
         conversation_id = conversation["id"]
         redact = self._cleaner(workspace)
         notes: list[dict] = []  # host notices for the model, in the order they arose
@@ -411,9 +477,9 @@ class Runtime:
         specs += await self._module_specs(conversation_id, run_id, workspace)
         history = self._history(conversation_id) + notes
         run_start = len(history)
-        for turn_number in range(1, self.settings.max_model_turns_per_run + 1):
+        for turn_number in range(1, max_turns + 1):
             self._check_cancel(run_id)
-            self._fit(history, run_start)
+            self._fit(history, run_start, context_chars)
             instructions = (PREAMBLE + "\n# Research rules of BioHarness Core\n" + rules
                             + "\n# Current state of this request, as returned by BioHarness Core\n"
                             + json.dumps(redact(last), ensure_ascii=False))
@@ -517,14 +583,15 @@ class Runtime:
         self._module_tools[run_id] = found
         return [spec for _, spec in found.values()]
 
-    def _fit(self, history: list[dict], run_start: int) -> None:
+    def _fit(self, history: list[dict], run_start: int, max_chars: int | None = None) -> None:
         """Keep this run's tool traffic within the configured bound by dropping the oldest tool
         results first. Core's current state is always given in full with every request."""
+        limit = max_chars if max_chars is not None else self.settings.model_context_chars
         def size() -> int:
             return sum(len(json.dumps(item, ensure_ascii=False, default=str)) for item in history[run_start:])
 
         for item in history[run_start:]:
-            if size() <= self.settings.model_context_chars:
+            if size() <= limit:
                 return
             if item["role"] == "tool" and not (isinstance(item["result"], dict)
                                                and item["result"].get("omitted_by_host")):

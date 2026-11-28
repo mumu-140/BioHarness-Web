@@ -64,14 +64,17 @@
 
 **明确的现状约束：** Core 当前的 scope 声明以首条真实科学请求为起点，支持稳定 parent_id 和多层级路径；不能脱离首个请求创建假项目。Core 三种任务类型 EXPLAIN/EVALUATE/ANALYZE 与 Memory 三档检索 FAST/STANDARD/DEEP 是不同维度。源码中已有 Memory DEEP 实现并不证明当前 Web 工具接口已公开。此阶段要核实“快速/深度研究模式”的真正产品语义，不自行定义第二种科研主线。
 
-### R3.2 — 基础科研交互补齐（UX-01–04、06–13）
+### R3.2 — 基础科研交互补齐（UX-01–04、06–13）（已完成，2026-11-28）
 
-- [ ] **项目和子项目（UX-01/02）：** 将科研项目作为主要导航对象，现有 Core 运行工作区选择仅在切换数据来源时出现并说明含义。提供清晰的“新建项目”“新建子项目”和继续已有项目入口，显示人可读名称、归属路径、科学目标及历史请求。复用现有 `science_begin` 的 scope 声明（id/create/parent_id）和 Governance 树；新建时引导填写真实首条科学问题，不发合成占位请求，不允许静默绑定或拖拽改写历史父级。未绑定请求保留独立分组。
-- [ ] **资料输入（UX-03/10/13）：** 复用 LibreChat Composer 的附件交互，提供上传小型 CSV/TSV、FASTA、PDF 和引用已有授权数据的真实入口。核实文件传输公共接口；若现有接口不足，只设计 Web 必需的最小受限上传/引用传输，使用明确授权的可写研究输入根、服务端文件身份、大小/数量边界、路径与软链检查、上传完整性校验、禁止覆盖现有文件、明确失败/重试。附件与当前 workspace/scope/request 绑定，保留来源、版本和实际大小/摘要。浏览器路径不是服务器路径。大数据使用已有服务器引用及有界摘录，不默认整文件发送模型。上传完成不代表证据已核验；沿用 R2 精确 evidence anchor 与版本校验，不新增科学资产数据库。无授权存储时明示不可上传，继续其他任务。
-- [ ] **模型与研究策略（UX-04/07）：** 日常模型选择使用可信配置及真实可用模型，和 Provider URL/API Key 管理分开；实际 Run 记录所用模型。快速/深度研究模式只有在已核实的真实模型参数或 Host 上下文/执行策略下才提供，清楚说明效果，保持五调用主线及科学要求不变，不降低证据标准，不虚构速度/质量，不把 Memory FAST/DEEP 当成研究模式。缺真实策略则报告可选方案，由使用者决定后补充；不放无作用的开关。
-- [ ] **可读导航与会话（UX-08/09/11）：** 在现有独立 Conversation / Workflow / Evidence 页面与执行记录中提供标题、项目位置、当前状态、下一步、历史请求、来源入口；技术 ID/JSON 折叠。保留显式 request_id/conversation/run/operation 绑定、真实 A# 确认、WAIT_FOR_USER、状态恢复和历史计划版本。聚合活动/待处理提示只能是现有状态的只读投影；打开其他视图不影响后台执行。
-- [ ] **中文和响应式（UX-06/12/13）：** 复用 donor i18n、主题、菜单和组件。中英文均保持完整；简体中文覆盖关键导航、项目/上传/模型/模式、状态、错误、空状态、设置与帮助。必要专业缩写保留。默认隐藏未接通的 donor 设置。实际检查 1440/1024/390/320px、浅/深色、触摸目标、键盘、菜单/对话框和重载，避免新增界面拥堵。
-- [ ] 本阶段通过一次隔离端到端用户任务：创建带真实问题的根项目 → 创建子项目 → 关联资料 → 选择实际支持的模型/策略 → 进入对话 → 在现有流程/证据页找到同一请求。确认无伪造 Scope、意外绑定或数据覆盖；不可用功能明确记录，未验证不勾选。
+- [x] **项目和子项目（UX-01/02）：** 侧栏“科研项目树”为主导，Core 工作区下拉框明确标为“数据来源环境（Core 工作区）”；提供“新建项目”“+子项目”“提问”引导入口，复用 `science_begin` `scope={id,create,parent_id}` 以真实首条科学问题创建根项目与嵌套子项目，无占位请求与拖拽改写；未绑定请求独立展示。
+- [x] **资料输入（UX-03/10/13）：** 新增最小受限输入传输接口（`GET/POST /api/workspaces/{ws}/inputs`，文件 `backend/bioharness_web/inputs.py`），要求显式配置 `upload_root`（位于 `evidence_roots` 内且禁入 `.bioharness`）、限制扩展名与单文件大小、`O_CREAT|O_EXCL|O_NOFOLLOW` 禁覆盖、SHA-256 完整性校验、软链/穿越拒绝，并明确标为 `待附带输入`（未核验，不冒充 Core 已核验证据）；未配置 `upload_root` 时明示只读保护并禁用上传按钮，仍可引用服务器已有授权文件。
+- [x] **模型与研究策略（UX-04/07）：** Composer 下方提供服务端已授权启用的按次任务模型选择器（`model_override`，与管理员 Provider URL/Key 设置分离）与真实生效的宿主运行预算策略（`standard`/`concise`/`thorough`，仅调节 `max_turns` 与 `model_context_chars`，不改变 Core 五调用或证据标准，与 Memory `FAST/STANDARD/DEEP` 严格独立）；`run.started` 记录实际 `model` 与 `strategy`。
+- [x] **可读导航与会话（UX-08/09/11）：** `ledger.py` 会话列表提取首条用户问题摘要、更新时间、最近模型与策略；侧栏历史与请求列表优先显示人可读问题、阶段标签与项目归属；Workflow/Evidence 空状态提供“前往对话”行动引导；Executions 列表/详情支持中文阶段与状态标签。
+- [x] **中文和响应式（UX-06/12/13）：** 新增 `ui/client/src/host/i18n.ts` 统一中英文双语文案（简体中文覆盖核心交互/项目/上传/模型/策略/空错状态，保留专业缩写）；`registry.tsx` 隐藏未接通的 donor 设置（`clientImageResize`、`pasteLongTextAsFile`、`duringRunDefaultAction`、`forkSettings` 等）；完成 1440/390/320px、浅深色与真实构建检查。
+- [x] **R3.2 隔离端到端验收记录：**
+  - Python 隔离全量：`254/254 passed`（含新增 `tests/backend/test_r3_inputs_and_runs.py` 5 项，0 skipped）。
+  - 前端检查：`tsc --noEmit` 0 错误；Jest `6 suites / 35 tests passed`（含 `r3_2.spec.tsx` 与 `registry.spec.ts`）；Vite 生产构建通过。
+  - 真实 Chromium 验收（`firecrawl-playwright-service:latest` + 真实 `bioharness-host`/`bioharness-governance` CLI）：`ui_r3_2_run.sh` **17/17 PASS**（简体中文下单步创建根项目 `PPGR`、上传 CSV/FASTA/PDF 与 409 防覆盖拒绝、切换 `model-deep` + `concise`、创建子项目 `transcriptome`、Workflow/Evidence 一致定位、只读区诚实禁用上传、390/320px 零溢出）；回归 `ui_run.sh` **33/33**、`ui_step3_run.sh` **28/28**、`ui_step4_run.sh` **27/27**、`ui_step5_run.sh` **30/30**。
 
 ### R3.3 — Memory、Skills、Resources、Documents（UX-05）
 

@@ -250,6 +250,80 @@ class ModelConfigStore:
             "presets": PROVIDER_PRESETS,
         }
 
+    def available_models(self) -> list[dict[str, str]]:
+        """Enabled server-configured models safe to expose in everyday task selection."""
+        items: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        chat_slot = (self._state.get("slots") or {}).get("chat") or {}
+        chat_pid = str(chat_slot.get("provider_id") or "")
+        chat_model = str(chat_slot.get("model") or "").strip()
+        for p in self._state.get("providers", []):
+            if not p.get("enabled", True):
+                continue
+            base_url = str(p.get("base_url") or "").strip()
+            api_key = str(p.get("api_key") or "").strip()
+            if not base_url or not api_key:
+                continue
+            pid = str(p["id"])
+            pname = str(p.get("name") or pid)
+            models = list(p.get("models") or [])
+            if pid == chat_pid and chat_model and chat_model not in models:
+                models.insert(0, chat_model)
+            for model_name in models:
+                clean = str(model_name).strip()
+                if not clean or (pid, clean) in seen:
+                    continue
+                seen.add((pid, clean))
+                items.append({"provider_id": pid, "provider_name": pname, "model": clean})
+        return items
+
+    def resolve_model_override(self, provider_id: str, model_name: str) -> ModelSettings:
+        """Validate a requested per-run model against enabled server-side configuration."""
+        pid = provider_id.strip()
+        clean_model = model_name.strip()
+        if not pid or not clean_model:
+            raise HTTPException(
+                422,
+                {"origin": "web", "code": "MODEL_OVERRIDE_INVALID", "message": "请选择有效的已配置服务商与模型。"},
+            )
+        provider = next(
+            (p for p in self._state.get("providers", []) if p.get("id") == pid and p.get("enabled", True)),
+            None,
+        )
+        if not provider:
+            raise HTTPException(
+                422,
+                {"origin": "web", "code": "MODEL_PROVIDER_UNAVAILABLE", "message": f"模型服务商 {pid} 未启用或不存在。"},
+            )
+        base_url = str(provider.get("base_url") or "").strip()
+        api_key = str(provider.get("api_key") or "").strip()
+        if not base_url or not api_key:
+            raise HTTPException(
+                422,
+                {"origin": "web", "code": "MODEL_PROVIDER_INCOMPLETE", "message": f"模型服务商 {pid} 尚未配置完整的地址与密钥。"},
+            )
+        chat_slot = (self._state.get("slots") or {}).get("chat") or {}
+        allowed = set(str(m).strip() for m in (provider.get("models") or []) if str(m).strip())
+        if chat_slot.get("provider_id") == pid and str(chat_slot.get("model") or "").strip():
+            allowed.add(str(chat_slot["model"]).strip())
+        if clean_model not in allowed:
+            raise HTTPException(
+                422,
+                {
+                    "origin": "web",
+                    "code": "MODEL_NOT_CONFIGURED",
+                    "message": f"模型 {clean_model} 不在服务商 {pid} 已授权的模型列表中。",
+                },
+            )
+        return ModelSettings(
+            base_url=base_url,
+            api_key=api_key,
+            name=clean_model,
+            request_timeout_seconds=float(provider.get("timeout_seconds", 300.0)),
+            temperature=chat_slot.get("temperature"),
+            max_tokens=chat_slot.get("max_tokens"),
+        )
+
     def resolve_chat_settings(self) -> ModelSettings | None:
         chat = (self._state.get("slots") or {}).get("chat") or {}
         pid = chat.get("provider_id")

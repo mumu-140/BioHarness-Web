@@ -34,6 +34,7 @@ import {
   saveModelConfig,
 } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
+import { useBhText } from './i18n';
 
 type EditableProvider = ProviderItem & {
   draft_api_key: string;
@@ -48,6 +49,7 @@ const EMPTY_SLOTS: SlotsState = {
 };
 
 export default function BioHarnessModelsSettings() {
+  const { tr } = useBhText();
   const queryClient = useQueryClient();
   const { service } = useBioHarnessWorkspace();
   const serviceKey = service ?? 'default';
@@ -262,12 +264,14 @@ export default function BioHarnessModelsSettings() {
       {/* Status summary */}
       <div className="border-border-light bg-surface-primary/60 flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-xs">
         <div>
-          <span className="text-text-secondary">Active chat model: </span>
+          <span className="text-text-secondary">{tr('服务端默认模型：', 'Active chat model: ')}</span>
           <strong className="text-text-primary font-mono" data-testid="bh-models-active-chat">
-            {data.active_chat_model || 'None'}
+            {data.active_chat_model || tr('未配置', 'None')}
           </strong>
           {!editable && (
-            <span className="text-text-tertiary ms-2">(Read-only: no writable config path)</span>
+            <span className="text-text-tertiary ms-2">
+              {tr('（只读：未配置可写配置目录）', '(Read-only: no writable config path)')}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -281,7 +285,7 @@ export default function BioHarnessModelsSettings() {
             className="gap-1.5 text-xs"
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Reset</span>
+            <span>{tr('重置', 'Reset')}</span>
           </Button>
           <Button
             type="button"
@@ -292,7 +296,7 @@ export default function BioHarnessModelsSettings() {
             className="gap-1.5 text-xs"
           >
             {saving ? <Spinner className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" aria-hidden="true" />}
-            <span>Save configuration</span>
+            <span>{tr('保存配置', 'Save configuration')}</span>
           </Button>
         </div>
       </div>
@@ -320,7 +324,7 @@ export default function BioHarnessModelsSettings() {
       <div className="grid gap-3 md:grid-cols-[200px_1fr]">
         <div className="border-border-light space-y-2 rounded-xl border p-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-text-secondary text-xs font-semibold">Providers</span>
+            <span className="text-text-secondary text-xs font-semibold">{tr('模型服务商', 'Providers')}</span>
             <Button
               type="button"
               variant="outline"
@@ -331,7 +335,7 @@ export default function BioHarnessModelsSettings() {
               className="h-7 gap-1 px-2 text-xs"
             >
               <Plus className="h-3 w-3" aria-hidden="true" />
-              <span>Add</span>
+              <span>{tr('新增', 'Add')}</span>
             </Button>
           </div>
 
@@ -400,7 +404,7 @@ export default function BioHarnessModelsSettings() {
 
               <div className="grid gap-2.5 sm:grid-cols-2">
                 <label className="grid gap-1 text-xs">
-                  <span className="text-text-secondary">Display name</span>
+                  <span className="text-text-secondary">{tr('显示名称', 'Display name')}</span>
                   <Input
                     value={selected.name}
                     disabled={!editable}
@@ -408,7 +412,7 @@ export default function BioHarnessModelsSettings() {
                   />
                 </label>
                 <label className="grid gap-1 text-xs">
-                  <span className="text-text-secondary">Protocol</span>
+                  <span className="text-text-secondary">{tr('协议类型', 'Protocol')}</span>
                   <select
                     value={selected.protocol}
                     disabled={!editable}
@@ -439,7 +443,7 @@ export default function BioHarnessModelsSettings() {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-text-secondary">API Key (stored server-side only)</span>
+                  <span className="text-text-secondary">{tr('API 密钥（仅保存在服务端）', 'API Key (stored server-side only)')}</span>
                   <span
                     className="text-text-tertiary font-mono text-[11px]"
                     data-testid="bh-provider-masked-key"
@@ -496,7 +500,7 @@ export default function BioHarnessModelsSettings() {
                   ) : (
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                   )}
-                  <span>Fetch models</span>
+                  <span>{tr('拉取模型列表', 'Fetch models')}</span>
                 </Button>
                 {fetchInfo[selected.id] && (
                   <span
@@ -526,10 +530,12 @@ export default function BioHarnessModelsSettings() {
 
       {/* Atomic Chat Slot Assignment */}
       <div className="border-border-light space-y-2.5 rounded-xl border p-3">
-        <div className="text-text-primary text-xs font-semibold">Primary Chat Model Slot</div>
+        <div className="text-text-primary text-xs font-semibold">
+          {tr('默认科研对话模型槽位（日常任务可在输入框直接切换已启用模型）', 'Primary Chat Model Slot')}
+        </div>
         <div className="grid gap-2.5 sm:grid-cols-2">
           <label className="grid gap-1 text-xs">
-            <span className="text-text-secondary">Provider</span>
+            <span className="text-text-secondary">{tr('服务商', 'Provider')}</span>
             <select
               aria-label="Chat slot provider"
               data-testid="bh-chat-slot-provider"
@@ -552,7 +558,7 @@ export default function BioHarnessModelsSettings() {
             </select>
           </label>
           <label className="grid gap-1 text-xs">
-            <span className="text-text-secondary">Model name</span>
+            <span className="text-text-secondary">{tr('模型名称', 'Model name')}</span>
             <Input
               aria-label="Chat slot model"
               data-testid="bh-chat-slot-model"

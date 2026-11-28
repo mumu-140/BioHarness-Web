@@ -40,6 +40,7 @@ import {
   fetchView,
 } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
+import { formatCompactTime, formatPhaseLabel, formatRunStateLabel, useBhText } from './i18n';
 
 const RUN_BADGE: Record<string, { label: string; cls: string }> = {
   RUNNING: { label: 'Running', cls: 'bg-teal-500/15 text-teal-700 dark:text-teal-300' },
@@ -57,7 +58,14 @@ export interface ResearchTreeEntry extends DataNode {
 }
 
 /** Projects Governance `views/tree` arbitrary-depth scope hierarchy into @rc-component/tree DataNodes. */
-export function buildResearchTreeNodes(scopes: TreeScopeNode[]): {
+export function buildResearchTreeNodes(
+  scopes: TreeScopeNode[],
+  opts?: {
+    zh?: boolean;
+    onCreateSubproject?: (parentScopeId: string) => void;
+    onAskInScope?: (scopeId: string) => void;
+  },
+): {
   nodes: ResearchTreeEntry[];
   allScopeKeys: string[];
 } {
@@ -95,19 +103,55 @@ export function buildResearchTreeNodes(scopes: TreeScopeNode[]): {
       key,
       nodeKind: 'scope',
       scopeId: scope.scope_id,
-      children: reqChildren,
       title: (
         <span
-          className="inline-flex min-w-0 items-center gap-1 text-xs font-medium"
+          className="group/scope inline-flex w-full min-w-0 items-center justify-between gap-1 text-xs"
           data-testid={`bh-tree-scope-${scope.scope_id}`}
-          title={scope.objective || label}
+          title={scope.objective || scope.scope_id}
         >
-          <span className="truncate">{label}</span>
-          {typeof scope.request_count === 'number' && (
-            <span className="text-text-tertiary shrink-0 text-[10px]">({scope.request_count})</span>
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="truncate font-medium">{label}</span>
+            {typeof scope.request_count === 'number' && (
+              <span className="text-text-tertiary shrink-0 text-[10px]">
+                ({scope.request_count})
+              </span>
+            )}
+          </span>
+          {(opts?.onCreateSubproject || opts?.onAskInScope) && (
+            <span className="inline-flex shrink-0 items-center gap-0.5">
+              {opts?.onCreateSubproject && (
+                <button
+                  type="button"
+                  data-testid={`bh-new-subproject-btn-${scope.scope_id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    opts.onCreateSubproject?.(scope.scope_id);
+                  }}
+                  className="text-text-tertiary hover:bg-surface-hover hover:text-text-primary rounded px-1 py-0.5 text-[10px]"
+                  title={opts.zh ? `在 ${scope.scope_id} 下新建子项目` : `New sub-project under ${scope.scope_id}`}
+                >
+                  {opts.zh ? '+子项目' : '+Sub'}
+                </button>
+              )}
+              {opts?.onAskInScope && (
+                <button
+                  type="button"
+                  data-testid={`bh-ask-in-scope-btn-${scope.scope_id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    opts.onAskInScope?.(scope.scope_id);
+                  }}
+                  className="text-text-tertiary hover:bg-surface-hover hover:text-text-primary rounded px-1 py-0.5 text-[10px]"
+                  title={opts.zh ? `在 ${scope.scope_id} 中发起新问题` : `Ask in ${scope.scope_id}`}
+                >
+                  {opts.zh ? '提问' : 'Ask'}
+                </button>
+              )}
+            </span>
           )}
         </span>
       ),
+      children: reqChildren,
     });
   }
 
@@ -131,6 +175,7 @@ export function buildResearchTreeNodes(scopes: TreeScopeNode[]): {
 }
 
 const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
+  const { zh, tr } = useBhText();
   const { conversationId: routeConversationId } = useParams();
   const isSmallScreen = useDrawerViewport();
   const { setSidebarOpen } = useSidebarToggle();
@@ -200,9 +245,26 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
   const openListSourceMessage = openRequestsQuery.data?.data?.source_message ?? null;
   const treeProjects = useMemo(() => extractTreeProjects(treeQuery.data), [treeQuery.data]);
   const treeScopes = useMemo(() => extractTreeScopes(treeQuery.data), [treeQuery.data]);
+  const closeDrawerIfMobile = () => {
+    if (isSmallScreen) {
+      setSidebarOpen(false);
+    }
+  };
+
   const { nodes: treeNodes, allScopeKeys } = useMemo(
-    () => buildResearchTreeNodes(treeScopes),
-    [treeScopes],
+    () =>
+      buildResearchTreeNodes(treeScopes, {
+        zh,
+        onCreateSubproject: (parentId) => {
+          openNewResearch({ scopeDraft: { mode: 'new', parentId } });
+          closeDrawerIfMobile();
+        },
+        onAskInScope: (scopeId) => {
+          openNewResearch({ scopeDraft: { mode: 'existing', scopeId }, scopeId });
+          closeDrawerIfMobile();
+        },
+      }),
+    [treeScopes, zh, openNewResearch, isSmallScreen, setSidebarOpen],
   );
   const treeGoalChanges = treeQuery.data?.ok ? (treeQuery.data.data?.goal_version_changes ?? []) : [];
   const treeRelatedLinks = treeQuery.data?.ok ? (treeQuery.data.data?.related_requests ?? []) : [];
@@ -221,12 +283,6 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     }
     return [];
   }, [selectedRequestId, selectedScopeId]);
-
-  const closeDrawerIfMobile = () => {
-    if (isSmallScreen) {
-      setSidebarOpen(false);
-    }
-  };
 
   const handleSelectRequest = (reqId: string, scopeId?: string | null) => {
     if (!runtimeEnabled) {
@@ -265,7 +321,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
             title="Model settings"
           >
             <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-            <span>Models</span>
+            <span>{tr('模型设置', 'Models')}</span>
           </button>
         </div>
 
@@ -282,9 +338,11 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
         ) : (
           <>
             <label className="block">
-              <span className="sr-only">Workspace</span>
+              <span className="text-text-tertiary mb-0.5 block text-[10px]">
+                {tr('数据来源环境（Core 工作区）', 'Core workspace (data source)')}
+              </span>
               <select
-                aria-label="Workspace"
+                aria-label={tr('数据来源环境', 'Workspace')}
                 data-testid="bh-workspace-select"
                 value={workspace ?? ''}
                 onChange={(e) => {
@@ -304,29 +362,47 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
               <Cpu className="h-3 w-3 shrink-0" aria-hidden="true" />
               <span className="truncate" data-testid="bh-active-model-label">
                 {runtimeEnabled
-                  ? meta?.runtime?.model || 'Model configured'
-                  : 'Runtime disabled (read-only)'}
+                  ? meta?.runtime?.model || tr('已配置默认模型', 'Model configured')
+                  : tr('只读模式（模型运行时未启用）', 'Runtime disabled (read-only)')}
               </span>
             </div>
           </>
         )}
       </div>
 
-      {/* Dominant action: new research question */}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        data-testid="bh-new-research-btn"
-        className="w-full justify-start gap-2"
-        onClick={() => {
-          openNewResearch();
-          closeDrawerIfMobile();
-        }}
-      >
-        <Plus className="h-4 w-4" aria-hidden="true" />
-        <span>New research question</span>
-      </Button>
+      <div className="flex gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="bh-new-research-btn"
+          className="min-h-[36px] flex-1 justify-start gap-1.5 px-2.5 text-xs"
+          onClick={() => {
+            openNewResearch();
+            closeDrawerIfMobile();
+          }}
+        >
+          <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{tr('新建提问', 'New research question')}</span>
+        </Button>
+        {runtimeEnabled && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="bh-new-project-btn"
+            className="min-h-[36px] shrink-0 gap-1 px-2.5 text-xs"
+            onClick={() => {
+              openNewResearch({ scopeDraft: { mode: 'new' } });
+              closeDrawerIfMobile();
+            }}
+            title={tr('以真实首条科学问题建立新的科研项目', 'Create a new research project with your first real scientific question')}
+          >
+            <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{tr('新建项目', 'New project')}</span>
+          </Button>
+        )}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">
         {/* Governance Research Tree (@rc-component/tree 1.5.3) */}
@@ -334,7 +410,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
           <div className="mb-1 flex items-center justify-between px-1">
             <span className="text-text-tertiary inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
               <FolderTree className="h-3 w-3" aria-hidden="true" />
-              Research tree
+              {tr('科研项目树', 'Research tree')}
             </span>
             <button
               type="button"
@@ -386,7 +462,27 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
               </ul>
             </div>
           ) : treeNodes.length === 0 ? (
-            <div className="text-text-tertiary px-2 py-1 text-xs">No governance scopes recorded yet.</div>
+            <div
+              data-testid="bh-empty-projects-card"
+              className="border-border-light bg-surface-primary/40 space-y-1.5 rounded-lg border p-2 text-xs"
+            >
+              <p className="text-text-secondary">
+                {tr('当前数据环境中尚无科研项目。', 'No governance scopes recorded yet.')}
+              </p>
+              {runtimeEnabled && (
+                <button
+                  type="button"
+                  data-testid="bh-empty-new-project-btn"
+                  onClick={() => {
+                    openNewResearch({ scopeDraft: { mode: 'new' } });
+                    closeDrawerIfMobile();
+                  }}
+                  className="text-teal-700 hover:underline dark:text-teal-300"
+                >
+                  {tr('+ 新建第一个科研项目', '+ Create first research project')}
+                </button>
+              )}
+            </div>
           ) : (
             <div
               className="bh-rc-tree border-border-light bg-surface-primary/40 rounded-lg border px-1.5 py-1 text-xs"
@@ -466,7 +562,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
           <section aria-label="Conversations" data-testid="bh-conversations-section">
             <div className="mb-1 flex items-center justify-between px-1">
               <span className="text-text-tertiary text-[11px] font-semibold uppercase tracking-wide">
-                Conversations ({conversations.length})
+                {tr(`历史对话 (${conversations.length})`, `Conversations (${conversations.length})`)}
               </span>
               <button
                 type="button"
@@ -486,38 +582,59 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                 {conversations.map((convo) => {
                   const active = activeConversationId === convo.id;
                   const badge = convo.last_run_state ? RUN_BADGE[convo.last_run_state] : null;
+                  const matchingOpen = convo.request_id
+                    ? openRequests.find((r) => r.request_id === convo.request_id)
+                    : undefined;
+                  const readableTitle =
+                    convo.first_message ||
+                    matchingOpen?.question ||
+                    convo.request_id ||
+                    convo.id.slice(0, 10);
+                  const updatedLabel = formatCompactTime(convo.updated_at || convo.created_at, zh);
                   return (
                     <li key={convo.id}>
                       <button
                         type="button"
                         data-testid={`bh-convo-item-${convo.id}`}
+                        title={`${convo.request_id || convo.id}${convo.last_model ? ` · ${convo.last_model}` : ''}`}
                         onClick={() => {
-                          openConversation(convo.id, { requestId: convo.request_id });
+                          openConversation(convo.id, {
+                            requestId: convo.request_id,
+                            scopeId: matchingOpen?.scope_id ?? undefined,
+                          });
                           closeDrawerIfMobile();
                         }}
                         className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+                          'flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
                           active
                             ? 'bg-surface-hover text-text-primary font-medium'
                             : 'text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary',
                         )}
                       >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <div className="flex w-full items-center justify-between gap-1.5">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{readableTitle}</span>
+                          </span>
+                          {badge && (
+                            <span
+                              className={cn(
+                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                                badge.cls,
+                              )}
+                            >
+                              {formatRunStateLabel(convo.last_run_state, zh) || badge.label}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-text-tertiary flex items-center justify-between gap-1 pl-5 text-[10px]">
                           <span className="truncate font-mono">
-                            {convo.request_id || convo.id.slice(0, 10)}
+                            {matchingOpen?.scope_id
+                              ? `${matchingOpen.scope_id} · ${convo.request_id?.slice(-6) ?? ''}`
+                              : convo.request_id || convo.id.slice(0, 10)}
                           </span>
-                        </span>
-                        {badge && (
-                          <span
-                            className={cn(
-                              'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
-                              badge.cls,
-                            )}
-                          >
-                            {badge.label}
-                          </span>
-                        )}
+                          {updatedLabel && <span className="shrink-0">{updatedLabel}</span>}
+                        </div>
                       </button>
                     </li>
                   );
@@ -531,7 +648,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
         <section aria-label="Open requests" data-testid="bh-open-requests-section">
           <div className="mb-1 flex items-center justify-between px-1">
             <span className="text-text-tertiary text-[11px] font-semibold uppercase tracking-wide">
-              Open requests ({openRequests.length})
+              {tr(`进行中的科研请求 (${openRequests.length})`, `Open requests (${openRequests.length})`)}
             </span>
             <button
               type="button"
@@ -569,9 +686,21 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                       )}
                     >
                       <div className="flex items-center justify-between gap-1">
-                        <span className="inline-flex min-w-0 items-center gap-1 font-mono font-medium">
+                        <span className="inline-flex min-w-0 items-center gap-1 font-medium">
                           <FolderGit2 className="h-3 w-3 shrink-0" aria-hidden="true" />
-                          <span className="truncate">{req.request_id}</span>
+                          <span className="truncate">
+                            {req.question || req.original_task_text || req.request_id}
+                          </span>
+                        </span>
+                        {req.phase && (
+                          <span className="bg-surface-hover text-text-tertiary shrink-0 rounded px-1 text-[10px]">
+                            {formatPhaseLabel(req.phase, zh)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-text-tertiary flex items-center justify-between gap-1 pl-4 text-[10px]">
+                        <span className="truncate font-mono">
+                          {req.scope_id ? `${req.scope_id} · ${req.request_id}` : req.request_id}
                         </span>
                         <span className="flex shrink-0 items-center gap-1">
                           {!req.scope_id && (
@@ -579,19 +708,16 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                               data-testid={`bh-open-req-unscoped-${req.request_id}`}
                               className="bg-surface-hover text-text-tertiary rounded px-1 text-[10px]"
                             >
-                              unscoped
+                              {tr('独立', 'unscoped')}
                             </span>
                           )}
                           {!boundConvo && (
-                            <span className="text-text-tertiary text-[10px]">unbound</span>
+                            <span className="text-text-tertiary text-[10px]">
+                              {tr('未建会话', 'unbound')}
+                            </span>
                           )}
                         </span>
                       </div>
-                      {(req.question || req.original_task_text) && (
-                        <span className="text-text-tertiary line-clamp-2 text-[11px]">
-                          {req.question || req.original_task_text}
-                        </span>
-                      )}
                     </button>
                   </li>
                 );

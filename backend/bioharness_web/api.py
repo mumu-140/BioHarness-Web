@@ -5,15 +5,17 @@ import asyncio
 import os
 import shutil
 
-from typing import Annotated
+from typing import Annotated, Literal
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import evidence
+from . import evidence, inputs
 from .cli import ToolError
-from .runtime import Runtime, RuntimeRefusal
+from .model_config import ModelConfigStore
+from .runtime import Runtime, RuntimeRefusal, run_strategies
 from .settings import Settings
 from .sources import (GOVERNANCE, SelectorError, Sources, UnknownWorkspace, source_error,
                       normalize_selector, path_redactor)
@@ -53,16 +55,26 @@ class Scope(BaseModel):
     related_request_ids: list[Annotated[str, Field(max_length=200)]] | None = Field(None, max_length=50)
 
 
+class ModelOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider_id: str = Field(min_length=1, max_length=64)
+    model: str = Field(min_length=1, max_length=200)
+
+
 class NewConversation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str | None = Field(None, max_length=MAX_MESSAGE_CHARS)
     request_id: str | None = Field(None, max_length=200)
     scope: Scope | None = None
+    model_override: ModelOverride | None = None
+    strategy: Literal["standard", "concise", "thorough"] | None = None
 
 
 class NewRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str | None = Field(None, max_length=MAX_MESSAGE_CHARS)  # absent: resume from Core's state
+    model_override: ModelOverride | None = None
+    strategy: Literal["standard", "concise", "thorough"] | None = None
 
 
 class Attach(BaseModel):
@@ -79,7 +91,9 @@ def _refusal(error: RuntimeRefusal) -> HTTPException:
     return HTTPException(error.status, {"origin": "web", "code": error.code, "message": error.message})
 
 
-def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
+def create_runtime_router(
+    runtime: Runtime, settings: Settings, model_store: ModelConfigStore | None = None
+) -> APIRouter:
     """Conversations and runs of the native runtime. A run lives in the backend; these
     routes start it, watch it and ask for its cancellation."""
     router = APIRouter(prefix="/api/workspaces/{workspace_id}/conversations",
@@ -104,6 +118,19 @@ def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
         if not body.request_id and not (body.text or "").strip():
             raise HTTPException(422, {"origin": "web", "code": "QUESTION_REQUIRED",
                                       "message": "give the question, or the request to continue"})
+        resolved_override = None
+        override_pid = None
+        if body.model_override is not None:
+            if model_store is None:
+                raise HTTPException(
+                    422,
+                    {"origin": "web", "code": "MODEL_OVERRIDE_UNAVAILABLE",
+                     "message": "当前运行模式不支持按次模型覆盖。"},
+                )
+            resolved_override = model_store.resolve_model_override(
+                body.model_override.provider_id, body.model_override.model
+            )
+            override_pid = body.model_override.provider_id
         conversation = runtime.create(workspace_id)
         run_id = None
         try:
@@ -111,7 +138,15 @@ def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
                 await runtime.attach(workspace_id, conversation["id"], body.request_id)
             if body.text is not None and body.text.strip():
                 scope = body.scope.model_dump(exclude_none=True) if body.scope else None
-                run_id = runtime.start_run(workspace_id, conversation["id"], body.text, scope)
+                run_id = runtime.start_run(
+                    workspace_id,
+                    conversation["id"],
+                    body.text,
+                    scope,
+                    model_override=resolved_override,
+                    provider_id=override_pid,
+                    strategy=body.strategy,
+                )
         except RuntimeRefusal as error:
             runtime.ledger.discard_unused(conversation["id"])  # nothing was started for it
             raise _refusal(error) from None
@@ -168,9 +203,31 @@ def create_runtime_router(runtime: Runtime, settings: Settings) -> APIRouter:
     @router.post("/{conversation_id}/runs", status_code=202)
     async def new_run(workspace_id: str, conversation_id: str, body: NewRun):
         workspace_exists(workspace_id)
+        resolved_override = None
+        override_pid = None
+        if body.model_override is not None:
+            if model_store is None:
+                raise HTTPException(
+                    422,
+                    {"origin": "web", "code": "MODEL_OVERRIDE_UNAVAILABLE",
+                     "message": "当前运行模式不支持按次模型覆盖。"},
+                )
+            resolved_override = model_store.resolve_model_override(
+                body.model_override.provider_id, body.model_override.model
+            )
+            override_pid = body.model_override.provider_id
         text = body.text if body.text is not None and body.text.strip() else None
         try:
-            return {"run_id": runtime.start_run(workspace_id, conversation_id, text)}
+            return {
+                "run_id": runtime.start_run(
+                    workspace_id,
+                    conversation_id,
+                    text,
+                    model_override=resolved_override,
+                    provider_id=override_pid,
+                    strategy=body.strategy,
+                )
+            }
         except RuntimeRefusal as error:
             raise _refusal(error) from None
 
@@ -207,6 +264,7 @@ def create_router(
     sources: Sources,
     settings: Settings,
     runtime: Runtime | None = None,
+    model_store: ModelConfigStore | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api", dependencies=[Depends(_no_store)])
 
@@ -225,14 +283,75 @@ def create_router(
         return {
             "service": settings.service_id,
             "workspaces": sorted(settings.workspaces),
+            "workspace_details": {
+                ws_id: {"upload_enabled": ws.upload_root is not None}
+                for ws_id, ws in sorted(settings.workspaces.items())
+            },
             "poll_interval_seconds": settings.poll_interval_seconds,
             "tools": {"core": tool(settings.core_cli),
                       "project-governance": tool(settings.governance_cli)},
             # Whether this service can conduct work itself; the read side works either way.
-            "runtime": {"enabled": settings.runtime_enabled,
-                        "model": active_model,
-                        "module_tool_servers": sorted(settings.mcp_servers)},
+            "runtime": {
+                "enabled": settings.runtime_enabled,
+                "model": active_model,
+                "module_tool_servers": sorted(settings.mcp_servers),
+                **(
+                    {
+                        "available_models": model_store.available_models() if model_store is not None else [],
+                        "strategies": run_strategies(settings),
+                    }
+                    if settings.runtime_enabled
+                    else {}
+                ),
+            },
         }
+
+    @router.get("/workspaces/{workspace_id}/inputs")
+    def list_inputs(workspace_id: str):
+        try:
+            workspace = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        return inputs.list_workspace_inputs(workspace, max_upload_bytes=settings.max_upload_bytes)
+
+    @router.post("/workspaces/{workspace_id}/inputs", status_code=201)
+    async def upload_input(workspace_id: str, request: Request):
+        try:
+            workspace = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        raw_filename = unquote(request.headers.get("x-bioharness-filename", ""))
+        raw_scope = unquote(request.headers.get("x-bioharness-scope", "")) or None
+        limit = settings.max_upload_bytes
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in request.stream():
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > limit:
+                raise HTTPException(
+                    413,
+                    {
+                        "origin": "web",
+                        "code": "INPUT_TOO_LARGE",
+                        "message": f"文件超过单文件上传上限（{limit // (1024 * 1024)} MiB）；大型数据集请保留在服务器存储并使用路径引用。",
+                    },
+                )
+            chunks.append(chunk)
+        try:
+            return inputs.save_workspace_input(
+                workspace,
+                raw_filename,
+                b"".join(chunks),
+                scope_id=raw_scope,
+                max_upload_bytes=limit,
+            )
+        except inputs.InputError as error:
+            raise HTTPException(
+                error.status,
+                {"origin": "web", "code": error.code, "message": error.message},
+            ) from None
 
     @router.get("/workspaces/{workspace_id}/views/{view}")
     async def read_view(

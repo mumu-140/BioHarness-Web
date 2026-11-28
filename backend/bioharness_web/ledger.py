@@ -114,10 +114,50 @@ class Ledger:
         return self._one("SELECT * FROM conversations WHERE id = ?", conversation_id)
 
     def conversations(self, workspace: str) -> list[dict]:
-        return self._all(
-            "SELECT c.*, (SELECT r.state FROM runs r WHERE r.conversation_id = c.id "
-            "             ORDER BY r.started_at DESC LIMIT 1) AS last_run_state "
-            "FROM conversations c WHERE c.workspace = ? ORDER BY c.created_at DESC", workspace)
+        rows = self._all(
+            "SELECT c.*, "
+            "(SELECT r.state FROM runs r WHERE r.conversation_id = c.id "
+            " ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1) AS last_run_state, "
+            "(SELECT e.data FROM events e WHERE e.conversation_id = c.id AND e.type = 'user.message' "
+            " ORDER BY e.seq ASC LIMIT 1) AS _first_user_event, "
+            "(SELECT e.at FROM events e WHERE e.conversation_id = c.id "
+            " ORDER BY e.seq DESC LIMIT 1) AS updated_at, "
+            "(SELECT e.data FROM events e WHERE e.conversation_id = c.id AND e.type = 'run.started' "
+            " ORDER BY e.seq DESC LIMIT 1) AS _last_run_event "
+            "FROM conversations c WHERE c.workspace = ? ORDER BY COALESCE(updated_at, c.created_at) DESC, c.rowid DESC",
+            workspace)
+        out: list[dict] = []
+        for row in rows:
+            first_msg = None
+            raw_first = row.pop("_first_user_event", None)
+            if isinstance(raw_first, str):
+                try:
+                    parsed = json.loads(raw_first)
+                    text = str(parsed.get("text") or "").strip() if isinstance(parsed, dict) else ""
+                    if text:
+                        first_line = text.splitlines()[0].strip()
+                        first_msg = first_line[:120] + ("…" if len(first_line) > 120 else "")
+                except ValueError:
+                    pass
+            last_model = None
+            last_strategy = None
+            raw_run = row.pop("_last_run_event", None)
+            if isinstance(raw_run, str):
+                try:
+                    parsed_run = json.loads(raw_run)
+                    if isinstance(parsed_run, dict):
+                        if isinstance(parsed_run.get("model"), str):
+                            last_model = parsed_run["model"]
+                        if isinstance(parsed_run.get("strategy"), str):
+                            last_strategy = parsed_run["strategy"]
+                except ValueError:
+                    pass
+            row["first_message"] = first_msg
+            row["updated_at"] = row.get("updated_at") or row.get("created_at")
+            row["last_model"] = last_model
+            row["last_strategy"] = last_strategy
+            out.append(row)
+        return out
 
     def discard_unused(self, conversation_id: str) -> None:
         """Remove a conversation that was created for a request which was then refused,

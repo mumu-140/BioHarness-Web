@@ -48,6 +48,7 @@ import {
 import { hostFetch } from './gate';
 import { useBioHarnessVersionStream } from './events';
 import { useBioHarnessWorkspace } from './workspace';
+import { useBhText } from './i18n';
 import { matchesSnapshot, resolveBoundConversation, useScientificRoutePages } from './scientificViews';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 import BioHarnessPdfViewer from './BioHarnessPdfViewer';
@@ -181,8 +182,17 @@ const SandboxedHtmlViewer = memo(function SandboxedHtmlViewer({
 
 const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { meta, service, workspace, selectedRequestId, selectedScopeId, linkedConversationId } =
-    useBioHarnessWorkspace();
+  const { tr } = useBhText();
+  const {
+    meta,
+    service,
+    workspace,
+    selectedRequestId,
+    selectedScopeId,
+    linkedConversationId,
+    openConversation,
+    openNewResearch,
+  } = useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
@@ -601,8 +611,8 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                     <FileText className="h-4 w-4" aria-hidden="true" />
                     <span>
                       {viewMode === 'scope'
-                        ? `Scope historical evidence (${evidenceRefs.length})`
-                        : `Recorded evidence (${evidenceRefs.length})`}
+                        ? tr(`项目历史证据 (${evidenceRefs.length})`, `Scope historical evidence (${evidenceRefs.length})`)
+                        : tr(`已记录科研证据 (${evidenceRefs.length})`, `Recorded evidence (${evidenceRefs.length})`)}
                     </span>
                   </h1>
                   <p className="text-text-tertiary text-xs">
@@ -696,10 +706,42 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
               ) : evidenceRefs.length === 0 ? (
                 <div
                   data-testid="bh-evidence-empty-list"
-                  className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border p-6 text-center text-xs"
+                  className="border-border-light bg-surface-primary/60 text-text-secondary space-y-2 rounded-xl border p-6 text-center text-sm"
                 >
-                  {completeEvidenceHistory ? 'No recorded evidence references found for this request.' :
-                    'No references in the available records; complete history has not been confirmed.'}
+                  <p className="text-text-primary font-medium">
+                    {completeEvidenceHistory
+                      ? tr('当前请求尚无 Core 已记录的科研证据引用。', 'No recorded evidence references found for this request.')
+                      : tr('现有可读记录中未找到证据引用；完整历史尚未确认。', 'No references in the available records; complete history has not been confirmed.')}
+                  </p>
+                  <p className="text-text-tertiary text-xs">
+                    {tr(
+                      '可在对话页通过“资料”上传或引用研究文件，待步骤完成后由 Core 计算 SHA-256 并登记为正式证据。',
+                      'Attach or upload materials in Conversation; once submitted in a step, Core hashes and records verified evidence here.',
+                    )}
+                  </p>
+                  <div className="pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="bh-evidence-go-chat-btn"
+                      onClick={() => {
+                        if (linkedConversationId) {
+                          openConversation(linkedConversationId, {
+                            requestId: selectedRequestId,
+                            scopeId: historyScopeId,
+                          });
+                        } else {
+                          openNewResearch({
+                            requestId: selectedRequestId,
+                            scopeId: historyScopeId,
+                          });
+                        }
+                      }}
+                    >
+                      {tr('前往对话添加或提交资料', 'Go to Conversation to attach materials')}
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="border-border-light bg-surface-primary overflow-x-auto rounded-xl border">

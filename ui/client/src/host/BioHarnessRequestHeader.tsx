@@ -19,6 +19,7 @@ import { cn } from '~/utils';
 import type { WorkspaceConversation } from './bioharness';
 import { bhKeys, fetchConversations } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
+import { useBhText } from './i18n';
 
 export type BioHarnessPrimaryTab = 'conversation' | 'workflow' | 'evidence' | 'executions';
 
@@ -46,6 +47,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
   onContinueFromCore,
 }: BioHarnessRequestHeaderProps) {
   const isSmallScreen = useMediaQuery('(max-width: 767px)');
+  const { tr } = useBhText();
   const {
     meta,
     service,
@@ -134,11 +136,11 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
             </span>
             <span className="text-text-tertiary">/</span>
             <span
-              className="text-text-primary max-w-[160px] truncate font-mono sm:max-w-[280px]"
+              className="text-text-primary max-w-[140px] truncate font-mono sm:max-w-[260px]"
               data-testid="bh-header-request"
-              title={requestId ?? 'Unbound'}
+              title={requestId ?? tr('未绑定科研请求', 'Unbound')}
             >
-              {requestId ? requestId : 'Unbound'}
+              {requestId ? requestId : tr('新研究', 'Unbound')}
             </span>
             {conversationId && (
               <>
@@ -157,7 +159,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
                 className="rounded-md bg-teal-500/15 px-2 py-0.5 font-medium text-teal-700 dark:text-teal-300"
                 data-testid="bh-header-active-run"
               >
-                {cancelRequested ? 'Cancel requested…' : `Run ${activeRunId.slice(0, 8)}`}
+                {cancelRequested ? tr('已请求取消…', 'Cancel requested…') : tr(`运行中 ${activeRunId.slice(0, 8)}`, `Run ${activeRunId.slice(0, 8)}`)}
               </span>
             )}
             {otherRunningConvo && (
@@ -183,7 +185,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
                 className="text-text-tertiary text-[11px]"
                 data-testid="bh-sse-status"
               >
-                {sseConnected ? 'SSE live' : 'SSE connecting…'}
+                {sseConnected ? tr('实时连接', 'SSE live') : tr('连接中…', 'SSE connecting…')}
               </span>
             )}
           </div>
@@ -201,7 +203,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
               className="gap-1.5 text-xs"
             >
               <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Continue from Core</span>
+              <span>{tr('从 Core 继续', 'Continue from Core')}</span>
             </Button>
           )}
           <Button
@@ -210,10 +212,15 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
             size="sm"
             data-testid="bh-header-models-btn"
             onClick={openModelSettings}
-            className="gap-1.5 text-xs"
+            title={tr(
+              '打开服务端模型服务商配置（管理员设置）；日常模型可在输入框下方直接切换',
+              'Open server-side provider settings; everyday model switching is in the composer',
+            )}
+            className="min-h-[36px] gap-1.5 text-xs"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="max-w-[110px] truncate sm:max-w-[140px]">{activeModel || 'Models'}</span>
+            <span className="hidden max-w-[130px] truncate sm:inline">{activeModel || tr('模型设置', 'Models')}</span>
+            <span className="sm:hidden">{tr('模型', 'Models')}</span>
           </Button>
         </div>
       </div>
@@ -238,7 +245,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
             className={tabClass(activeTab === 'conversation')}
           >
             <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Conversation</span>
+            <span>{tr('对话', 'Conversation')}</span>
           </button>
           <button
             ref={(el) => {
@@ -254,7 +261,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
             className={tabClass(activeTab === 'workflow')}
           >
             <GitFork className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Research workflow</span>
+            <span>{tr('研究流程', 'Research workflow')}</span>
           </button>
           <button
             ref={(el) => {
@@ -270,7 +277,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
             className={tabClass(activeTab === 'evidence')}
           >
             <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Evidence</span>
+            <span>{tr('证据', 'Evidence')}</span>
           </button>
         </div>
 
@@ -287,7 +294,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
           )}
         >
           <Activity className="h-3 w-3" aria-hidden="true" />
-          <span>Execution records</span>
+          <span>{tr('执行记录', 'Execution records')}</span>
         </button>
       </nav>
     </header>

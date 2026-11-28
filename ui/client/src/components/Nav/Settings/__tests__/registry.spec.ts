@@ -2,7 +2,7 @@ import { isValidElementType } from 'react-is';
 import { SettingsTabValues, isTwoFactorPolicyProvider } from 'librechat-data-provider';
 import type { SettingsContextValue } from '../types';
 import en from '~/locales/en/translation.json';
-import { registry } from '../registry';
+import { registry, HOST_UNAVAILABLE_SETTING_IDS } from '../registry';
 import { TABS, HOST_UNAVAILABLE_TABS } from '../types';
 
 const validTabSections = new Map(TABS.map((t) => [t.id, new Set(t.sections.map((s) => s.id))]));
@@ -119,9 +119,10 @@ describe('settings registry', () => {
 
   /* BioHarness: changed from LibreChat v0.8.9. The upstream cases for Account, Data and Speech
    * entries are replaced by this one: those tabs are not offered on this host. */
-  it('offers no entry from a tab this host does not provide', () => {
+  it('offers no entry from a tab or control this host does not provide', () => {
     expect(registry.length).toBeGreaterThan(0);
     expect(registry.filter((entry) => HOST_UNAVAILABLE_TABS.has(entry.tab))).toEqual([]);
+    expect(registry.filter((entry) => HOST_UNAVAILABLE_SETTING_IDS.has(entry.id))).toEqual([]);
     expect(TABS.filter((tab) => HOST_UNAVAILABLE_TABS.has(tab.id))).toEqual([]);
   });
 });

@@ -28,18 +28,22 @@ import { bhKeys, fetchConversations, fetchView } from './bioharness';
 import { useBioHarnessVersionStream } from './events';
 import { isCurrentPlanAttempt, matchesSnapshot, resolveBoundConversation, useScientificRoutePages } from './scientificViews';
 import { useBioHarnessWorkspace } from './workspace';
+import { formatPhaseLabel, useBhText } from './i18n';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 import BioHarnessPlanGraph from './BioHarnessPlanGraph';
 
 const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isSmallScreen = useMediaQuery('(max-width: 767px)');
+  const { zh, tr } = useBhText();
   const {
     meta,
     service,
     workspace,
     selectedRequestId,
     linkedConversationId,
+    openConversation,
+    openNewResearch,
     openEvidenceView,
     stageTextInConversation,
   } = useBioHarnessWorkspace();
@@ -535,13 +539,37 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
           ) : steps.length === 0 ? (
             <div
               data-testid="bh-workflow-empty-plan"
-              className="border-border-light bg-surface-primary/60 rounded-xl border p-6 text-center text-sm"
+              className="border-border-light bg-surface-primary/60 space-y-2 rounded-xl border p-6 text-center text-sm"
             >
-              <p className="text-text-primary font-medium">No research plan recorded by Core yet.</p>
-              <p className="text-text-secondary mt-1 text-xs">
-                Current phase: <code className="font-mono">{nowData.phase ?? 'unknown'}</code> ·
-                Action: <code className="font-mono">{nowData.action ?? 'unknown'}</code>
+              <p className="text-text-primary font-medium">
+                {tr('Core 尚未记录正式研究计划', 'No research plan recorded by Core yet.')}
               </p>
+              <p className="text-text-secondary text-xs">
+                {tr('当前阶段：', 'Current phase: ')}{' '}
+                <code className="font-mono">{formatPhaseLabel(nowData.phase, zh)}</code> ·{' '}
+                {tr('下一步动作：', 'Action: ')}{' '}
+                <code className="font-mono">{nowData.action ?? 'unknown'}</code>
+              </p>
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="bh-workflow-go-chat-btn"
+                  onClick={() => {
+                    if (resolvedConversationId) {
+                      openConversation(resolvedConversationId, {
+                        requestId: selectedRequestId,
+                        scopeId,
+                      });
+                    } else {
+                      openNewResearch({ requestId: selectedRequestId, scopeId });
+                    }
+                  }}
+                >
+                  {tr('前往对话继续推进', 'Go to Conversation to continue')}
+                </Button>
+              </div>
             </div>
           ) : (
             /* Full-width Plan Overview (Graph or dependency-labelled List) */

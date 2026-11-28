@@ -221,12 +221,12 @@ def create_app(
         response.set_cookie(SESSION_COOKIE, session, httponly=True, samesite="strict",
                             secure=request.url.scheme == "https", path="/")
 
-    app.include_router(create_router(sources, settings, runtime),
+    app.include_router(create_router(sources, settings, runtime, model_store),
                        dependencies=[Depends(require_session)])
     app.include_router(create_model_settings_router(model_store, runtime),
                        dependencies=[Depends(require_session)])
     if runtime is not None:
-        app.include_router(create_runtime_router(runtime, settings),
+        app.include_router(create_runtime_router(runtime, settings, model_store),
                            dependencies=[Depends(require_session)])
 
     @app.get("/api", include_in_schema=False)
