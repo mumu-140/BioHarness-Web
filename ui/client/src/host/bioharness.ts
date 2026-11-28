@@ -533,7 +533,7 @@ export const bhKeys = {
     ] as const,
 };
 
-function stableSelectorKey(selector: Record<string, string | number | boolean | undefined>): string {
+export function stableSelectorKey(selector: Record<string, string | number | boolean | undefined>): string {
   const params = new URLSearchParams();
   for (const key of Object.keys(selector).sort()) {
     const value = selector[key];
@@ -1089,6 +1089,26 @@ export function evidenceAnchorKey(anchor: EvidenceAnchor): string {
   return `${anchor.request_id}:${anchor.submission_index}:${anchor.evidence_id}:${anchor.sha256}`;
 }
 
+function normalizeEvidenceRef(
+  raw: EvidenceRef,
+  fallbackRequestId?: string,
+  fallbackSubmissionIndex?: number,
+): EvidenceRef | null {
+  const reqId = raw.request_id || fallbackRequestId || '';
+  const subIdx =
+    typeof raw.submission_index === 'number' ? raw.submission_index : fallbackSubmissionIndex;
+  const evId = raw.evidence_id || (raw as { id?: string }).id || '';
+  if (!reqId || typeof subIdx !== 'number' || !evId || !raw.sha256) {
+    return null;
+  }
+  return {
+    ...raw,
+    request_id: reqId,
+    submission_index: subIdx,
+    evidence_id: evId,
+  };
+}
+
 /** Collects actual request-level recorded EvidenceRefs from Governance snapshots without fabricating any items. */
 export function collectRequestEvidenceRefs(
   requestId: string | null,
@@ -1100,13 +1120,15 @@ export function collectRequestEvidenceRefs(
     return [];
   }
   const byKey = new Map<string, EvidenceRef>();
-  const add = (ref: EvidenceRef, stepId?: string, submissionStatus?: string) => {
-    if (
-      ref.request_id !== requestId ||
-      typeof ref.submission_index !== 'number' ||
-      !ref.evidence_id ||
-      !ref.sha256
-    ) {
+  const add = (
+    raw: EvidenceRef,
+    fallbackReqId?: string,
+    fallbackSubIdx?: number,
+    stepId?: string,
+    submissionStatus?: string,
+  ) => {
+    const ref = normalizeEvidenceRef(raw, fallbackReqId, fallbackSubIdx);
+    if (!ref || ref.request_id !== requestId) {
       return;
     }
     const key = evidenceAnchorKey(ref);
@@ -1124,7 +1146,7 @@ export function collectRequestEvidenceRefs(
       continue;
     }
     for (const ref of attempt.evidence ?? []) {
-      add(ref, attempt.step_id, attempt.submission_status);
+      add(ref, attempt.request_id, attempt.submission_index, attempt.step_id, attempt.submission_status);
     }
   }
   for (const sub of contextData?.shared?.recent_submissions ?? []) {
@@ -1132,7 +1154,7 @@ export function collectRequestEvidenceRefs(
       continue;
     }
     for (const ref of sub.evidence ?? []) {
-      add(ref, sub.step_id, sub.submission_status);
+      add(ref, sub.request_id, sub.submission_index, sub.step_id, sub.submission_status);
     }
   }
   for (const shared of treeData?.shared_evidence ?? []) {
@@ -1142,6 +1164,59 @@ export function collectRequestEvidenceRefs(
   }
   return Array.from(byKey.values()).sort(
     (a, b) => a.submission_index - b.submission_index || a.evidence_id.localeCompare(b.evidence_id),
+  );
+}
+
+/** Collects actual scope-level historical EvidenceRefs across requests in a Governance scope. */
+export function collectScopeEvidenceRefs(
+  scopeId: string | null,
+  routesData: RoutesData | null | undefined,
+  contextData: ContextData | null | undefined,
+): EvidenceRef[] {
+  if (!scopeId) {
+    return [];
+  }
+  const byKey = new Map<string, EvidenceRef>();
+  const add = (
+    raw: EvidenceRef,
+    fallbackReqId?: string,
+    fallbackSubIdx?: number,
+    stepId?: string,
+    submissionStatus?: string,
+  ) => {
+    const ref = normalizeEvidenceRef(raw, fallbackReqId, fallbackSubIdx);
+    if (!ref) {
+      return;
+    }
+    const key = evidenceAnchorKey(ref);
+    const prev = byKey.get(key);
+    byKey.set(key, {
+      ...prev,
+      ...ref,
+      step_id: ref.step_id ?? stepId ?? prev?.step_id,
+      submission_status: ref.submission_status ?? submissionStatus ?? prev?.submission_status,
+    });
+  };
+
+  if (routesData && routesData.scope_id === scopeId) {
+    for (const attempt of routesData.attempts ?? []) {
+      for (const ref of attempt.evidence ?? []) {
+        add(ref, attempt.request_id, attempt.submission_index, attempt.step_id, attempt.submission_status);
+      }
+    }
+  }
+  if (contextData?.shared?.scope?.scope_id === scopeId) {
+    for (const sub of contextData.shared.recent_submissions ?? []) {
+      for (const ref of sub.evidence ?? []) {
+        add(ref, sub.request_id, sub.submission_index, sub.step_id, sub.submission_status);
+      }
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) =>
+      a.request_id.localeCompare(b.request_id) ||
+      a.submission_index - b.submission_index ||
+      a.evidence_id.localeCompare(b.evidence_id),
   );
 }
 

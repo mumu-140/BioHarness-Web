@@ -90,6 +90,9 @@ large_tsv = ("\n".join(rows) + "\n").encode("utf-8")
 json_bytes = json.dumps({"workspace": "fixture", "status": "verified", "genes": ["BRCA1", "TP53"]}, indent=2).encode("utf-8")
 (ws1 / "summary.json").write_bytes(json_bytes)
 
+sibling_bytes = json.dumps({"workspace": "fixture", "request": "req-no-ver", "marker": "SCOPE_HISTORY_SIBLING_ONLY"}, indent=2).encode("utf-8")
+(ws1 / "sibling.json").write_bytes(sibling_bytes)
+
 drift_orig = make_minimal_pdf("Original Step 5 PDF")
 drift_sha = hashlib.sha256(drift_orig).hexdigest()
 (ws1 / "drifted.pdf").write_bytes(drift_orig + b"%DRIFTED")
@@ -121,6 +124,7 @@ manifest = {
         "ev-pdf": entry("ev-pdf", ws1 / "study.pdf", pdf_bytes, "req-main", 1),
         "ev-large": entry("ev-large", ws1 / "large_2500.tsv", large_tsv, "req-main", 1),
         "ev-json": entry("ev-json", ws1 / "summary.json", json_bytes, "req-main", 2),
+        "ev-sibling": entry("ev-sibling", ws1 / "sibling.json", sibling_bytes, "req-no-ver", 1),
         "ev-drift": entry("ev-drift", ws1 / "drifted.pdf", drift_orig, "req-main", 2, override_sha=drift_sha),
         "ev-escape": entry("ev-escape", escape_link, secret_out.read_bytes(), "req-main", 2),
     },
@@ -599,7 +603,7 @@ if cmd == "routes":
                 "at": "2026-11-28T00:05:00Z",
                 "submission_status": "DONE",
                 "summary": "Historical v1 submission for unversioned plan test",
-                "evidence": [],
+                "evidence": [m1["ev-sibling"]],
             },
         ],
     }))

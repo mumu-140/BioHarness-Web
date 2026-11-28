@@ -163,18 +163,34 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     }, { timeout: 15000 });
     check('External Core mutation updates workflow live via SSE without reload', true);
 
-    // Transient Core 502/503 failure injection via real SSE source.stale retains last confirmed snapshot with stale banner!
+    // Transient Core 502/503 failure injection via real SSE source.stale retains last confirmed snapshot with stale banner + Refresh action, and recovers automatically via SSE!
     fs.writeFileSync(CTRL + '/fail_503', '1');
     await page.getByTestId('bh-workflow-stale-banner').waitFor({ timeout: 15000 });
+    const staleRefreshVisible = await page.getByTestId('bh-workflow-stale-refresh-btn').isVisible();
     const apiFailStatus = await page.evaluate(async () => {
       const r = await fetch('/api/workspaces/fixture/views/now?request_id=req-main');
       return r.status;
     });
     const canvasStillVisible = await page.getByTestId('bh-plan-graph-canvas').isVisible();
     fs.unlinkSync(CTRL + '/fail_503');
-    check('Transient Core failure triggers SSE source.stale & stale banner without discarding confirmed workflow canvas',
-      (apiFailStatus === 502 || apiFailStatus === 503) && canvasStillVisible,
-      `apiStatus=${apiFailStatus} canvasStillVisible=${canvasStillVisible}`);
+    await page.getByTestId('bh-workflow-stale-banner').waitFor({ state: 'detached', timeout: 15000 });
+    check('Transient Core failure triggers SSE source.stale with Refresh action, retains canvas, and recovers automatically via SSE',
+      (apiFailStatus === 502 || apiFailStatus === 503) && canvasStillVisible && staleRefreshVisible,
+      `apiStatus=${apiFailStatus} canvasStillVisible=${canvasStillVisible} refreshBtn=${staleRefreshVisible}`);
+
+    // Request vs Scope evidence history distinction
+    await page.getByTestId('bh-tab-evidence').click();
+    await page.getByTestId('bh-evidence-table-list').waitFor({ timeout: 10000 });
+    const siblingHiddenInReqMode = (await page.getByTestId('bh-evidence-row-ev-sibling').count()) === 0;
+    await page.getByTestId('bh-evidence-mode-scope').click();
+    await page.getByTestId('bh-evidence-row-ev-sibling').waitFor({ timeout: 10000 });
+    await page.getByTestId('bh-open-evidence-ev-sibling').click();
+    await page.getByTestId('bh-code-viewer').waitFor({ timeout: 15000 });
+    await page.waitForFunction(() => document.body.innerText.includes('SCOPE_HISTORY_SIBLING_ONLY'), { timeout: 15000 });
+    const headerReqUnchanged = (await page.getByTestId('bh-header-request').innerText()).trim() === 'req-main';
+    check('Request vs Scope evidence history stays distinct and opens sibling anchor without rebinding selected request',
+      siblingHiddenInReqMode && headerReqUnchanged,
+      `hiddenInReq=${siblingHiddenInReqMode} headerReqUnchanged=${headerReqUnchanged}`);
 
     // 6. Failure & boundary states: empty plan, unavailable plan version, unscoped request, 12-step large DAG
     await page.goto(BASE + '/w/workflow?ws=fixture&req=req-empty-plan');

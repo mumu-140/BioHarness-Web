@@ -34,6 +34,7 @@ import {
   createConversation,
   deriveRunStatus,
   eventsToMessages,
+  extractTreeProjects,
   extractTreeScopes,
   fetchConversationState,
   fetchView,
@@ -62,6 +63,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     service,
     workspace,
     selectedRequestId,
+    selectedScopeId: workspaceScopeId,
     branchSource,
     setBranchSource,
     openConversation,
@@ -115,7 +117,14 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     refetchOnWindowFocus: false,
   });
 
-  const scopes = useMemo(() => extractTreeScopes(treeQuery.data), [treeQuery.data]);
+  const scopes = useMemo(() => {
+    const direct = extractTreeScopes(treeQuery.data);
+    const base = direct.length > 0 ? direct : extractTreeProjects(treeQuery.data);
+    if (workspaceScopeId && !base.some((s) => s.scope_id === workspaceScopeId)) {
+      return [{ scope_id: workspaceScopeId, title: workspaceScopeId }, ...base];
+    }
+    return base;
+  }, [treeQuery.data, workspaceScopeId]);
   const [scopeMode, setScopeMode] = useState<'none' | 'existing' | 'new'>('none');
   const [selectedScopeId, setSelectedScopeId] = useState('');
   const [newScopeId, setNewScopeId] = useState('');

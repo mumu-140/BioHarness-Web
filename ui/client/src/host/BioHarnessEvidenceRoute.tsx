@@ -38,6 +38,7 @@ import {
   bhKeys,
   classifyEvidenceFormat,
   collectRequestEvidenceRefs,
+  collectScopeEvidenceRefs,
   evidenceAnchorKey,
   evidenceContentUrl,
   fetchConversations,
@@ -180,17 +181,20 @@ const SandboxedHtmlViewer = memo(function SandboxedHtmlViewer({
 
 const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { meta, service, workspace, selectedRequestId, linkedConversationId } =
+  const { meta, service, workspace, selectedRequestId, selectedScopeId, linkedConversationId } =
     useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
+  const modeParam = searchParams.get('mode');
+  const evReqParam = searchParams.get('ev_req');
   const subParam = searchParams.get('sub');
   const evParam = searchParams.get('ev');
   const shaParam = searchParams.get('sha');
   const activeAnchor: EvidenceAnchor | null = useMemo(() => {
-    if (!selectedRequestId || subParam === null || !evParam || !shaParam) {
+    const anchorRequestId = evReqParam || selectedRequestId;
+    if (!anchorRequestId || subParam === null || !evParam || !shaParam) {
       return null;
     }
     const submissionIndex = Number(subParam);
@@ -198,12 +202,12 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
       return null;
     }
     return {
-      request_id: selectedRequestId,
+      request_id: anchorRequestId,
       submission_index: submissionIndex,
       evidence_id: evParam,
       sha256: shaParam,
     };
-  }, [selectedRequestId, subParam, evParam, shaParam]);
+  }, [evReqParam, selectedRequestId, subParam, evParam, shaParam]);
 
   const conversationsQuery = useQuery<WorkspaceConversation[]>({
     queryKey: bhKeys.conversations(service ?? 'svc', workspace ?? ''),
@@ -250,37 +254,52 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
   const effectiveScopeId =
     (typeof selectedNow?.scope_context?.scope_id === 'string' ? selectedNow.scope_context.scope_id : null) ??
     (treeBinding?.request_id === selectedRequestId ? treeBinding.scope_id ?? null : null);
-  const routesQuery = useScientificRoutePages(service, workspace, effectiveScopeId,
-    Boolean(selectedRequestId));
+  const historyScopeId = effectiveScopeId ?? selectedScopeId;
+  const viewMode: 'request' | 'scope' =
+    modeParam === 'scope' && historyScopeId
+      ? 'scope'
+      : !selectedRequestId && historyScopeId
+        ? 'scope'
+        : 'request';
+  const routesQuery = useScientificRoutePages(service, workspace, historyScopeId,
+    Boolean(selectedRequestId || historyScopeId));
 
   const contextQuery = useQuery<Snapshot<ContextData>>({
     queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'context', {
-      scope_id: effectiveScopeId ?? undefined,
+      scope_id: historyScopeId ?? undefined,
       request_id: selectedRequestId ?? undefined,
     }),
     queryFn: () =>
       fetchView<ContextData>(workspace!, 'context', {
-        scope_id: effectiveScopeId!,
+        scope_id: historyScopeId!,
         request_id: selectedRequestId ?? undefined,
       }),
-    enabled: Boolean(service && workspace && effectiveScopeId),
+    enabled: Boolean(service && workspace && historyScopeId),
     staleTime: 15_000,
     refetchOnWindowFocus: false,
   });
 
   const selectedContext = matchesSnapshot(contextQuery.data, service, workspace) &&
     contextQuery.data.ok ? contextQuery.data.data : null;
-  const evidenceRefs = collectRequestEvidenceRefs(selectedRequestId, routesQuery.routesData,
+  const requestEvidenceRefs = collectRequestEvidenceRefs(selectedRequestId, routesQuery.routesData,
     selectedContext, selectedTree);
+  const scopeEvidenceRefs = collectScopeEvidenceRefs(historyScopeId, routesQuery.routesData,
+    selectedContext);
+  const evidenceRefs = viewMode === 'scope' ? scopeEvidenceRefs : requestEvidenceRefs;
   const evidenceReadUnavailable = Boolean(routesQuery.isError || contextQuery.isError || treeQuery.isError ||
     (contextQuery.data && !selectedContext) || (treeQuery.data && !selectedTree));
-  const completeEvidenceHistory = Boolean(effectiveScopeId && routesQuery.confirmed && !evidenceReadUnavailable);
+  const completeEvidenceHistory = Boolean(historyScopeId && routesQuery.confirmed && !evidenceReadUnavailable);
 
   const activeRefMeta = useMemo(() => {
     if (!activeAnchor) return null;
     const key = evidenceAnchorKey(activeAnchor);
-    return evidenceRefs.find((r) => evidenceAnchorKey(r) === key) ?? null;
-  }, [activeAnchor, evidenceRefs]);
+    return (
+      evidenceRefs.find((r) => evidenceAnchorKey(r) === key) ??
+      requestEvidenceRefs.find((r) => evidenceAnchorKey(r) === key) ??
+      scopeEvidenceRefs.find((r) => evidenceAnchorKey(r) === key) ??
+      null
+    );
+  }, [activeAnchor, evidenceRefs, requestEvidenceRefs, scopeEvidenceRefs]);
 
   const previewQuery = useQuery<EvidencePreviewResponse>({
     queryKey: activeAnchor
@@ -292,11 +311,30 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
     refetchOnWindowFocus: false,
   });
 
+  const setEvidenceMode = (nextMode: 'request' | 'scope') => {
+    const next = new URLSearchParams(searchParams);
+    if (nextMode === 'scope') {
+      next.set('mode', 'scope');
+    } else {
+      next.delete('mode');
+    }
+    next.delete('sub');
+    next.delete('ev');
+    next.delete('sha');
+    next.delete('ev_req');
+    setSearchParams(next);
+  };
+
   const openEvidence = (anchor: EvidenceAnchor) => {
     const next = new URLSearchParams(searchParams);
     next.set('sub', String(anchor.submission_index));
     next.set('ev', anchor.evidence_id);
     next.set('sha', anchor.sha256);
+    if (anchor.request_id !== selectedRequestId) {
+      next.set('ev_req', anchor.request_id);
+    } else {
+      next.delete('ev_req');
+    }
     setSearchParams(next);
   };
 
@@ -305,6 +343,7 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
     next.delete('sub');
     next.delete('ev');
     next.delete('sha');
+    next.delete('ev_req');
     setSearchParams(next);
   };
 
@@ -346,12 +385,12 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
           from the sidebar; recorded evidence remains independently inspectable.
         </p>}
         <div className="mx-auto w-full max-w-5xl space-y-4">
-          {!selectedRequestId ? (
+          {!selectedRequestId && !historyScopeId ? (
             <div
               data-testid="bh-evidence-no-request"
               className="border-border-light bg-surface-primary/60 rounded-xl border p-6 text-center text-sm"
             >
-              Select a research request from the sidebar to view its recorded evidence.
+              Select a research request or scope from the sidebar to view recorded evidence.
             </div>
           ) : activeAnchor && service && workspace ? (
             /* Full-content Single-Evidence Detail View (replaces list) */
@@ -395,7 +434,7 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                       {displayName}
                     </h1>
                     <span className="bg-surface-hover text-text-secondary rounded px-1.5 py-0.5 text-[10px]">
-                      {activeAnchor.evidence_id} · sub #{activeAnchor.submission_index}
+                      {activeAnchor.request_id} · {activeAnchor.evidence_id} · sub #{activeAnchor.submission_index}
                     </span>
                     <span className="bg-surface-hover text-text-secondary rounded px-1.5 py-0.5 text-[10px]">
                       {displayKind}
@@ -481,19 +520,32 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
               ) : formatKind === 'image' ? (
                 <VerifiedImageViewer key={JSON.stringify([service, workspace, activeAnchor])} workspace={workspace} anchor={activeAnchor} alt={displayName} />
               ) : formatKind === 'html' && preview?.content_available && preview.content !== null ? (
-                preview.current_file_identity === 'DIFFERS_FROM_RECORD' ? (
+                preview.current_file_identity !== 'MATCHES_RECORD' || preview.truncated ? (
                   <div
                     role="alert"
                     data-testid="bh-html-drift-blocked"
-                    className="rounded-xl border border-amber-400/70 bg-amber-50/90 p-4 text-xs text-amber-950"
+                    className="rounded-xl border border-amber-400/70 bg-amber-50/90 p-4 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
                   >
-                    Refusing to render drifted HTML content as the recorded snapshot.
+                    {preview.current_file_identity === 'DIFFERS_FROM_RECORD'
+                      ? 'Refusing to render drifted HTML content as the recorded snapshot.'
+                      : preview.truncated
+                        ? 'HTML document exceeded the bounded preview excerpt; refusing to render a partial HTML document.'
+                        : `Refusing to render unverified HTML content (${preview.current_file_identity}) as the recorded snapshot.`}
                   </div>
                 ) : (
                   <SandboxedHtmlViewer content={preview.content} title={displayName} />
                 )
               ) : formatKind === 'code' && preview?.content_available && preview.content !== null ? (
                 <div className="space-y-2">
+                  {preview.current_file_identity !== 'MATCHES_RECORD' && (
+                    <div
+                      role="status"
+                      data-testid="bh-code-unverified-notice"
+                      className="rounded-lg border border-amber-400/70 bg-amber-50/80 px-3 py-1.5 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
+                    >
+                      Showing current live file excerpt (identity: {preview.current_file_identity} — not verified as the recorded snapshot).
+                    </div>
+                  )}
                   {preview.truncated && (
                     <div
                       data-testid="bh-preview-truncated-notice"
@@ -541,19 +593,67 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
               )}
             </section>
           ) : (
-            /* Request-level Evidence List View (LibreChat Table) */
+            /* Request-level vs Scope-history Evidence List View (LibreChat Table) */
             <section className="space-y-3" aria-label="Recorded evidence list">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h1 className="text-text-primary flex items-center gap-1.5 text-base font-semibold">
                     <FileText className="h-4 w-4" aria-hidden="true" />
-                    <span>Recorded evidence ({evidenceRefs.length})</span>
+                    <span>
+                      {viewMode === 'scope'
+                        ? `Scope historical evidence (${evidenceRefs.length})`
+                        : `Recorded evidence (${evidenceRefs.length})`}
+                    </span>
                   </h1>
                   <p className="text-text-tertiary text-xs">
-                    Exact recorded references from Project Governance for request{' '}
-                    <code className="font-mono">{selectedRequestId}</code>.
+                    {viewMode === 'scope' ? (
+                      <>
+                        Recorded historical references across requests in Governance scope{' '}
+                        <code className="font-mono">{historyScopeId}</code> (distinct from single-request results).
+                      </>
+                    ) : (
+                      <>
+                        Exact recorded references from Project Governance for request{' '}
+                        <code className="font-mono">{selectedRequestId}</code>.
+                      </>
+                    )}
                   </p>
                 </div>
+                {historyScopeId && (
+                  <div
+                    className="border-border-light bg-surface-primary inline-flex rounded-lg border p-0.5 text-xs"
+                    role="group"
+                    aria-label="Evidence history view mode"
+                  >
+                    <button
+                      type="button"
+                      data-testid="bh-evidence-mode-request"
+                      aria-pressed={viewMode === 'request'}
+                      disabled={!selectedRequestId}
+                      onClick={() => setEvidenceMode('request')}
+                      className={`rounded-md px-2.5 py-1 transition-colors disabled:opacity-45 ${
+                        viewMode === 'request'
+                          ? 'bg-surface-hover text-text-primary font-medium'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      Request evidence
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="bh-evidence-mode-scope"
+                      aria-pressed={viewMode === 'scope'}
+                      onClick={() => setEvidenceMode('scope')}
+                      className={`rounded-md px-2.5 py-1 transition-colors ${
+                        viewMode === 'scope'
+                          ? 'bg-surface-hover text-text-primary font-medium'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      Scope history
+                    </button>
+                  </div>
+                )}
               </div>
 
               {changedWarnings.length > 0 && (
@@ -573,10 +673,10 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                 </div>
               )}
 
-              {(!effectiveScopeId || evidenceReadUnavailable || routesQuery.partial) && (
+              {(!historyScopeId || evidenceReadUnavailable || routesQuery.partial) && (
                 <p role="status" className="text-text-secondary text-xs">
                   {evidenceReadUnavailable ? 'Evidence sources are temporarily unavailable. ' :
-                    !effectiveScopeId ? 'No verified scoped route history is available. ' :
+                    !historyScopeId ? 'No verified scoped route history is available. ' :
                     'Route history is only partially loaded. '}
                   Loaded exact references remain available; incomplete reads do not establish absence.
                 </p>
@@ -607,6 +707,7 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Evidence ID</TableHead>
+                        {viewMode === 'scope' && <TableHead>Request</TableHead>}
                         <TableHead>File / Source</TableHead>
                         <TableHead>Kind</TableHead>
                         <TableHead>Step / Sub</TableHead>
@@ -623,6 +724,11 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                             <TableCell className="font-mono text-xs font-medium">
                               {ref.evidence_id}
                             </TableCell>
+                            {viewMode === 'scope' && (
+                              <TableCell className="font-mono text-xs text-text-secondary">
+                                {ref.request_id}
+                              </TableCell>
+                            )}
                             <TableCell className="max-w-[260px] truncate text-xs" title={ref.source}>
                               {name}
                             </TableCell>

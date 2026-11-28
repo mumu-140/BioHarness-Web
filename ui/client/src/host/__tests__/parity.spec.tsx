@@ -8,11 +8,14 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { Snapshot, TreeData, ConversationEvent } from '../bioharness';
 import {
   bhKeys,
+  collectRequestEvidenceRefs,
+  collectScopeEvidenceRefs,
   deriveRunStatus,
   eventsToMessages,
   extractTreeProjects,
   extractTreeScopes,
 } from '../bioharness';
+import { shouldAutoExpandExecutionDetails } from '../BioHarnessExecutionsRoute';
 import { isCurrentPlanAttempt, matchesSnapshot, resolveBoundConversation } from '../scientificViews';
 import BioHarnessRequestHeader from '../BioHarnessRequestHeader';
 import { useBioHarnessWorkspace } from '../workspace';
@@ -129,6 +132,65 @@ describe('Step 5 Governance multi-project extraction & scientific views identity
     const msgs = eventsToMessages(afterFailure, '', 'conv-1', 'active-model-should-not-leak');
     expect(msgs.some((m) => !m.isCreatedByUser && m.text?.includes('partial uncommitted'))).toBe(false);
     expect(msgs.some((m) => m.text?.includes('Explain TF motif enrichment'))).toBe(true);
+  });
+
+  it('keeps Request evidence strictly isolated from Scope historical evidence across sibling requests', () => {
+    const sha1 = '1'.repeat(64);
+    const sha2 = '2'.repeat(64);
+    const routes = {
+      scope_id: 'scope-shared',
+      attempt_count: 2,
+      offset: 0,
+      attempts: [
+        {
+          request_id: 'req-1',
+          submission_index: 1,
+          step_id: 'S1',
+          submission_status: 'DONE',
+          summary: 'req 1',
+          evidence: [{ request_id: 'req-1', submission_index: 1, evidence_id: 'ev-1', sha256: sha1, kind: 'file' }],
+        },
+        {
+          request_id: 'req-2',
+          submission_index: 1,
+          step_id: 'S1',
+          submission_status: 'DONE',
+          summary: 'req 2',
+          evidence: [{ request_id: 'req-2', submission_index: 1, evidence_id: 'ev-2', sha256: sha2, kind: 'file' }],
+        },
+      ],
+    };
+    const reqRefs = collectRequestEvidenceRefs('req-1', routes, null, null);
+    expect(reqRefs.map((r) => `${r.request_id}:${r.evidence_id}`)).toEqual(['req-1:ev-1']);
+
+    const scopeRefs = collectScopeEvidenceRefs('scope-shared', routes, null);
+    expect(scopeRefs.map((r) => `${r.request_id}:${r.evidence_id}`)).toEqual(['req-1:ev-1', 'req-2:ev-2']);
+    expect(collectScopeEvidenceRefs('other-scope', routes, null)).toEqual([]);
+  });
+
+  it('auto-expands execution technical details only on failure/UNKNOWN/REFUSED/omitted payloads', () => {
+    const base = {
+      cursor: 1,
+      id: 'op-1',
+      run_id: 'run-1',
+      kind: 'tool',
+      name: 'lookup',
+      state: 'SUCCEEDED',
+      started_at: '2026-11-28T00:00:00Z',
+      ended_at: '2026-11-28T00:00:01Z',
+      server: 'gov',
+      input: { q: 1 },
+      output: { ok: true },
+      error: null,
+      note: null,
+      initiator: 'model',
+      details: {},
+    };
+    expect(shouldAutoExpandExecutionDetails(base)).toBe(false);
+    expect(shouldAutoExpandExecutionDetails({ ...base, state: 'FAILED' })).toBe(true);
+    expect(shouldAutoExpandExecutionDetails({ ...base, state: 'UNKNOWN' })).toBe(true);
+    expect(shouldAutoExpandExecutionDetails({ ...base, state: 'REFUSED' })).toBe(true);
+    expect(shouldAutoExpandExecutionDetails({ ...base, output: { omitted: true, characters: 99999, head: 'abc' } })).toBe(true);
   });
 });
 

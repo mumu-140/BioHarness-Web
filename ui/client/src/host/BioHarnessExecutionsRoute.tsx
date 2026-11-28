@@ -11,6 +11,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Activity, ArrowLeft, Cpu, RefreshCw, Search } from 'lucide-react';
 import { Button, Spinner } from '@librechat/client';
 import type {
+  InvocationItem,
   InvocationsResponse,
   ModulesResponse,
   WorkspaceConversation,
@@ -39,6 +40,18 @@ function isOmittedPayload(value: unknown): value is { omitted: true; characters:
     value !== null &&
     (value as Record<string, unknown>).omitted === true &&
     typeof (value as Record<string, unknown>).characters === 'number'
+  );
+}
+
+/** Per AGENTS.md: collapse raw IDs/JSON by default, auto-expanding on failure, UNKNOWN, or partial/omitted payloads. */
+export function shouldAutoExpandExecutionDetails(item: InvocationItem): boolean {
+  return (
+    item.state === 'FAILED' ||
+    item.state === 'UNKNOWN' ||
+    item.state === 'REFUSED' ||
+    Boolean(item.error) ||
+    isOmittedPayload(item.input) ||
+    isOmittedPayload(item.output)
   );
 }
 
@@ -228,11 +241,6 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                         {selectedItem.state}
                       </span>
                     </div>
-                    <p className="text-text-tertiary mt-1 font-mono text-[11px]">
-                      op={selectedItem.id} · run={selectedItem.run_id}
-                      {selectedItem.server ? ` · server=${selectedItem.server}` : ''}
-                      {selectedItem.initiator ? ` · initiator=${selectedItem.initiator}` : ''}
-                    </p>
                   </div>
                   <div className="text-text-tertiary text-right font-mono text-[11px]">
                     <div>Started: {selectedItem.started_at}</div>
@@ -244,12 +252,29 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                   <p className="text-text-secondary text-xs">{selectedItem.note}</p>
                 )}
 
-                <PayloadBlock label="Input" value={selectedItem.input} />
-                <PayloadBlock label="Output" value={selectedItem.output} />
-                {selectedItem.error && <PayloadBlock label="Error" value={selectedItem.error} />}
-                {selectedItem.details && Object.keys(selectedItem.details).length > 0 && (
-                  <PayloadBlock label="Details" value={selectedItem.details} />
-                )}
+                <details
+                  key={selectedItem.id}
+                  data-testid="bh-exec-tech-details"
+                  open={shouldAutoExpandExecutionDetails(selectedItem)}
+                  className="border-border-light bg-surface-secondary/30 rounded-lg border p-3"
+                >
+                  <summary className="text-text-secondary cursor-pointer select-none text-xs font-medium">
+                    Technical details (raw operation IDs &amp; redacted JSON payloads)
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <p className="text-text-tertiary font-mono text-[11px]">
+                      op={selectedItem.id} · run={selectedItem.run_id}
+                      {selectedItem.server ? ` · server=${selectedItem.server}` : ''}
+                      {selectedItem.initiator ? ` · initiator=${selectedItem.initiator}` : ''}
+                    </p>
+                    <PayloadBlock label="Input" value={selectedItem.input} />
+                    <PayloadBlock label="Output" value={selectedItem.output} />
+                    {selectedItem.error && <PayloadBlock label="Error" value={selectedItem.error} />}
+                    {selectedItem.details && Object.keys(selectedItem.details).length > 0 && (
+                      <PayloadBlock label="Details" value={selectedItem.details} />
+                    )}
+                  </div>
+                </details>
               </div>
             </section>
           ) : (

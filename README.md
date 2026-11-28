@@ -24,7 +24,7 @@ BioHarness Research Workspace 为科研人员提供一个能够理解、组织�
 4. **Modules 保持独立。** Memory、文献、统计、评审和领域计算仍归 BioHarness-Modules；Web 负责呈现与调用公开能力；Modules 中原预留 Research Workspace 不再独立开发，唯一产品入口归本仓。
 5. **科研可视化优先。** 科研树、科研流程、证据溯源和执行轨迹是不同视图，不能混成一个泛化流程图。
 6. **V1 不构成兼容约束。** 原有只读 PostgreSQL 模型、页面、API 和部署方案均可按 V2 需要重构或删除。保留 Git 历史及明确归档的设计记录即可。
-7. **当前自研 UI 退役，替代设计已定稿。** 2026-11-27 确认对话、流程、证据分开的设计，后续再优化视觉；整站底座选定 LibreChat，按 `dsh-context` 的视图组织二开。所有复杂组件必须复用成熟实现，禁止自行编写交互引擎。设计及固定复用清单见[唯一路线 §17.4–17.5](docs/plans/2026-11-25-research-workspace-v2.md#174-upstream-based-ui-replacement-design-2026-11-27)。设计和选型已完成；§17.4 第一步（源码归档、依赖与许可证核验及 236/236 Python 基线回归）、第二步（`ui/` 独立前端底座与 C5 基线归档 `b57aaca`）、C1–C4 安全/SPA深链/禁用SW/验收脚本收口，以及第三步原生垂直接入与真实 Chromium 验收（`ui_run.sh` 33/33、`ui_step3_run.sh` 28/28、授权 live 模型 `auto/deepseek-v4.1-flash` Core 闭环 14/14、Python 238/238）已全部完成；现有 `frontend/` 代码和部署保持不变，第四至第五步（科研视图与证据传输、行为对等与替换）尚未完成。
+7. **旧自研 UI 已在源码树退役，替代前端完成 §17.4 第一至第五步源码验收。** 2026-11-27 冻结对话、流程、证据分离页面设计与 §17.5 成熟复用选型（LibreChat `v0.8.9` 底座 + `dsh-context` 视图组织 + `@rc-component/tree` / `@xyflow/react` / `@dagrejs/dagre` / AG Grid Community / 自托管 PDF.js `v6.5.438` / 自托管 Monaco）。§17.4 第 1–5 步与独立复核收口已在仓库源码中完成，`frontend/` 与旧 `tests/browser/{run.sh,check.cjs}` 已从工作树移除（保留于 Git 历史），新前端产物位于 `ui/client/dist`；详见[唯一路线 §17.4–17.5](docs/plans/2026-11-25-research-workspace-v2.md#174-upstream-based-ui-replacement-design-2026-11-27)。**线上私有部署替换尚未执行，需另行明确批准。**
 
 ## 项目职责
 
@@ -58,7 +58,7 @@ W3 提供已记录调用的分页查询、时间线、通用调用/Module 检查
 
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
-.venv/bin/python -m pytest          # 契约测试需要已安装 bioharness-host 与 bioharness-governance，否则跳过
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY .venv/bin/python -m pytest  # 避免代理拦截 loopback 模拟端点；契约测试需已安装公开 Core/Governance CLI
 cd ui && npm ci --ignore-scripts && npm run build && (cd client && npx tsc --noEmit -p tsconfig.json && npx jest --watchAll=false) && cd ..
 tests/browser/ui_run.sh <带 Node 与 Playwright Chromium 的容器镜像>         # 只读与安全边界检查
 tests/browser/ui_step3_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 原生对话/SSE/HITL/模型配置

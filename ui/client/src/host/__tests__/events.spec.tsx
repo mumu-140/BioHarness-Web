@@ -226,9 +226,43 @@ describe('useBioHarnessVersionStream (SSE version & source.stale)', () => {
 
     // source.stale triggers invalidation so last-confirmed stale banner can surface
     act(() => {
-      es.emit('source.stale', { workspace: 'ws-1', view: 'now', code: 'TOOL_FAILED' });
+      es.emit('source.stale', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        code: 'TOOL_FAILED',
+      });
     });
     expect(invalidateSpy).toHaveBeenCalledTimes(3);
+
+    // Recovery after source.stale MUST invalidate even when content_sha256 matches the pre-failure hash!
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-v2',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(4);
+
+    // Subsequent duplicate after recovery is deduplicated again
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-v2',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(4);
+
+    // Reconnect after SSE transport error triggers resync invalidation
+    act(() => {
+      es.onerror?.();
+      es.onopen?.();
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(5);
 
     unmount();
     invalidateSpy.mockRestore();

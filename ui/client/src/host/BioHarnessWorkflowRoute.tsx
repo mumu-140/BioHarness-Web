@@ -20,6 +20,7 @@ import {
   Maximize2,
   MessageSquarePlus,
   Minimize2,
+  RefreshCw,
 } from 'lucide-react';
 import { Button, Spinner, useMediaQuery } from '@librechat/client';
 import type { ContextData, NowData, Snapshot, WorkspaceConversation } from './bioharness';
@@ -253,20 +254,34 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
             <div
               role="alert"
               data-testid="bh-workflow-stale-banner"
-              className="flex items-start gap-2 rounded-xl border border-amber-400/70 bg-amber-50/90 px-3 py-2 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
+              className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-amber-400/70 bg-amber-50/90 px-3 py-2 text-xs text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <div>
-                <p className="font-semibold">
-                  Core refresh failed — showing last confirmed snapshot from{' '}
-                  <code>{effectiveSnapshot.observed_at}</code>.
-                </p>
-                <p className="opacity-85">
-                  {(nowQuery.error as Error)?.message ||
-                    nowQuery.data?.error?.message ||
-                    'Core snapshot temporarily unavailable (503).'}
-                </p>
+              <div className="flex min-w-0 items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="font-semibold">
+                    Core refresh failed — showing last confirmed snapshot from{' '}
+                    <code>{effectiveSnapshot.observed_at}</code>.
+                  </p>
+                  <p className="opacity-85">
+                    {(nowQuery.error as Error)?.message ||
+                      nowQuery.data?.error?.message ||
+                      'Core snapshot temporarily unavailable (503).'}
+                  </p>
+                </div>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="bh-workflow-stale-refresh-btn"
+                disabled={nowQuery.isFetching}
+                onClick={() => void nowQuery.refetch()}
+                className="shrink-0 gap-1 text-xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Refresh</span>
+              </Button>
             </div>
           )}
 

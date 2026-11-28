@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ConversationEvent } from './bioharness';
-import { bhKeys, conversationsPath } from './bioharness';
+import { bhKeys, conversationsPath, stableSelectorKey } from './bioharness';
 
 const EVENT_TYPES = [
   'user.message',
@@ -292,6 +292,28 @@ export function useBioHarnessVersionStream(
     const source = new EventSource(url);
 
     const seenVersionByKey = new Map<string, string>();
+    const staleKeys = new Set<string>();
+    let hadError = false;
+    const makeKey = (
+      view?: string,
+      selector?: Record<string, string | number | boolean | undefined>,
+    ) => (view ? `${view}::${stableSelectorKey(selector ?? {})}` : '');
+
+    source.onopen = () => {
+      if (closed || !hadError) {
+        return;
+      }
+      hadError = false;
+      seenVersionByKey.clear();
+      staleKeys.clear();
+      void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
+    };
+    source.onerror = () => {
+      if (!closed) {
+        hadError = true;
+      }
+    };
+
     const onVersion = (ev: MessageEvent) => {
       if (closed) {
         return;
@@ -306,18 +328,22 @@ export function useBioHarnessVersionStream(
         if (payload.workspace && payload.workspace !== workspace) {
           return;
         }
-        const key = JSON.stringify([payload.view ?? '', payload.selector ?? {}]);
-        if (typeof payload.content_sha256 === 'string') {
+        const key = makeKey(payload.view, payload.selector);
+        const wasStale = (key ? staleKeys.delete(key) : false) || staleKeys.delete('*');
+        if (typeof payload.content_sha256 === 'string' && key) {
           const prev = seenVersionByKey.get(key);
           seenVersionByKey.set(key, payload.content_sha256);
-          if (prev === payload.content_sha256) {
-            return;
-          }
-          if (payload.view) {
-            const cached = queryClient.getQueryData<{ content_sha256?: string }>(
-              bhKeys.view(service, workspace, payload.view, payload.selector),
-            );
-            if (cached?.content_sha256 === payload.content_sha256) {
+          const qState = payload.view
+            ? queryClient.getQueryState<{ content_sha256?: string }>(
+                bhKeys.view(service, workspace, payload.view, payload.selector),
+              )
+            : undefined;
+          const queryErrored = qState?.status === 'error';
+          if (!wasStale && !queryErrored) {
+            if (prev === payload.content_sha256) {
+              return;
+            }
+            if (qState?.status === 'success' && qState.data?.content_sha256 === payload.content_sha256) {
               return;
             }
           }
@@ -332,12 +358,25 @@ export function useBioHarnessVersionStream(
         return;
       }
       try {
-        const payload = JSON.parse(String(ev.data || '{}')) as { workspace?: string };
+        const payload = JSON.parse(String(ev.data || '{}')) as {
+          workspace?: string;
+          view?: string;
+          selector?: Record<string, string | number | boolean | undefined>;
+        };
         if (payload.workspace && payload.workspace !== workspace) {
           return;
         }
+        const key = makeKey(payload.view, payload.selector);
+        if (key) {
+          seenVersionByKey.delete(key);
+          staleKeys.add(key);
+        } else {
+          seenVersionByKey.clear();
+          staleKeys.add('*');
+        }
       } catch {
-        // ignore parse errors
+        seenVersionByKey.clear();
+        staleKeys.add('*');
       }
       void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
     };
