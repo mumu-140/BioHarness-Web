@@ -125,4 +125,12 @@ describe('settings registry', () => {
     expect(registry.filter((entry) => HOST_UNAVAILABLE_SETTING_IDS.has(entry.id))).toEqual([]);
     expect(TABS.filter((tab) => HOST_UNAVAILABLE_TABS.has(tab.id))).toEqual([]);
   });
+
+  it('registers BioHarness R3.3 Skills, Memory, Modules and Diagnostics tabs', () => {
+    const ids = new Set(registry.map((e) => e.id));
+    expect(ids.has('bioharness-skills')).toBe(true);
+    expect(ids.has('bioharness-memory')).toBe(true);
+    expect(ids.has('bioharness-modules')).toBe(true);
+    expect(ids.has('bioharness-diagnostics')).toBe(true);
+  });
 });

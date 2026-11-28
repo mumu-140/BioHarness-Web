@@ -248,6 +248,37 @@ class Ledger:
     def operations(self, run_id: str) -> list[dict]:
         return self._all("SELECT * FROM operations WHERE run_id = ? ORDER BY started_at, id", run_id)
 
+    def observed_module_usage(self, workspace: str) -> dict[str, Any]:
+        """Count actual observed tool/server invocations for this workspace from the technical ledger."""
+        tool_rows = self._all(
+            "SELECT o.name AS name, COUNT(*) AS cnt, MAX(o.started_at) AS last_at "
+            "FROM operations o JOIN runs r ON r.id = o.run_id JOIN conversations c ON c.id = r.conversation_id "
+            "WHERE c.workspace = ? AND o.kind = 'tool' GROUP BY o.name",
+            workspace,
+        )
+        tools = {row["name"]: int(row["cnt"]) for row in tool_rows}
+        event_rows = self._all(
+            "SELECT e.data AS data FROM events e JOIN conversations c ON c.id = e.conversation_id "
+            "WHERE c.workspace = ? AND e.type IN ('tool.started', 'module.tools') ORDER BY e.seq DESC LIMIT 500",
+            workspace,
+        )
+        servers: dict[str, int] = {}
+        for row in event_rows:
+            try:
+                data = json.loads(row["data"])
+            except ValueError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            srv = data.get("server")
+            if isinstance(srv, str) and srv and "name" in data:
+                servers[srv] = servers.get(srv, 0) + 1
+        return {
+            "servers": servers,
+            "tools": tools,
+            "total_tool_calls": sum(tools.values()),
+        }
+
     # ---- events ----------------------------------------------------------
     def invocation_page(self, conversation_id: str, before: int | None, limit: int) -> dict:
         """Newest operations first, with only their own observed start/end payloads.

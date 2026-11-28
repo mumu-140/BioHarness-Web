@@ -6,6 +6,7 @@ import React, { memo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
+  Database,
   CornerUpLeft,
   FileText,
   GitFork,
@@ -21,7 +22,7 @@ import { bhKeys, fetchConversations } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
 import { useBhText } from './i18n';
 
-export type BioHarnessPrimaryTab = 'conversation' | 'workflow' | 'evidence' | 'executions';
+export type BioHarnessPrimaryTab = 'conversation' | 'workflow' | 'evidence' | 'executions' | 'capabilities';
 
 export interface BioHarnessRequestHeaderProps {
   activeTab: BioHarnessPrimaryTab;
@@ -58,6 +59,7 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
     openWorkflowView,
     openEvidenceView,
     openExecutionsView,
+    openCapabilitiesView,
     openModelSettings,
   } = useBioHarnessWorkspace();
 
@@ -281,21 +283,38 @@ const BioHarnessRequestHeader = memo(function BioHarnessRequestHeader({
           </button>
         </div>
 
-        <button
-          type="button"
-          data-testid="bh-tab-executions"
-          aria-current={activeTab === 'executions' ? 'page' : undefined}
-          onClick={() => openExecutionsView({ requestId, conversationId })}
-          className={cn(
-            'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
-            activeTab === 'executions'
-              ? 'bg-surface-hover text-text-primary'
-              : 'text-text-tertiary hover:bg-surface-hover/60 hover:text-text-primary',
-          )}
-        >
-          <Activity className="h-3 w-3" aria-hidden="true" />
-          <span>{tr('执行记录', 'Execution records')}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            data-testid="bh-tab-capabilities"
+            aria-current={activeTab === 'capabilities' ? 'page' : undefined}
+            onClick={() => openCapabilitiesView({ requestId, conversationId })}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+              activeTab === 'capabilities'
+                ? 'bg-surface-hover text-text-primary'
+                : 'text-text-tertiary hover:bg-surface-hover/60 hover:text-text-primary',
+            )}
+          >
+            <Database className="h-3 w-3" aria-hidden="true" />
+            <span>{tr('记忆与能力', 'Memory & Capabilities')}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="bh-tab-executions"
+            aria-current={activeTab === 'executions' ? 'page' : undefined}
+            onClick={() => openExecutionsView({ requestId, conversationId })}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+              activeTab === 'executions'
+                ? 'bg-surface-hover text-text-primary'
+                : 'text-text-tertiary hover:bg-surface-hover/60 hover:text-text-primary',
+            )}
+          >
+            <Activity className="h-3 w-3" aria-hidden="true" />
+            <span>{tr('执行记录', 'Execution records')}</span>
+          </button>
+        </div>
       </nav>
     </header>
   );

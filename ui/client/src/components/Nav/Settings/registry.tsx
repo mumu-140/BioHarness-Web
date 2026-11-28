@@ -3,6 +3,12 @@ import type { SettingEntry } from './types';
 import { HOST_UNAVAILABLE_TABS } from './types';
 import BioHarnessModelsSettings from '~/host/BioHarnessModelsSettings';
 import {
+  BioHarnessSkillsSettings,
+  BioHarnessMemorySettings,
+  BioHarnessModulesSettings,
+  BioHarnessDiagnosticsSettings,
+} from '~/host/BioHarnessCapabilitiesSettings';
+import {
   unseenTabBadgeAtom,
   replyNotificationsAtom,
   replyNotificationSoundAtom,
@@ -908,6 +914,38 @@ const bioHarnessEntries: SettingEntry[] = [
     labelKey: 'com_bioharness_settings_models_section',
     keywords: ['model', 'provider', 'api', 'key', 'openai', 'anthropic', 'gemini'],
     Component: BioHarnessModelsSettings,
+  },
+  {
+    id: 'bioharness-skills',
+    tab: 'skills',
+    section: 'skills',
+    labelKey: 'com_bioharness_settings_skills_section',
+    keywords: ['skills', 'resources', 'skill.md', 'governance', 'documents'],
+    Component: BioHarnessSkillsSettings,
+  },
+  {
+    id: 'bioharness-memory',
+    tab: 'bhMemory',
+    section: 'bhMemory',
+    labelKey: 'com_bioharness_settings_memory_section',
+    keywords: ['memory', 'recall', 'curator', 't1', 't2', 't3', 'mcp'],
+    Component: BioHarnessMemorySettings,
+  },
+  {
+    id: 'bioharness-modules',
+    tab: 'modules',
+    section: 'modules',
+    labelKey: 'com_bioharness_settings_modules_section',
+    keywords: ['modules', 'mcp', 'cli', 'literature', 'statistics', 'compute'],
+    Component: BioHarnessModulesSettings,
+  },
+  {
+    id: 'bioharness-diagnostics',
+    tab: 'diagnostics',
+    section: 'diagnostics',
+    labelKey: 'com_bioharness_settings_diagnostics_section',
+    keywords: ['diagnostics', 'security', 'posture', 'export', 'json', 'doctor'],
+    Component: BioHarnessDiagnosticsSettings,
   },
 ];
 

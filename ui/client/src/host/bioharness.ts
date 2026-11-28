@@ -584,6 +584,26 @@ export const bhKeys = {
       offset,
       limit,
     ] as const,
+  capabilities: (
+    service: string,
+    workspace: string,
+    scopeId?: string | null,
+    requestId?: string | null,
+    probeMcp?: boolean,
+  ) =>
+    [
+      'bh',
+      service,
+      workspace,
+      'capabilities',
+      scopeId ?? 'none',
+      requestId ?? 'none',
+      Boolean(probeMcp),
+    ] as const,
+  diagnostics: (service: string, workspace: string) =>
+    ['bh', service, workspace, 'diagnostics'] as const,
+  memoryStatus: (service: string, workspace: string) =>
+    ['bh', service, workspace, 'memory-status'] as const,
 };
 
 export function stableSelectorKey(selector: Record<string, string | number | boolean | undefined>): string {
@@ -1342,4 +1362,393 @@ export function classifyEvidenceFormat(
     return 'code';
   }
   return 'unsupported';
+}
+
+
+/* ===================== R3.3 Capabilities, Memory & Diagnostics ===================== */
+
+export type MemoryRecallMode = 'FAST' | 'STANDARD' | 'DEEP';
+export type MemoryExpandDetail = 'T1' | 'T2' | 'T3';
+export type MemoryUseStage = 'selected' | 'consumed' | 'outcome_reported';
+
+export interface MemoryStatusCapabilities {
+  recall_modes: {
+    FAST: boolean;
+    STANDARD: boolean;
+    DEEP: boolean;
+  };
+  deep_unavailable_reason?: string;
+  curator_interactive_publish: boolean;
+  curator_tools?: string[];
+  curator_gap_note?: string | null;
+}
+
+export interface MemoryStatusMetrics {
+  schema_version?: string;
+  scope_ref?: string;
+  active_memory_count?: number;
+  theme_count?: number;
+  pending_candidate_count?: number;
+  backend?: string;
+  [key: string]: unknown;
+}
+
+export interface MemoryDiagnoseMetrics {
+  scope_ref?: string;
+  active_count?: number;
+  theme_count?: number;
+  stale_theme_count?: number;
+  orphan_memory_count?: number;
+  themes_with_one_member?: number;
+  source_current_count?: number;
+  source_issue_count?: number;
+  source_issues?: unknown[];
+  exact_duplicate_group_count?: number;
+  shared_source_group_count?: number;
+  context_trigger_keys?: string[];
+  use_feedback?: {
+    events?: number;
+    consumed?: number;
+    reported_failures?: number;
+    without_reported_use?: number;
+  };
+  pending_candidates?: {
+    state?: string;
+    count?: number;
+  };
+  [key: string]: unknown;
+}
+
+export interface MemoryOverviewResponse {
+  configured: boolean;
+  callable: boolean;
+  server: string | null;
+  checked_at: string;
+  tools: string[];
+  status: MemoryStatusMetrics | null;
+  diagnose: MemoryDiagnoseMetrics | null;
+  capabilities: MemoryStatusCapabilities;
+  error: { code: string; message: string } | null;
+}
+
+export interface MemoryConditionHint {
+  key: string;
+  expected_value?: string;
+  state: string;
+  instruction?: string;
+}
+
+export interface MemoryRecallCandidate {
+  memory_ref: string;
+  under?: string;
+  applicability: 'APPLICABLE' | 'NEEDS_REVIEW' | 'INAPPLICABLE' | string;
+  missing_conditions?: string[];
+  conflicting_conditions?: string[];
+  condition_hints?: MemoryConditionHint[];
+  source_status?: string;
+  verification_status?: string;
+}
+
+export interface MemoryRecallTheme {
+  t1_ref: string;
+  title: string;
+  scope: string;
+  member_count: number;
+  shown_members?: number;
+  stale: boolean;
+}
+
+export interface MemoryRecallResponse {
+  server: string;
+  mode: MemoryRecallMode;
+  result: {
+    scope_ref?: string;
+    backend?: string;
+    included_refs?: string[];
+    context_text?: string;
+    warnings?: string[];
+    themes?: MemoryRecallTheme[];
+    candidates?: MemoryRecallCandidate[];
+    relations?: Array<{ relation_id?: string; kind?: string }>;
+    scientific_validation?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface MemoryExpandT3Source {
+  source_ref: string;
+  source_revision: string;
+  record_sha256: string;
+  relative_path: string;
+  line: number;
+  text: string | null;
+}
+
+export interface MemoryExpandResponse {
+  server: string;
+  detail: MemoryExpandDetail;
+  result: {
+    t1_ref?: string;
+    title?: string;
+    scope?: string;
+    cues?: string[];
+    summary?: string;
+    stale?: boolean;
+    members?: Array<{
+      memory_ref: string;
+      applicability: string;
+      source_status?: string;
+      gist?: string;
+      expected_conditions?: Record<string, string>;
+    }>;
+    memory_ref?: string;
+    detail?: string;
+    verification_status?: string;
+    source_status?: string;
+    conditions_to_confirm?: string[];
+    content?: unknown;
+    sources?: MemoryExpandT3Source[];
+    [key: string]: unknown;
+  };
+}
+
+export interface CapabilityResourceItem {
+  id: string;
+  kind?: string;
+  title?: string;
+  how_to_use?: string;
+  declared: boolean;
+  installed: boolean;
+  callable: boolean | null;
+  actually_used: boolean;
+  use_count: number;
+}
+
+export interface CapabilitySkillItem {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  truncated?: boolean;
+  declared: boolean;
+  installed: boolean;
+  callable: boolean;
+  actually_used: boolean;
+  use_count: number;
+}
+
+export interface CapabilityMcpServerItem {
+  server: string;
+  command: string;
+  declared: boolean;
+  installed: boolean;
+  callable: boolean | null;
+  tools: Array<{ name: string; description?: string }>;
+  error: { code: string; message: string } | null;
+  actually_used?: boolean;
+  use_count?: number;
+}
+
+export interface CapabilityCliModuleItem {
+  id: string;
+  command: string;
+  description: string;
+  declared: boolean;
+  installed: boolean;
+  callable: boolean;
+  actually_used: boolean;
+  use_count: number;
+}
+
+export interface GovernanceLoadedDoc {
+  path?: string;
+  source?: string;
+  size_bytes?: number;
+  sha256?: string;
+  truncated?: boolean;
+  preview?: string;
+  [key: string]: unknown;
+}
+
+export interface CapabilitiesResponse {
+  service: string;
+  workspace: string;
+  observed_at: string;
+  core_state_present: boolean;
+  doctor: {
+    status?: string;
+    checks?: Array<{ check?: string; status?: string; detail?: string }>;
+    [key: string]: unknown;
+  } | null;
+  doctor_error: string | null;
+  resources: CapabilityResourceItem[];
+  skills: CapabilitySkillItem[];
+  mcp_servers: CapabilityMcpServerItem[];
+  cli_modules: CapabilityCliModuleItem[];
+  documents: {
+    scope_id: string | null;
+    candidates: string[];
+    selected: Record<string, string>;
+    loaded: Record<string, GovernanceLoadedDoc>;
+    error: string | null;
+  };
+  observed_usage: {
+    servers: Record<string, number>;
+    tools: Record<string, number>;
+    total_tool_calls: number;
+  };
+  compute: {
+    remote_compute_enabled: boolean;
+    phase: string;
+    note: string;
+  };
+}
+
+export interface DiagnosticsResponse {
+  service: string;
+  workspace: string;
+  exported_at: string;
+  security_posture: {
+    auth_mode: string;
+    token_length_ok: boolean;
+    upload_root_configured: boolean;
+    symlink_containment_enforced: boolean;
+    provider_keys_server_side_only: boolean;
+    arbitrary_shell_blocked: boolean;
+    remote_compute_enabled: boolean;
+  };
+  runtime: {
+    enabled: boolean;
+    model_configured: string | null;
+    mcp_servers: CapabilityMcpServerItem[];
+  };
+  core_doctor: CapabilitiesResponse['doctor'];
+  core_doctor_error: string | null;
+  memory: {
+    configured: boolean;
+    callable: boolean;
+    server: string | null;
+    tools: string[];
+    status: MemoryStatusMetrics | null;
+    diagnose: MemoryDiagnoseMetrics | null;
+    capabilities: MemoryStatusCapabilities;
+    error: { code: string; message: string } | null;
+  };
+  modules: {
+    skills_count: number;
+    resources_count: number;
+    cli_modules: CapabilityCliModuleItem[];
+  };
+  usage: {
+    servers: Record<string, number>;
+    tools: Record<string, number>;
+    total_tool_calls: number;
+  };
+}
+
+export async function fetchCapabilities(
+  workspace: string,
+  opts?: {
+    scopeId?: string | null;
+    requestId?: string | null;
+    probeMcp?: boolean;
+    documents?: Partial<Record<'contract' | 'guide' | 'status' | 'findings_index', string>>;
+  },
+): Promise<CapabilitiesResponse> {
+  const qs = new URLSearchParams();
+  if (opts?.scopeId) qs.set('scope_id', opts.scopeId);
+  if (opts?.requestId) qs.set('request_id', opts.requestId);
+  if (opts?.probeMcp) qs.set('probe_mcp', 'true');
+  if (opts?.documents?.contract) qs.set('doc_contract', opts.documents.contract);
+  if (opts?.documents?.guide) qs.set('doc_guide', opts.documents.guide);
+  if (opts?.documents?.status) qs.set('doc_status', opts.documents.status);
+  if (opts?.documents?.findings_index) qs.set('doc_findings_index', opts.documents.findings_index);
+  const query = qs.toString();
+  const res = await hostFetch(
+    `/api/workspaces/${encodeURIComponent(workspace)}/capabilities${query ? `?${query}` : ''}`,
+  );
+  return parseJsonOrError<CapabilitiesResponse>(res);
+}
+
+export async function fetchDiagnostics(workspace: string): Promise<DiagnosticsResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/diagnostics`);
+  return parseJsonOrError<DiagnosticsResponse>(res);
+}
+
+export async function fetchMemoryStatus(workspace: string): Promise<MemoryOverviewResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/memory/status`);
+  return parseJsonOrError<MemoryOverviewResponse>(res);
+}
+
+export async function recallMemory(
+  workspace: string,
+  body: {
+    query: string;
+    task_conditions?: Record<string, string>;
+    mode: MemoryRecallMode;
+    limit?: number;
+  },
+): Promise<MemoryRecallResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/memory/recall`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJsonOrError<MemoryRecallResponse>(res);
+}
+
+export async function expandMemory(
+  workspace: string,
+  body: {
+    memory_ref: string;
+    task_conditions?: Record<string, string>;
+    detail: MemoryExpandDetail;
+  },
+): Promise<MemoryExpandResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/memory/expand`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJsonOrError<MemoryExpandResponse>(res);
+}
+
+export async function reportMemoryUse(
+  workspace: string,
+  body: {
+    event_id: string;
+    memory_ref: string;
+    task_ref: string;
+    stage: MemoryUseStage;
+    outcome?: string;
+  },
+): Promise<{ server: string; result: Record<string, unknown> }> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/memory/report-use`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJsonOrError(res);
+}
+
+export async function proposeMemory(
+  workspace: string,
+  body: {
+    kind: 'candidate' | 'scientific';
+    event_id: string;
+    summary?: string;
+    evidence_locator?: string;
+    memory_id?: string;
+    t1_core?: string;
+    t2_detail?: Record<string, unknown>;
+    required_conditions?: Record<string, string>;
+    evidence?: Array<Record<string, unknown>>;
+  },
+): Promise<{ server: string; tool: string; result: Record<string, unknown> }> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/memory/propose`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJsonOrError(res);
 }

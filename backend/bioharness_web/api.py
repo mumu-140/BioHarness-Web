@@ -5,14 +5,14 @@ import asyncio
 import os
 import shutil
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import evidence, inputs
+from . import capabilities, evidence, inputs
 from .cli import ToolError
 from .model_config import ModelConfigStore
 from .runtime import Runtime, RuntimeRefusal, run_strategies
@@ -80,6 +80,43 @@ class NewRun(BaseModel):
 class Attach(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(max_length=200)
+
+
+class MemoryRecallBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=2000)
+    task_conditions: dict[str, str] | None = None
+    mode: Literal["FAST", "STANDARD", "DEEP"] = "FAST"
+    limit: int = Field(default=10, ge=1, le=32)
+
+
+class MemoryExpandBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    memory_ref: str = Field(min_length=1, max_length=200)
+    task_conditions: dict[str, str] | None = None
+    detail: Literal["T1", "T2", "T3"] = "T2"
+
+
+class MemoryReportUseBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(min_length=1, max_length=128)
+    memory_ref: str = Field(min_length=1, max_length=128)
+    task_ref: str = Field(min_length=1, max_length=128)
+    stage: Literal["selected", "consumed", "outcome_reported"]
+    outcome: Literal["reported_success", "reported_failure", "reported_unknown"] | None = None
+
+
+class MemoryProposeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["candidate", "scientific"] = "candidate"
+    event_id: str = Field(min_length=1, max_length=128)
+    summary: str | None = Field(default=None, max_length=1500)
+    evidence_locator: str = Field(default="", max_length=240)
+    memory_id: str | None = Field(default=None, max_length=128)
+    t1_core: str | None = Field(default=None, max_length=600)
+    t2_detail: dict[str, Any] | None = None
+    required_conditions: dict[str, str] | None = None
+    evidence: list[dict[str, Any]] | None = None
 
 
 def _public(conversation: dict) -> dict:
@@ -313,6 +350,195 @@ def create_router(
         except UnknownWorkspace as error:
             raise _http_error(error) from None
         return inputs.list_workspace_inputs(workspace, max_upload_bytes=settings.max_upload_bytes)
+
+    @router.get("/workspaces/{workspace_id}/capabilities")
+    async def workspace_capabilities(
+        workspace_id: str,
+        scope_id: str | None = None,
+        request_id: str | None = None,
+        probe_mcp: bool = False,
+        doc_contract: str | None = None,
+        doc_guide: str | None = None,
+        doc_status: str | None = None,
+        doc_findings_index: str | None = None,
+    ):
+        try:
+            sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        selected_docs = {
+            k: v
+            for k, v in (
+                ("contract", doc_contract),
+                ("guide", doc_guide),
+                ("status", doc_status),
+                ("findings_index", doc_findings_index),
+            )
+            if v
+        } or None
+        return await capabilities.build_capabilities_snapshot(
+            settings=settings,
+            sources=sources,
+            runner=sources.runner,
+            ledger=runtime.ledger if runtime is not None else None,
+            workspace_id=workspace_id,
+            scope_id=scope_id,
+            request_id=request_id,
+            probe_mcp=probe_mcp,
+            documents=selected_docs,
+        )
+
+    @router.get("/workspaces/{workspace_id}/diagnostics")
+    async def workspace_diagnostics(workspace_id: str):
+        try:
+            sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        return await capabilities.build_diagnostics_report(
+            settings=settings,
+            sources=sources,
+            runner=sources.runner,
+            ledger=runtime.ledger if runtime is not None else None,
+            workspace_id=workspace_id,
+        )
+
+    @router.get("/workspaces/{workspace_id}/memory/status")
+    async def memory_status(workspace_id: str):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        return await capabilities.fetch_memory_overview(settings, ws)
+
+    @router.post("/workspaces/{workspace_id}/memory/recall")
+    async def memory_recall(workspace_id: str, body: MemoryRecallBody):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        if body.mode == "DEEP":
+            raise HTTPException(
+                501,
+                {
+                    "origin": "bioharness-module-memory",
+                    "code": "RECALL_MODE_NOT_IMPLEMENTED",
+                    "message": capabilities._DEEP_UNAVAILABLE_NOTE,
+                },
+            )
+        try:
+            server, payload, _ = await capabilities.call_memory_tool(
+                settings,
+                ws,
+                "memory_recall",
+                {
+                    "query": body.query,
+                    "task_conditions": body.task_conditions or {},
+                    "mode": body.mode,
+                    "limit": body.limit,
+                },
+            )
+            return {"server": server, "mode": body.mode, "result": payload}
+        except capabilities.CapabilityError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-memory", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/memory/expand")
+    async def memory_expand(workspace_id: str, body: MemoryExpandBody):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        try:
+            server, payload, _ = await capabilities.call_memory_tool(
+                settings,
+                ws,
+                "memory_expand",
+                {
+                    "memory_ref": body.memory_ref,
+                    "task_conditions": body.task_conditions or {},
+                    "detail": body.detail,
+                },
+            )
+            return {"server": server, "detail": body.detail, "result": payload}
+        except capabilities.CapabilityError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-memory", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/memory/report-use")
+    async def memory_report_use(workspace_id: str, body: MemoryReportUseBody):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        args: dict[str, object] = {
+            "event_id": body.event_id,
+            "memory_ref": body.memory_ref,
+            "task_ref": body.task_ref,
+            "stage": body.stage,
+        }
+        if body.outcome is not None:
+            args["outcome"] = body.outcome
+        try:
+            server, payload, _ = await capabilities.call_memory_tool(
+                settings, ws, "memory_report_use", args
+            )
+            return {"server": server, "result": payload}
+        except capabilities.CapabilityError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-memory", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/memory/propose")
+    async def memory_propose(workspace_id: str, body: MemoryProposeBody):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        if body.kind == "scientific":
+            if not (body.memory_id and body.t1_core and body.t2_detail and body.evidence):
+                raise HTTPException(
+                    422,
+                    {"origin": "web", "code": "MEMORY_PROPOSAL_INCOMPLETE",
+                     "message": "科学经验候选需提供 memory_id、t1_core、t2_detail 与 evidence 来源锚点。"},
+                )
+            tool_name = "memory_propose_scientific"
+            args = {
+                "event_id": body.event_id,
+                "agent_ref": "bioharness-web-user",
+                "session_ref": f"ws:{workspace_id}",
+                "memory_id": body.memory_id,
+                "t1_core": body.t1_core,
+                "t2_detail": body.t2_detail,
+                "required_conditions": body.required_conditions or {},
+                "evidence": body.evidence,
+            }
+        else:
+            if not (body.summary and body.summary.strip()):
+                raise HTTPException(
+                    422,
+                    {"origin": "web", "code": "MEMORY_SUMMARY_REQUIRED", "message": "请填写候选经验摘要。"},
+                )
+            tool_name = "memory_capture_candidate"
+            args = {
+                "event_id": body.event_id,
+                "agent_ref": "bioharness-web-user",
+                "session_ref": f"ws:{workspace_id}",
+                "summary": body.summary.strip(),
+                "evidence_locator": body.evidence_locator,
+            }
+        try:
+            server, payload, _ = await capabilities.call_memory_tool(settings, ws, tool_name, args)
+            return {"server": server, "tool": tool_name, "result": payload}
+        except capabilities.CapabilityError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-memory", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
 
     @router.post("/workspaces/{workspace_id}/inputs", status_code=201)
     async def upload_input(workspace_id: str, request: Request):

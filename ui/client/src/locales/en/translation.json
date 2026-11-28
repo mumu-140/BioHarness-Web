@@ -4072,5 +4072,13 @@
   "com_ui_slack_apps_interactions": "Interactivity URL",
   "com_ui_slack_apps_empty": "No Slack apps yet. Create an app in Slack, then add its credentials here to connect agents to your workspace.",
   "com_bioharness_settings_models": "Models",
-  "com_bioharness_settings_models_section": "Model providers & slots"
+  "com_bioharness_settings_models_section": "Model providers & slots",
+  "com_bioharness_settings_skills": "Skills & Resources",
+  "com_bioharness_settings_skills_section": "Four-state Skills, Core Resources & Governance Docs",
+  "com_bioharness_settings_memory": "Research Memory",
+  "com_bioharness_settings_memory_section": "BioHarness Memory Status & Boundaries",
+  "com_bioharness_settings_modules": "Scientific Modules",
+  "com_bioharness_settings_modules_section": "Configured MCP Servers, CLI Modules & Compute Scope",
+  "com_bioharness_settings_diagnostics": "Diagnostics & Security",
+  "com_bioharness_settings_diagnostics_section": "Redacted Diagnostics Export & Passive Security Posture"
 }

@@ -42,6 +42,14 @@ const APPROVED_API: Array<{ method: string; path: RegExp }> = [
   /* R3.2: Restricted research-input upload & authorized workspace file listing */
   { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/inputs$/ },
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/inputs$/ },
+  /* R3.3: Capabilities, redacted diagnostics, and BioHarness Memory MCP thin BFF */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/capabilities$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/diagnostics$/ },
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/memory\/status$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/recall$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/expand$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/report-use$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/propose$/ },
 ];
 
 export const NOT_PROVIDED = 'NOT_PROVIDED_BY_HOST';

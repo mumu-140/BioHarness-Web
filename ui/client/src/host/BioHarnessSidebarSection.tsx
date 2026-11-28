@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Cpu,
+  Database,
   FolderGit2,
   FolderTree,
   MessageSquare,
@@ -194,6 +195,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     openConversation,
     openNewResearch,
     openWorkflowView,
+    openCapabilitiesView,
     openModelSettings,
   } = useBioHarnessWorkspace();
 
@@ -370,7 +372,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
         )}
       </div>
 
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         <Button
           type="button"
           variant="outline"
@@ -402,6 +404,20 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
             <span>{tr('新建项目', 'New project')}</span>
           </Button>
         )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-testid="bh-sidebar-capabilities-btn"
+          className="text-text-secondary hover:text-text-primary min-h-[32px] w-full justify-start gap-1.5 px-2 text-xs"
+          onClick={() => {
+            openCapabilitiesView();
+            closeDrawerIfMobile();
+          }}
+        >
+          <Database className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{tr('记忆 · 能力 · 项目文档', 'Memory & Capabilities')}</span>
+        </Button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5">

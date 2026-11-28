@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import { MessageSquare, Info, SlidersHorizontal } from 'lucide-react';
+import { Boxes, Brain, MessageSquare, Info, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react';
 import { SettingsTabValues } from 'librechat-data-provider';
 import { GearIcon, DataIcon, UserIcon, SpeechIcon } from '@librechat/client';
 import type { ComponentType, ReactNode } from 'react';
@@ -13,7 +13,11 @@ export type SettingsTab =
   | SettingsTabValues.DATA
   | SettingsTabValues.ACCOUNT
   | SettingsTabValues.ABOUT
-  | 'models';
+  | 'models'
+  | 'skills'
+  | 'bhMemory'
+  | 'modules'
+  | 'diagnostics';
 
 export type SectionId =
   | 'appearance'
@@ -39,7 +43,11 @@ export type SectionId =
   | 'connections'
   | 'billing'
   | 'about'
-  | 'models';
+  | 'models'
+  | 'skills'
+  | 'bhMemory'
+  | 'modules'
+  | 'diagnostics';
 
 export interface SettingsContextValue {
   balanceEnabled: boolean;
@@ -121,6 +129,30 @@ const ALL_TABS: TabMeta[] = [
     labelKey: 'com_bioharness_settings_models',
     icon: createElement(SlidersHorizontal, { className: 'icon-sm', 'aria-hidden': true }),
     sections: [{ id: 'models', labelKey: 'com_bioharness_settings_models_section' }],
+  },
+  {
+    id: 'skills',
+    labelKey: 'com_bioharness_settings_skills',
+    icon: createElement(Wrench, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'skills', labelKey: 'com_bioharness_settings_skills_section' }],
+  },
+  {
+    id: 'bhMemory',
+    labelKey: 'com_bioharness_settings_memory',
+    icon: createElement(Brain, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'bhMemory', labelKey: 'com_bioharness_settings_memory_section' }],
+  },
+  {
+    id: 'modules',
+    labelKey: 'com_bioharness_settings_modules',
+    icon: createElement(Boxes, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'modules', labelKey: 'com_bioharness_settings_modules_section' }],
+  },
+  {
+    id: 'diagnostics',
+    labelKey: 'com_bioharness_settings_diagnostics',
+    icon: createElement(ShieldCheck, { className: 'icon-sm', 'aria-hidden': true }),
+    sections: [{ id: 'diagnostics', labelKey: 'com_bioharness_settings_diagnostics_section' }],
   },
   {
     id: SettingsTabValues.GENERAL,

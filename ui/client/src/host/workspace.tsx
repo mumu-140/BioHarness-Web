@@ -50,11 +50,18 @@ export interface BioHarnessWorkspaceContextValue {
   openWorkflowView: (opts?: { requestId?: string | null; conversationId?: string | null; stepId?: string | null; scopeId?: string | null }) => void;
   openEvidenceView: (opts?: { requestId?: string | null; conversationId?: string | null; anchor?: EvidenceAnchor | null; scopeId?: string | null }) => void;
   openExecutionsView: (opts?: { requestId?: string | null; conversationId?: string | null; scopeId?: string | null }) => void;
+  openCapabilitiesView: (opts?: {
+    requestId?: string | null;
+    conversationId?: string | null;
+    scopeId?: string | null;
+    tab?: 'memory' | 'capabilities' | 'documents';
+  }) => void;
   stageTextInConversation: (opts: { conversationId: string | null; requestId: string | null; snippet: string }) => void;
   getDraft: (conversationKey: string) => string;
   setDraft: (conversationKey: string, text: string) => void;
   clearDraft: (conversationKey: string) => void;
   openModelSettings: () => void;
+  openCapabilitiesSettings: (tab?: 'skills' | 'bhMemory' | 'modules' | 'diagnostics') => void;
 }
 
 const BioHarnessWorkspaceContext = createContext<BioHarnessWorkspaceContextValue | null>(null);
@@ -365,10 +372,49 @@ ${snippet}` : snippet;
     [getDraft, setDraft, openConversation, openNewResearch],
   );
 
+  const openCapabilitiesView = useCallback(
+    (opts?: {
+      requestId?: string | null;
+      conversationId?: string | null;
+      scopeId?: string | null;
+      tab?: 'memory' | 'capabilities' | 'documents';
+    }) => {
+      const next = new URLSearchParams();
+      if (workspace) {
+        next.set('ws', workspace);
+      }
+      const req = opts?.requestId !== undefined ? opts.requestId : selectedRequestId;
+      if (req) {
+        next.set('req', req);
+      }
+      const convo = opts?.conversationId !== undefined ? opts.conversationId : linkedConversationId;
+      if (convo) {
+        next.set('convo', convo);
+      }
+      const sc = opts?.scopeId !== undefined ? opts.scopeId : selectedScopeId;
+      if (sc) {
+        next.set('scope', sc);
+      }
+      if (opts?.tab) {
+        next.set('tab', opts.tab);
+      }
+      navigate(`/w/capabilities?${next.toString()}`);
+    },
+    [workspace, selectedRequestId, linkedConversationId, selectedScopeId, navigate],
+  );
+
   const openModelSettings = useCallback(() => {
     setRequestedTab('models');
     onOpenSettings();
   }, [setRequestedTab, onOpenSettings]);
+
+  const openCapabilitiesSettings = useCallback(
+    (tab: 'skills' | 'bhMemory' | 'modules' | 'diagnostics' = 'bhMemory') => {
+      setRequestedTab(tab);
+      onOpenSettings();
+    },
+    [setRequestedTab, onOpenSettings],
+  );
 
   const value = useMemo<BioHarnessWorkspaceContextValue>(
     () => ({
@@ -392,11 +438,13 @@ ${snippet}` : snippet;
       openWorkflowView,
       openEvidenceView,
       openExecutionsView,
+      openCapabilitiesView,
       stageTextInConversation,
       getDraft,
       setDraft,
       clearDraft,
       openModelSettings,
+      openCapabilitiesSettings,
     }),
     [
       meta,
@@ -417,11 +465,13 @@ ${snippet}` : snippet;
       openWorkflowView,
       openEvidenceView,
       openExecutionsView,
+      openCapabilitiesView,
       stageTextInConversation,
       getDraft,
       setDraft,
       clearDraft,
       openModelSettings,
+      openCapabilitiesSettings,
     ],
   );
 

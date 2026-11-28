@@ -17,6 +17,7 @@ import Root from './Root';
 const BioHarnessWorkflowRoute = lazy(() => import('~/host/BioHarnessWorkflowRoute'));
 const BioHarnessEvidenceRoute = lazy(() => import('~/host/BioHarnessEvidenceRoute'));
 const BioHarnessExecutionsRoute = lazy(() => import('~/host/BioHarnessExecutionsRoute'));
+const BioHarnessCapabilitiesRoute = lazy(() => import('~/host/BioHarnessCapabilitiesRoute'));
 
 const RouteSuspense = ({ children }: { children: React.ReactNode }) => (
   <Suspense
@@ -80,6 +81,14 @@ export const router = createBrowserRouter(
                   element: (
                     <RouteSuspense>
                       <BioHarnessExecutionsRoute />
+                    </RouteSuspense>
+                  ),
+                },
+                {
+                  path: 'w/capabilities',
+                  element: (
+                    <RouteSuspense>
+                      <BioHarnessCapabilitiesRoute />
                     </RouteSuspense>
                   ),
                 },

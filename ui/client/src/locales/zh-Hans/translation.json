@@ -1449,5 +1449,13 @@
   "com_user_message": "您",
   "com_ui_feedback_tag_other_issue": "其他问题",
   "com_bioharness_settings_models": "模型配置",
-  "com_bioharness_settings_models_section": "模型服务商与槽位"
+  "com_bioharness_settings_models_section": "模型服务商与槽位",
+  "com_bioharness_settings_skills": "技能与资源",
+  "com_bioharness_settings_skills_section": "Skills / Core 资源四态状态与文档入口",
+  "com_bioharness_settings_memory": "科研记忆",
+  "com_bioharness_settings_memory_section": "科研记忆状态与能力边界说明",
+  "com_bioharness_settings_modules": "专业模块",
+  "com_bioharness_settings_modules_section": "MCP 工具服务、科研 CLI 模块与算力范围",
+  "com_bioharness_settings_diagnostics": "诊断与安全",
+  "com_bioharness_settings_diagnostics_section": "脱敏诊断 JSON 导出与被动安全姿态声明"
 }

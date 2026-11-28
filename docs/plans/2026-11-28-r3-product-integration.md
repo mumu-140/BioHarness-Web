@@ -76,13 +76,17 @@
   - 前端检查：`tsc --noEmit` 0 错误；Jest `6 suites / 35 tests passed`（含 `r3_2.spec.tsx` 与 `registry.spec.ts`）；Vite 生产构建通过。
   - 真实 Chromium 验收（`firecrawl-playwright-service:latest` + 真实 `bioharness-host`/`bioharness-governance` CLI）：`ui_r3_2_run.sh` **17/17 PASS**（简体中文下单步创建根项目 `PPGR`、上传 CSV/FASTA/PDF 与 409 防覆盖拒绝、切换 `model-deep` + `concise`、创建子项目 `transcriptome`、Workflow/Evidence 一致定位、只读区诚实禁用上传、390/320px 零溢出）；回归 `ui_run.sh` **33/33**、`ui_step3_run.sh` **28/28**、`ui_step4_run.sh` **27/27**、`ui_step5_run.sh` **30/30**。
 
-### R3.3 — Memory、Skills、Resources、Documents（UX-05）
+### R3.3 — Memory、Skills、Resources、Documents（UX-05）（已完成 Web 能力接入，外部接口缺口如实保留，2026-11-28）
 
-- [ ] **记忆入口及检索：** 连接 Memory 的公开查询接口，提供真实检索、T1 主题/T2 具体经验/T3 原始来源的展开；信息层与 FAST/STANDARD/DEEP 检索层独立。显示实际检索后端、返回范围、适用条件、冲突/反例、来源和版本。不复制 Memory 记录，不把候选/召回冒充实际消费。DEEP/TaskMemoryGraph 仅在公开且可用时呈现真实返回；未暴露能力标记不可用。
-- [ ] **Curator 与来源核验：** 复用 Memory 自有 CuratorProposal/Decision、inspect/publish、source_registration、来源 SHA-256 与修订 CAS 语义，实际调用以 R3.1 核实的公开接口为准。提供候选查看、来源核验、差异、审核反馈和明确发布动作；不得绕过受控来源登记的 Memory operator 边界，不在 Web 重做 curation。发现未暴露的必要公开接口由 Memory 所有者处理，需单独批准的改动不阻断其他 Web 工作。
-- [ ] **Skills/Resources/Documents：** 在已有产品导航/设置中增加可发现的科研能力与记忆入口，组织 Core resources（memory/knowledge/data/workflow/compute/service）、实际 workspace Skills、Governance 项目文档及 Literature 输出。展示 Declared / Installed / Callable / Actually Used 的有据状态，直接阅读已有公开资料和执行宿主观察到的实际调用。复用现有 Composer 触发/附件入口及公共调用，不另造资源 Registry 或 Skill runtime。
-- [ ] **设置与诊断：** 复用现有设置框架，按 General/Models/Skills/Memory/Modules 与 Compute/Diagnostics 的已支持能力组织；不存在的 R4 远程计算能力不提前实现。明确只读/配置锁、失败原因、上次确认时间；诊断仅限必要脱敏信息。
-- [ ] 通过真实模块隔离验收：召回 → 候选形成 → T3 核验 → 经授权 Curator 发布 → 再召回；核对条件、冲突、来源、实际消费反馈。验证 Skills/Resources 的四种状态和作用域；完整链路存在接口缺口时不得伪报通过。
+- [x] **记忆入口及检索：** 新增 `backend/bioharness_web/capabilities.py` 与 `/api/workspaces/{ws}/memory/{status,recall,expand,report-use,propose}` 薄 BFF，前端新增 `/w/capabilities` 工作台（`ui/client/src/host/BioHarnessCapabilitiesRoute.tsx`）与设置入口（`ui/client/src/host/BioHarnessCapabilitiesSettings.tsx`），直接调用 `bioharness-memory-mcp` 公开工具。检索深度（`FAST` / `STANDARD`，`DEEP` 因未公开在后端返回 HTTP 501 `RECALL_MODE_NOT_IMPLEMENTED` 且前端禁用标注）与 `T1`/`T2`/`T3` 展开正交独立；显示检索后端、范围、`scientific_validation=NOT_PERFORMED`、条件提示及显式 `memory_report_use`（`selected`/`consumed`/`outcome_reported`）。
+- [ ] **Curator 与来源核验（外部 MCP 接口缺口，Web 侧已完成候选提交与诚实边界展示）：** 已接入 `memory_propose_scientific` / `memory_capture_candidate` 写入 `UNREVIEWED_PENDING_IMPORT` 及 `T3` 锚点 SHA-256 核验（MCP 边界按 `NativeLineSource(allow_text=False)` 返回文件/行定位与哈希而不外泄原文）；实测已安装 `bioharness-module-memory` MCP `ed82a7b6` 未暴露交互式 `inspect_proposal`、`publish_reviewed` 与 `source_registration`（仅存 Memory 运维 Python/CLI 层），Web 保持不重做 curation 并在界面返回 `curator_interactive_publish=false` 与明确说明，待 `BioHarness-Modules` 公开受控 MCP 接口后可继续补全。
+- [x] **Skills/Resources/Documents（Core/Workspace/Governance 已完成；Literature 输出归口 R3.4）：** `/api/workspaces/{ws}/capabilities` 与 `ledger.py`（`observed_module_usage`）汇总展示 Workspace `SKILL.md`、Core `doctor`/`[[resources]]`、已配置 MCP 服务及本地 CLI 模块的 Declared / Installed / Callable / Actually Used 四态，并通过 `bioharness-governance context` 读取与预览 `contract`/`guide`/`status`/`findings_index` 文档且支持“引用到对话草稿”；Literature 领域输出将在 R3.4 接入。
+- [x] **设置与诊断：** 复用 LibreChat `SettingsDialog` 与 `registry.tsx`，新增 `技能与资源` / `科研记忆` / `专业模块` / `诊断与安全` 标签页（仅挂载到 `/w/capabilities` 或点击设置页签时懒加载，零污染 `/c/new` 基线），展示 R4 远端算力延后声明（`remote_compute_enabled=false`）、503 降级时保留最近成功确认时间、以及 `/api/workspaces/{ws}/diagnostics` 服务端脱敏 JSON 复制/导出与被动安全姿态清单。
+- [ ] **通过真实模块隔离验收（含已知接口缺口说明）：** 已通过隔离真实模块闭环（以 Curator `publish_reviewed` + `publish_theme` 实库初始化 → `memory_recall(FAST/STANDARD)` → `DEEP` 501 → `T1`/`T2`/`T3` 锚点 SHA-256 → `memory_capture_candidate` → `memory_report_use(consumed)` → `memory_diagnose`，以及真实 `bioharness-host doctor`、`bioharness-governance context` 与 `echo_mcp.py` 四态/使用统计），仅“Web 触发交互式 Curator 发布→再召回”因前述外部 `bioharness-memory-mcp` 未公开接口保持未勾选、如实留缺口。
+- [x] **R3.3 隔离与真实浏览器验收记录：**
+  - Python 隔离全量：`256 passed in 223.48s (0 failed, 0 skipped)`（含新增 `tests/backend/test_r3_memory_and_capabilities.py` 2 项真实 Memory MCP / Host / Governance 集成测试）。
+  - 前端检查：`tsc --noEmit` 0 错误；Jest `7 suites / 39 tests passed`（含 `r3_3.spec.tsx` 与 `registry.spec.ts`）；Vite 生产构建成功（`ui/client/dist`）。
+  - 真实 Chromium 验收（`firecrawl-playwright-service:latest`）：`ui_r3_3_run.sh` **22/22 PASS**（真实 `bioharness-memory-mcp` + `bioharness-host` + `bioharness-governance`，含 390px/320px）；既有回归 `ui_run.sh` **33/33 PASS**（`/skills` donor 守卫保持未挂载）、`ui_r3_2_run.sh` **17/17 PASS**、`ui_step3_run.sh` **28/28 PASS**、`ui_step4_run.sh` **27/27 PASS**、`ui_step5_run.sh` **30/30 PASS**。
 
 ### R3.4 — 专业科研模块接入
 
