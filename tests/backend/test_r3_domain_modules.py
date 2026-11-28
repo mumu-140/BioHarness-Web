@@ -55,7 +55,8 @@ def test_r34_domain_modules_discovery_and_honest_boundaries(tmp_path: Path):
         assert by_id["literature"]["providers"]["paperqa2"]["status"] == "NOT_PRODUCTION_ENABLED"
         assert by_id["literature"]["providers"]["paperseek"]["available"] is False
         assert by_id["statistics"]["subcomponents"]["clinical_subgroup_reviewers"] == "PRODUCTION_NOT_ENABLED"
-        assert "CodeArtsIntakeReviewer" in by_id["scientific-review"]["direct_model_api_gap_note"]
+        assert "BioHarness-Modules" in by_id["scientific-review"]["direct_model_api_gap_note"]
+        assert "[advisor]" in by_id["scientific-review"]["direct_model_api_gap_note"]
         assert by_id["dapseq"]["callable"] is False
         assert "NOT_PUBLISHED" in by_id["dapseq"]["status"]
         assert by_id["genome-web-tf"]["callable"] is False
@@ -72,7 +73,7 @@ def test_r34_domain_modules_discovery_and_honest_boundaries(tmp_path: Path):
             json={"operation": "search", "question": "plant GRF motif evolution"},
         )
         assert missing.status_code == 503
-        assert missing.json()["detail"]["code"] == "LITERATURE_PROVIDER_UNAVAILABLE"
+        assert missing.json()["detail"]["code"] == "UPSTREAM_UNAVAILABLE"
 
 
 def test_r34_statistics_real_report_binding_render_verify_and_drift(tmp_path: Path):

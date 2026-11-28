@@ -1829,12 +1829,16 @@ export interface DomainModuleEntry {
 export interface DomainModuleRecentInvocation {
   id: string;
   conversation_id: string | null;
+  request_id?: string | null;
+  scope_id?: string | null;
   module_id: string;
   operation: string;
   state: string;
   input: Record<string, unknown> | null;
   error: { code?: string; message?: string } | null;
   saved_artifact: WorkspaceInputFile | null;
+  started_at?: string;
+  ended_at?: string | null;
   at: string;
 }
 
@@ -1910,6 +1914,7 @@ export interface LiteratureRunResponse {
   cli: string;
   result: Record<string, unknown>;
   saved_artifact?: WorkspaceInputFile | null;
+  saved_pdfs?: WorkspaceInputFile[];
   save_note?: string | null;
   recorded_in_ledger?: boolean;
 }
@@ -2017,6 +2022,8 @@ export async function runLiteratureModule(
     lanes?: boolean;
     save_output?: boolean;
     conversation_id?: string;
+    request_id?: string;
+    scope_id?: string;
   },
 ): Promise<LiteratureRunResponse> {
   const res = await hostFetch(
@@ -2039,6 +2046,8 @@ export async function runStatisticsReportBinding(
     report_path?: string;
     save_output?: boolean;
     conversation_id?: string;
+    request_id?: string;
+    scope_id?: string;
   },
 ): Promise<StatisticsReportBindingResponse> {
   const res = await hostFetch(
@@ -2064,6 +2073,8 @@ export async function runProteinModule(
     model_index?: number;
     save_output?: boolean;
     conversation_id?: string;
+    request_id?: string;
+    scope_id?: string;
   },
 ): Promise<ProteinRunResponse> {
   const res = await hostFetch(

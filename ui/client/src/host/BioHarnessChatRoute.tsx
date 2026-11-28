@@ -83,6 +83,9 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     getDraft,
     setDraft,
     clearDraft,
+    getContinuationDraft,
+    setContinuationDraft,
+    clearContinuationDraft,
   } = useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
@@ -159,23 +162,92 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
   const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${activeConversationId ?? 'new'}::${selectedRequestId ?? 'none'}::${workspaceScopeId ?? 'none'}`;
   const contextKeyRef = useRef(contextKey);
   contextKeyRef.current = contextKey;
+  const continuationKey =
+    activeConversationId ??
+    (selectedRequestId
+      ? `req:${selectedRequestId}`
+      : workspaceScopeId
+        ? `scope:${workspaceScopeId}`
+        : 'new');
+  const hydratedContextRef = useRef<string>('');
+  const userEditedRunOptsRef = useRef<boolean>(false);
 
   useEffect(() => {
     setScopeMode('none');
     setSelectedScopeId('');
     setNewScopeId('');
     setParentScopeId('');
-    setAttachedInputs([]);
-    setUploadError(null);
-    setUploadingInput(false);
     setInputsDrawerOpen(false);
-  }, [workspace]);
+  }, [workspace, selectedRequestId]);
 
+  // Restore per-context continuation draft (model override, strategy, staged attachments) across reload
+  // while strictly isolating different workspaces, projects, requests, and conversations.
   useEffect(() => {
-    setAttachedInputs([]);
+    hydratedContextRef.current = contextKey;
+    userEditedRunOptsRef.current = false;
     setUploadError(null);
     setUploadingInput(false);
-  }, [activeConversationId, selectedRequestId, workspaceScopeId]);
+    const saved = getContinuationDraft?.(continuationKey) ?? null;
+    if (saved) {
+      setSelectedModelOverride(saved.modelOverride);
+      setSelectedStrategy(saved.strategy);
+      setAttachedInputs(saved.attachedInputs);
+      if (saved.modelOverride || saved.strategy !== 'standard') {
+        userEditedRunOptsRef.current = true;
+      }
+    } else {
+      setSelectedModelOverride(null);
+      setSelectedStrategy('standard');
+      setAttachedInputs([]);
+    }
+  }, [contextKey, continuationKey, getContinuationDraft]);
+
+  // For existing conversations reloaded in a fresh tab (no sessionStorage override), restore
+  // the last run's recorded strategy and enabled model override from the authoritative event log.
+  useEffect(() => {
+    if (!activeConversationId || userEditedRunOptsRef.current || log.events.length === 0) {
+      return;
+    }
+    const lastRunStart = [...log.events]
+      .reverse()
+      .find((ev) => ev.type === 'run.started');
+    if (!lastRunStart) {
+      return;
+    }
+    const strat = lastRunStart.data?.strategy;
+    if (strat === 'concise' || strat === 'thorough' || strat === 'standard') {
+      setSelectedStrategy(strat);
+    }
+    const pid = typeof lastRunStart.data?.provider_id === 'string' ? lastRunStart.data.provider_id : null;
+    const mod = typeof lastRunStart.data?.model === 'string' ? lastRunStart.data.model : null;
+    if (pid && mod) {
+      const enabled = (meta?.runtime?.available_models ?? []).some(
+        (m) => m.provider_id === pid && m.model === mod,
+      );
+      if (enabled) {
+        setSelectedModelOverride({ provider_id: pid, model: mod });
+      }
+    }
+  }, [activeConversationId, log.events, meta?.runtime?.available_models]);
+
+  // Persist current context's model override, strategy, and staged attachments for reload continuation.
+  useEffect(() => {
+    if (hydratedContextRef.current !== contextKey) {
+      return;
+    }
+    setContinuationDraft?.(continuationKey, {
+      modelOverride: selectedModelOverride,
+      strategy: selectedStrategy,
+      attachedInputs,
+    });
+  }, [
+    contextKey,
+    continuationKey,
+    selectedModelOverride,
+    selectedStrategy,
+    attachedInputs,
+    setContinuationDraft,
+  ]);
 
   useEffect(() => {
     if (!pendingAttachments || pendingAttachments.length === 0) {
@@ -237,7 +309,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
     setProblem(null);
   }, [workspace, activeConversationId, selectedRequestId]);
 
-  const draftKey = activeConversationId ?? (selectedRequestId ? `req:${selectedRequestId}` : 'new');
+  const draftKey = continuationKey;
   const draftText = getDraft(draftKey);
 
   const scopeProblem = useMemo(() => {
@@ -380,6 +452,11 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
         startRun(workspace, activeConversationId, null, runOpts),
       );
       if (res) {
+        setContinuationDraft?.(continuationKey, {
+          modelOverride: selectedModelOverride,
+          strategy: effectiveStrategy,
+          attachedInputs: [],
+        });
         setAttachedInputs([]);
         void queryClient.invalidateQueries({
           queryKey: bhKeys.conversation(service, workspace, activeConversationId),
@@ -494,6 +571,7 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
         );
         if (created) {
           clearDraft(draftKey);
+          clearContinuationDraft?.(continuationKey);
           setAttachedInputs([]);
           setBranchSource(null);
           void queryClient.invalidateQueries({ queryKey: bhKeys.conversations(service, workspace) });
@@ -506,6 +584,11 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
         );
         if (res) {
           clearDraft(draftKey);
+          setContinuationDraft?.(continuationKey, {
+            modelOverride: selectedModelOverride,
+            strategy: selectedStrategy,
+            attachedInputs: [],
+          });
           setAttachedInputs([]);
           void queryClient.invalidateQueries({
             queryKey: bhKeys.conversation(service, workspace, activeConversationId),
@@ -740,10 +823,16 @@ const BioHarnessChatRoute = memo(function BioHarnessChatRoute() {
                       activeModel={activeModel}
                       availableModels={meta?.runtime?.available_models ?? []}
                       selectedModelOverride={selectedModelOverride}
-                      onSelectModelOverride={setSelectedModelOverride}
+                      onSelectModelOverride={(next) => {
+                        userEditedRunOptsRef.current = true;
+                        setSelectedModelOverride(next);
+                      }}
                       strategies={meta?.runtime?.strategies ?? []}
                       selectedStrategy={selectedStrategy}
-                      onSelectStrategy={setSelectedStrategy}
+                      onSelectStrategy={(next) => {
+                        userEditedRunOptsRef.current = true;
+                        setSelectedStrategy(next);
+                      }}
                       inputsState={inputsQuery.data ?? null}
                       inputsLoading={inputsQuery.isLoading}
                       attachedInputs={attachedInputs}

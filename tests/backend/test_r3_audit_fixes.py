@@ -320,3 +320,299 @@ def test_audit4_dynamic_probe_and_honest_skill_callability(tmp_path: Path):
         cli_by_id = {c["id"]: c for c in caps["cli_modules"]}
         assert cli_by_id["statistics"]["installed"] is True
         assert cli_by_id["statistics"]["callable"] is False
+
+
+def test_final1_literature_fetch_persists_pdfs_and_rewrites_downloads_json(tmp_path: Path):
+    """Literature fetch must persist downloaded PDFs under upload_root/module-artifacts/literature/
+    and rewrite downloads.json so entries point to durable workspace paths instead of deleted /tmp."""
+    lit_cli = _find_cli("bioharness-literature")
+    if not lit_cli:
+        pytest.skip("bioharness-literature CLI not installed")
+
+    ws = tmp_path / "ws"
+    upload_dir = ws / "inputs"
+    upload_dir.mkdir(parents=True)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    # Minimal valid search.json
+    (ws / "search.json").write_text(
+        json.dumps({
+            "operation": "search",
+            "question": "test fetch",
+            "papers": [
+                {
+                    "rank": 1,
+                    "title": "Sample Study",
+                    "doi": "10.1000/test.pdf.1",
+                    "identifier": "10.1000/test.pdf.1",
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    # Stub scansci-pdf CLI that writes a real PDF inside --output and prints JSON manifest
+    fake_scansci = tmp_path / "fake_scansci"
+    fake_scansci.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        "out_dir = Path('.')\n"
+        "for i, a in enumerate(args):\n"
+        "    if a in ('-o', '--output', '--output-dir') and i + 1 < len(args):\n"
+        "        out_dir = Path(args[i + 1])\n"
+        "out_dir.mkdir(parents=True, exist_ok=True)\n"
+        "pdf = out_dir / 'sample_paper.pdf'\n"
+        "pdf.write_bytes(b'%PDF-1.4\\n%real persisted pdf fixture\\n')\n"
+        "print(json.dumps({'downloaded': [{'identifier': '10.1000/test.pdf.1', 'file': str(pdf), 'status': 'downloaded'}]}))\n",
+        encoding="utf-8",
+    )
+    fake_scansci.chmod(0o755)
+
+    # Stub bioharness-literature fetch CLI to simulate exact downloads.json + PDF output inside --output
+    fake_lit = tmp_path / "fake_lit"
+    fake_lit.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        "out_dir = Path(args[args.index('--output') + 1])\n"
+        "pdfs = out_dir / 'pdfs'\n"
+        "pdfs.mkdir(parents=True, exist_ok=True)\n"
+        "pdf = pdfs / 'study_2026.pdf'\n"
+        "pdf_bytes = b'%PDF-1.4\\n%persisted study pdf\\n'\n"
+        "pdf.write_bytes(pdf_bytes)\n"
+        "manifest = {\n"
+        "    'ok': True,\n"
+        "    'operation': 'fetch',\n"
+        "    'downloaded_identifiers': 1,\n"
+        "    'requested_identifiers': 1,\n"
+        "    'entries': [\n"
+        "        {'identifier': '10.1000/test.pdf.1', 'status': 'downloaded', 'file': str(pdf)}\n"
+        "    ],\n"
+        "}\n"
+        "(out_dir / 'downloads.json').write_text(json.dumps(manifest), encoding='utf-8')\n"
+        "print(json.dumps(manifest))\n",
+        encoding="utf-8",
+    )
+    fake_lit.chmod(0o755)
+
+    settings = Settings(
+        service_id="svc-final1",
+        workspaces={
+            "demo": Workspace(
+                id="demo",
+                path=ws.resolve(),
+                evidence_roots=(ws.resolve(),),
+                upload_root=upload_dir.resolve(),
+            )
+        },
+        access_token=TOKEN,
+        ledger_path=state_dir / "ledger.sqlite3",
+        literature_cli=str(fake_lit),
+        scansci_cli=str(fake_scansci),
+    )
+
+    with TestClient(create_app(settings)) as client:
+        res = client.post(
+            "/api/workspaces/demo/modules/literature/run",
+            headers=HEADERS,
+            json={"operation": "fetch", "search_json_path": "search.json", "save_output": True},
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert len(body["saved_pdfs"]) == 1
+        pdf_art = body["saved_pdfs"][0]
+        assert pdf_art["relative_path"].startswith("inputs/module-artifacts/literature/")
+        assert (ws / pdf_art["relative_path"]).is_file()
+        assert (ws / pdf_art["relative_path"]).read_bytes().startswith(b"%PDF-1.4")
+
+        # Persisted downloads.json points to durable $WORKSPACE path (never deleted /tmp path)
+        saved_dl = body["saved_artifact"]
+        assert saved_dl is not None
+        dl_data = json.loads((ws / saved_dl["relative_path"]).read_text(encoding="utf-8"))
+        assert dl_data["entries"][0]["file"] == pdf_art["server_path"]
+        assert "/tmp/" not in dl_data["entries"][0]["file"]
+        assert dl_data["entries"][0]["sha256"] == pdf_art["sha256"]
+
+        # Persisted PDF is immediately discoverable in /inputs
+        inp = client.get("/api/workspaces/demo/inputs", headers=HEADERS).json()
+        assert any(f["name"] == pdf_art["name"] for f in inp["files"])
+
+
+def test_final2_attachment_bounded_read_identity_drift_and_real_data_analysis(tmp_path: Path):
+    """Uploaded CSV content is identity-verified via descriptor, bounded-read into host context,
+    and genuinely parsed by the model for analysis; drifted files are refused safely."""
+    import re
+    from bioharness_web import inputs
+
+    # Scripted provider dynamically parses CSV rows from the host prompt to compute exact ratio!
+    def data_aware_provider(messages, tools):
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+        if len(tool_results) == 0:
+            return tool("science_plan", {"plan": PLAN})
+        if len(tool_results) == 1:
+            return tool("science_submit", SUBMIT)
+        if len(tool_results) == 2:
+            full_prompt = json.dumps(messages, ensure_ascii=False)
+            m = re.search(r"G1,([0-9.]+),([0-9.]+)", full_prompt)
+            assert m is not None, f"CSV data row missing from model prompt: {full_prompt}"
+            ratio = float(m.group(2)) / float(m.group(1))
+            return tool(
+                "science_deliver",
+                {**DELIVER, "answer": f"Computed from uploaded counts.csv: G1_fold_change={ratio:.2f}x"},
+            )
+        return {"text": "Delivered analysis computed from actual uploaded CSV rows."}
+
+    with Harness(tmp_path, data_aware_provider) as h:
+        csv_path = h.workspace / "counts.csv"
+        csv_bytes = b"gene,baseline,treatment\nG1,10.0,35.0\nG2,4.0,10.0\n"
+        csv_path.write_bytes(csv_bytes)
+        sha = hashlib.sha256(csv_bytes).hexdigest()
+
+        q = "Compute fold change for G1 from attached counts."
+        resp = h.client.post(
+            h.url,
+            headers=AUTH,
+            json={"text": q, "attachments": [{"path": "$WORKSPACE/counts.csv", "sha256": sha}]},
+        )
+        assert resp.status_code == 201, resp.text
+        cid = resp.json()["conversation"]["id"]
+        state = h.wait(cid)
+        now = h.now(state["conversation"]["request_id"])
+        assert now["question"] == q
+        assert "G1_fold_change=3.50x" in now["answer"]
+
+        events = h.events(cid)
+        read_ev = next(e for e in events if e["type"] == "attachments.read")
+        assert read_ev["data"]["items"][0]["file_identity"] == "MATCHES_RECORD"
+        assert read_ev["data"]["items"][0]["readable"] is True
+
+        # Tamper file on disk -> read_attachment_for_model refuses drifted bytes!
+        csv_path.write_bytes(b"gene,baseline,treatment\nG1,10.0,999.0\n")
+        ws_obj = Workspace(id="demo", path=h.workspace.resolve(), evidence_roots=(h.workspace.resolve(),))
+        drifted = inputs.read_attachment_for_model(
+            ws_obj,
+            {"name": "counts.csv", "server_path": "$WORKSPACE/counts.csv", "sha256": sha},
+        )
+        assert drifted["file_identity"] == "DIFFERS_FROM_RECORD"
+        assert drifted["readable"] is False
+        assert "excerpt" not in drifted
+
+
+def test_final3_ledger_true_lifecycle_recovery_attribution_and_chat_isolation(tmp_path: Path):
+    """Module invocations record STARTED -> terminal state with real timestamps, restart recovery
+    to UNKNOWN, request/scope attribution, cross-workspace rejection, and zero chat last_run_state corruption."""
+    from bioharness_web.ledger import Ledger
+
+    led = Ledger(tmp_path / "ledger.sqlite3")
+    try:
+        c1 = led.create_conversation("ws-a", request_id="sci-req-1")
+        chat_run = led.start_run(c1["id"])
+        led.end_run(chat_run, "INTERRUPTED", "paused")
+
+        # 1. Cross-workspace conversation_id must be rejected
+        with pytest.raises(ValueError):
+            led.start_module_operation(
+                "ws-b", module_id="statistics", operation="render", conversation_id=c1["id"]
+            )
+
+        # 2. Two-phase lifecycle records STARTED (ended_at=None) then FAILED (real ended_at >= started_at)
+        started = led.start_module_operation(
+            "ws-a",
+            module_id="statistics",
+            operation="verify",
+            input_data={"records_path": "r.json"},
+            conversation_id=c1["id"],
+            scope_id="proj-x",
+        )
+        assert started["state"] == "STARTED"
+        assert started["ended_at"] is None
+        assert started["request_id"] == "sci-req-1"
+        assert started["scope_id"] == "proj-x"
+
+        # Started-only op is NOT prematurely counted as finished usage
+        assert led.observed_module_usage("ws-a")["total_tool_calls"] == 0
+
+        finished_rec = led.finish_module_operation(
+            started["id"],
+            state="FAILED",
+            error_data={"code": "REPORT_BINDING_FAIL", "message": "mismatch"},
+        )
+        assert finished_rec is not None
+        assert finished_rec["state"] == "FAILED"
+        assert finished_rec["ended_at"] is not None
+        assert finished_rec["ended_at"] >= finished_rec["started_at"]
+
+        # Failed module op must NOT overwrite chat conversation's INTERRUPTED last_run_state!
+        convos = led.conversations("ws-a")
+        assert convos[0]["last_run_state"] == "INTERRUPTED"
+
+        # 3. In-flight STARTED module op recovers to UNKNOWN on service restart
+        inflight = led.start_module_operation(
+            "ws-a",
+            module_id="protein-methods",
+            operation="structure-inventory",
+            conversation_id=c1["id"],
+        )
+        led.recover()
+        invs = led.module_invocations("ws-a", limit=10)
+        by_id = {i["id"]: i for i in invs}
+        assert by_id[inflight["id"]]["state"] == "UNKNOWN"
+        assert by_id[inflight["id"]]["ended_at"] is not None
+        assert by_id[inflight["id"]]["error"]["code"] == "SERVICE_RESTARTED"
+    finally:
+        led.close()
+
+
+def test_final4_preserve_real_cli_error_codes_and_no_speculative_inference(tmp_path: Path):
+    """Missing or crashing statistics CLI must preserve TOOL_UNAVAILABLE (503) / TOOL_FAILED (502),
+    never masking them as REPORT_BINDING_FAIL; configured [advisor] reports callable=None."""
+    ws = tmp_path / "ws"
+    (ws / ".bioharness").mkdir(parents=True)
+    (ws / ".bioharness/config.toml").write_text('[advisor]\nfactory = "pkg:fn"\n', encoding="utf-8")
+    (ws / "b.json").write_text('{"records":[],"tables":[]}', encoding="utf-8")
+    (ws / "t.md").write_text("hi\n", encoding="utf-8")
+
+    crash_cli = tmp_path / "crash_stat"
+    crash_cli.write_text("#!/bin/sh\necho 'ImportError: broken env' >&2\nexit 2\n", encoding="utf-8")
+    crash_cli.chmod(0o755)
+
+    # Case A: missing CLI -> 503 TOOL_UNAVAILABLE
+    s_missing = Settings(
+        service_id="svc-f4a",
+        workspaces={"demo": Workspace(id="demo", path=ws.resolve(), evidence_roots=(ws.resolve(),))},
+        access_token=TOKEN,
+        statistics_cli="/nonexistent/stat-cli",
+    )
+    with TestClient(create_app(s_missing)) as client:
+        r = client.post(
+            "/api/workspaces/demo/modules/statistics/report-binding",
+            headers=HEADERS,
+            json={"action": "render", "records_path": "b.json", "template_path": "t.md"},
+        )
+        assert r.status_code == 503, r.text
+        assert r.json()["detail"]["code"] == "TOOL_UNAVAILABLE"
+
+        dm = client.get("/api/workspaces/demo/domain-modules", headers=HEADERS).json()
+        rev = next(m for m in dm["modules"] if m["id"] == "scientific-review")
+        assert rev["advisor_config"]["configured"] is True
+        assert rev["callable"] is None
+
+    # Case B: crashing CLI (non-binding stderr) -> 502 TOOL_FAILED (never REPORT_BINDING_FAIL!)
+    s_crash = Settings(
+        service_id="svc-f4b",
+        workspaces={"demo": Workspace(id="demo", path=ws.resolve(), evidence_roots=(ws.resolve(),))},
+        access_token=TOKEN,
+        statistics_cli=str(crash_cli),
+    )
+    with TestClient(create_app(s_crash)) as client:
+        r = client.post(
+            "/api/workspaces/demo/modules/statistics/report-binding",
+            headers=HEADERS,
+            json={"action": "render", "records_path": "b.json", "template_path": "t.md"},
+        )
+        assert r.status_code == 502, r.text
+        assert r.json()["detail"]["code"] == "TOOL_FAILED"

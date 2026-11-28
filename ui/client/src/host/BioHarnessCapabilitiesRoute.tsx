@@ -241,19 +241,33 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
     return cond;
   };
 
+  const wrapScopedError = (snapKey: string, err: unknown) => {
+    const wrapped = err instanceof Error ? err : new Error(String(err));
+    (wrapped as Error & { __bhSnapKey?: string }).__bhSnapKey = snapKey;
+    return wrapped;
+  };
+  const isStaleScopedError = (err: unknown): boolean => {
+    const key = (err as { __bhSnapKey?: string } | null)?.__bhSnapKey;
+    return Boolean(key && key !== contextKeyRef.current);
+  };
+
   const recallMutation = useMutation({
     mutationFn: async () => {
       if (!workspace) {
         throw new Error('No workspace selected');
       }
       const snapKey = contextKeyRef.current;
-      const data = await recallMemory(workspace, {
-        query: recallQuery.trim(),
-        task_conditions: buildTaskConditions(),
-        mode: recallMode,
-        limit: recallLimit,
-      });
-      return { snapKey, data };
+      try {
+        const data = await recallMemory(workspace, {
+          query: recallQuery.trim(),
+          task_conditions: buildTaskConditions(),
+          mode: recallMode,
+          limit: recallLimit,
+        });
+        return { snapKey, data };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, data }) => {
       if (contextKeyRef.current !== snapKey) return;
@@ -262,6 +276,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       setLastConfirmedAt(new Date().toISOString());
     },
     onError: (err) => {
+      if (isStaleScopedError(err)) return;
       setRecallError(err instanceof Error ? err.message : String(err));
     },
   });
@@ -275,12 +290,16 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
         throw new Error('No workspace selected');
       }
       const snapKey = contextKeyRef.current;
-      const data = await expandMemory(workspace, {
-        memory_ref: vars.memoryRef,
-        task_conditions: buildTaskConditions(),
-        detail: vars.detail,
-      });
-      return { snapKey, data };
+      try {
+        const data = await expandMemory(workspace, {
+          memory_ref: vars.memoryRef,
+          task_conditions: buildTaskConditions(),
+          detail: vars.detail,
+        });
+        return { snapKey, data };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, data }) => {
       if (contextKeyRef.current !== snapKey) return;
@@ -288,6 +307,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       setExpandError(null);
     },
     onError: (err) => {
+      if (isStaleScopedError(err)) return;
       setExpandError(err instanceof Error ? err.message : String(err));
     },
   });
@@ -304,14 +324,18 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       const snapWs = workspace;
       const eventId = `evt-web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const taskRef = selectedRequestId || `web-${workspace}`;
-      const data = await reportMemoryUse(workspace, {
-        event_id: eventId,
-        memory_ref: vars.memoryRef,
-        task_ref: taskRef,
-        stage: vars.stage,
-        outcome: vars.outcome,
-      });
-      return { snapKey, snapSvc, snapWs, data };
+      try {
+        const data = await reportMemoryUse(workspace, {
+          event_id: eventId,
+          memory_ref: vars.memoryRef,
+          task_ref: taskRef,
+          stage: vars.stage,
+          outcome: vars.outcome,
+        });
+        return { snapKey, snapSvc, snapWs, data };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, snapSvc, snapWs, data }, vars) => {
       if (snapSvc && snapWs) {
@@ -326,6 +350,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       );
     },
     onError: (err) => {
+      if (isStaleScopedError(err)) return;
       setUsageNotice(
         (err instanceof Error ? err.message : String(err)) || tr('使用反馈失败', 'Feedback failed'),
       );
@@ -351,28 +376,32 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       const snapSvc = service;
       const snapWs = workspace;
       const eventId = `evt-prop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      if (proposeKind === 'candidate') {
+      try {
+        if (proposeKind === 'candidate') {
+          const res = await proposeMemory(workspace, {
+            kind: 'candidate',
+            event_id: eventId,
+            summary: candSummary.trim(),
+            evidence_locator: candLocator.trim() || undefined,
+          });
+          return { snapKey, snapSvc, snapWs, res };
+        }
+        const parsedT2 = JSON.parse(sciT2Json) as Record<string, unknown>;
+        const parsedCond = JSON.parse(sciCondJson) as Record<string, string>;
+        const parsedEvid = JSON.parse(sciEvidJson) as Array<Record<string, unknown>>;
         const res = await proposeMemory(workspace, {
-          kind: 'candidate',
+          kind: 'scientific',
           event_id: eventId,
-          summary: candSummary.trim(),
-          evidence_locator: candLocator.trim() || undefined,
+          memory_id: sciMemoryId.trim(),
+          t1_core: sciT1Core.trim(),
+          t2_detail: parsedT2,
+          required_conditions: parsedCond,
+          evidence: parsedEvid,
         });
         return { snapKey, snapSvc, snapWs, res };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
       }
-      const parsedT2 = JSON.parse(sciT2Json) as Record<string, unknown>;
-      const parsedCond = JSON.parse(sciCondJson) as Record<string, string>;
-      const parsedEvid = JSON.parse(sciEvidJson) as Array<Record<string, unknown>>;
-      const res = await proposeMemory(workspace, {
-        kind: 'scientific',
-        event_id: eventId,
-        memory_id: sciMemoryId.trim(),
-        t1_core: sciT1Core.trim(),
-        t2_detail: parsedT2,
-        required_conditions: parsedCond,
-        evidence: parsedEvid,
-      });
-      return { snapKey, snapSvc, snapWs, res };
     },
     onSuccess: ({ snapKey, snapSvc, snapWs, res }) => {
       if (snapSvc && snapWs) {
@@ -391,6 +420,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
       setCandLocator('');
     },
     onError: (err) => {
+      if (isStaleScopedError(err)) return;
       setProposeFeedback(null);
       setProposeError(err instanceof Error ? err.message : String(err));
     },

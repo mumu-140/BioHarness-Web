@@ -16,7 +16,7 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from . import mcp_tools
+from . import inputs, mcp_tools
 from .cli import ToolError
 from .core import MODEL_TOOLS, MUTATING, CoreHost
 from .ledger import Ledger, RunActive
@@ -415,17 +415,63 @@ class Runtime:
             if attachments:
                 user_payload["attachments"] = attachments
             self._emit(conversation_id, run_id, "user.message", user_payload)  # verbatim question + separate attachments
-        if attachments:
-            att_lines = [
-                f"- {a.get('server_path') or a.get('relative_path')} "
-                f"({a.get('bytes', 0)} bytes, sha256={a.get('sha256', '')}, unverified_input=true)"
-                for a in attachments
-            ]
+        active_attachments = list(attachments) if attachments else []
+        if not active_attachments and text is None:
+            # On continuation without a new user message, re-surface the most recent user message's attachments
+            # so resumed analysis retains bounded, identity-verified access to the bound research inputs.
+            for ev in reversed(self.ledger.events(conversation_id)):
+                if ev["type"] == "user.message":
+                    prev_atts = ev["data"].get("attachments")
+                    if isinstance(prev_atts, list) and prev_atts:
+                        active_attachments = [a for a in prev_atts if isinstance(a, dict)]
+                    break
+        if active_attachments:
+            total_budget = inputs.MAX_ATTACHMENT_TOTAL_CHARS if attachments else 6_000
+            per_file_budget = max(1500, total_budget // max(1, len(active_attachments)))
+            remaining_chars = total_budget
+            verified_summaries: list[dict[str, Any]] = []
+            prompt_sections: list[str] = []
+            drifted_names: list[str] = []
+            for att in active_attachments:
+                alloc = min(per_file_budget, max(512, remaining_chars))
+                info = inputs.read_attachment_for_model(workspace, att, max_chars=alloc)
+                summary_rec = {k: v for k, v in info.items() if k != "excerpt"}
+                verified_summaries.append(summary_rec)
+                if info.get("file_identity") in {"DIFFERS_FROM_RECORD", "UNAVAILABLE"}:
+                    drifted_names.append(f"{info.get('name')} ({info.get('file_identity')})")
+                    prompt_sections.append(
+                        f"- {info.get('server_path')} [file_identity={info.get('file_identity')}, "
+                        f"unverified_input=true]: {info.get('note')}"
+                    )
+                elif info.get("readable") and isinstance(info.get("excerpt"), str):
+                    remaining_chars = max(0, remaining_chars - len(info["excerpt"]))
+                    trunc_label = ", truncated=true" if info.get("truncated") else ""
+                    prompt_sections.append(
+                        f"- {info.get('server_path')} ({info.get('bytes', 0)} bytes, "
+                        f"sha256={info.get('sha256') or 'unhashed'}, file_identity={info.get('file_identity')}, "
+                        f"format={info.get('format')}, unverified_input=true{trunc_label}):\n"
+                        f"```\n{info['excerpt']}\n```"
+                    )
+                else:
+                    prompt_sections.append(
+                        f"- {info.get('server_path')} ({info.get('bytes', 0)} bytes, "
+                        f"sha256={info.get('sha256') or 'unhashed'}, file_identity={info.get('file_identity')}, "
+                        f"unverified_input=true): {info.get('note') or 'metadata only'}"
+                    )
+            self._emit(conversation_id, run_id, "attachments.read", {"items": verified_summaries})
+            if drifted_names:
+                self._emit(conversation_id, run_id, "notice", {
+                    "source": "host",
+                    "code": "ATTACHMENT_IDENTITY_DRIFT",
+                    "text": "检测到部分附带资料文件自提交后发生变更或不可读，未向模型注入漂移内容：" + "、".join(drifted_names),
+                })
             notes.append({
                 "role": "host",
                 "text": (
                     "The user attached workspace input file(s) separately from their verbatim scientific question. "
-                    "Inspect/verify them via tools before citing as evidence:\n" + "\n".join(att_lines)
+                    "These are raw research inputs (`unverified_input=true`, NOT Core-verified scientific evidence); "
+                    "bounded identity-verified excerpts are provided below for analysis:\n"
+                    + "\n".join(prompt_sections)
                 ),
             })
 

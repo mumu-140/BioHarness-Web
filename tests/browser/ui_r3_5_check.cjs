@@ -152,7 +152,7 @@ async function waitForFile(p, timeoutMs = 20000) {
     await page.getByTestId('bh-protein-run-btn').click();
     await page.getByTestId('bh-domain-protein-card').waitFor({ timeout: 15000 });
     const protOk = (await page.getByTestId('bh-protein-atom-count').innerText()).trim() === '4';
-    const revGapOk = (await page.getByTestId('bh-review-api-gap-note').innerText()).includes('CodeArtsIntakeReviewer');
+    const revGapOk = (await page.getByTestId('bh-review-api-gap-note').innerText()).includes('[advisor]');
     check('7. All R3.4 domain modules (Literature, Statistics PASS, Protein Methods, Review gap) verified live',
       statOk && protOk && revGapOk, `statOk=${statOk} protOk=${protOk} revGapOk=${revGapOk}`);
 

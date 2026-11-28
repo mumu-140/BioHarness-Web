@@ -122,6 +122,11 @@ class CliRunner:
             raise ToolError("TOOL_BAD_OUTPUT", f"{tool} did not return a JSON object")
         return answer
 
+    async def run_raw(self, argv: Sequence[str], stdin: dict | None = None, *,
+                      timeout: float | None = None) -> tuple[bytes, bytes, int | None]:
+        """Run one configured CLI and return bounded (stdout, stderr, returncode), preserving ToolError codes."""
+        return await self._run(argv, stdin, timeout)
+
     async def run_text(self, argv: Sequence[str], *, timeout: float | None = None) -> str:
         """What a tool printed, for the few public commands that print text."""
         stdout, _, code = await self._run(argv, None, timeout)

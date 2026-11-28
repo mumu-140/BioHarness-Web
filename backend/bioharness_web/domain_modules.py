@@ -161,19 +161,7 @@ def _read_installed_release_meta(slug: str, cli_cmd: str | None = None) -> dict[
         except OSError:
             pass
 
-    if slug == "scientific-review" and base.is_dir():
-        # Dynamically inspect installed releases to see if a direct model API adapter is present
-        found_codearts_only = False
-        for check_dir in [cur, *(((base / "releases").glob("*")) if (base / "releases").is_dir() else [])]:
-            for advisor_py in check_dir.glob("**/core_advisor.py"):
-                try:
-                    src = advisor_py.read_text(encoding="utf-8", errors="ignore")
-                    if "CodeArtsIntakeReviewer" in src and "OpenAI" not in src and "httpx" not in src:
-                        found_codearts_only = True
-                except OSError:
-                    pass
-        if found_codearts_only:
-            out["direct_model_api_supported"] = False
+
 
     return out
 
@@ -319,13 +307,9 @@ def build_domain_modules_snapshot(
     rev_ver_desc = "；".join(rev_ver_summary_parts) if rev_ver_summary_parts else "本地未检测到已安装版本元数据"
 
     rev_gap_note = (
-        f"当前探测到的 scientific-review（{rev_ver_desc}）"
-        + (
-            "经由 CodeArtsIntakeReviewer 外部 CLI 驱动，尚无直接模型 API 适配层；"
-            if rev_meta["direct_model_api_supported"] is False
-            else "通过 Core [advisor] 接入；"
-        )
-        + "适配器扩展归属 BioHarness-Modules，Web 仅非阻断展示 Core 记录的审查结论、依据、分歧与修订记录。"
+        f"当前探测到的 scientific-review（{rev_ver_desc}）仅通过 Core [advisor] 公共契约接入；"
+        "Web 不做源码关键字推断，也不提供直连模型 API 审查执行入口。"
+        "任何审查器适配器扩展均归属 BioHarness-Modules，Web 仅非阻断展示 Core 记录的审查结论、依据、分歧与修订记录。"
     )
 
     lit_callable = lit_probe["callable"] and (ps_probe["callable"] or sc_probe["callable"])
@@ -368,7 +352,7 @@ def build_domain_modules_snapshot(
                 "paperqa2": {
                     "command": "paperqa2",
                     "available": False,
-                    "installed": False,
+                    "installed": _resolve_cli_path("paperqa2") is not None,
                     "status": "NOT_PRODUCTION_ENABLED",
                     "role": "只读观察适配器（未作为生产检索/下载 Provider 启用）",
                 },
@@ -413,7 +397,7 @@ def build_domain_modules_snapshot(
             "releases": rev_meta["releases"],
             "declared": True,
             "installed": rev_meta["installed_dir_present"],
-            "callable": bool(advisor_cfg["configured"]),
+            "callable": None if advisor_cfg["configured"] else False,
             "inspectable": True,
             "actually_used": rev_used > 0,
             "use_count": rev_used,
@@ -457,7 +441,7 @@ def build_domain_modules_snapshot(
             "version": None,
             "source_sha": None,
             "declared": True,
-            "installed": False,
+            "installed": (_modules_root() / "dapseq").is_dir(),
             "callable": False,
             "inspectable": False,
             "actually_used": False,
@@ -473,7 +457,7 @@ def build_domain_modules_snapshot(
             "version": None,
             "source_sha": None,
             "declared": True,
-            "installed": False,
+            "installed": (_modules_root() / "genome-web-tf").is_dir(),
             "callable": False,
             "inspectable": False,
             "actually_used": False,
@@ -489,7 +473,7 @@ def build_domain_modules_snapshot(
             "version": None,
             "source_sha": None,
             "declared": True,
-            "installed": False,
+            "installed": (_modules_root() / "sequence").is_dir(),
             "callable": False,
             "inspectable": False,
             "actually_used": False,
@@ -574,6 +558,85 @@ def inspect_literature_artifact(
     })
 
 
+def _http_status_for_tool_error(code: str) -> int:
+    if code == "TOOL_UNAVAILABLE":
+        return 503
+    if code == "TOOL_TIMEOUT":
+        return 504
+    return 502
+
+
+def _persist_literature_pdfs(
+    workspace: Workspace,
+    out_dir: Path,
+    payload: dict[str, Any],
+    *,
+    max_upload_bytes: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Persist downloaded PDFs from `bioharness-literature fetch` into authorized `upload_root`
+    and rewrite payload/downloads.json entries so saved paths point to durable artifacts instead
+    of ephemeral `/tmp` directories."""
+    if workspace.upload_root is None or not out_dir.is_dir():
+        return [], payload
+
+    out_root = out_dir.resolve()
+    saved_pdfs: list[dict[str, Any]] = []
+    by_name: dict[str, dict[str, Any]] = {}
+    by_rel: dict[str, dict[str, Any]] = {}
+    by_abs: dict[str, dict[str, Any]] = {}
+
+    for pdf_path in sorted(out_root.rglob("*.pdf"), key=lambda p: str(p).lower()):
+        if pdf_path.is_symlink() or not pdf_path.is_file():
+            continue
+        try:
+            resolved = pdf_path.resolve(strict=True)
+        except OSError:
+            continue
+        if not resolved.is_relative_to(out_root):
+            continue
+        try:
+            st = resolved.stat()
+        except OSError:
+            continue
+        if st.st_size <= 0 or st.st_size > max_upload_bytes:
+            continue
+        try:
+            raw_pdf = resolved.read_bytes()
+        except OSError:
+            continue
+        saved = inputs.save_module_artifact(workspace, "literature", resolved.name, raw_pdf)
+        if saved is None:
+            continue
+        saved_pdfs.append(saved)
+        rel_str = str(resolved.relative_to(out_root))
+        by_name[resolved.name] = saved
+        by_rel[rel_str] = saved
+        by_abs[str(resolved)] = saved
+
+    if not saved_pdfs:
+        return [], payload
+
+    updated = json.loads(json.dumps(payload, ensure_ascii=False))
+    entries = updated.get("entries")
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            raw_file = entry.get("file") or entry.get("pdf_path") or entry.get("path")
+            matched = None
+            if isinstance(raw_file, str) and raw_file.strip():
+                rf = raw_file.strip()
+                matched = by_abs.get(rf) or by_rel.get(rf) or by_name.get(Path(rf).name)
+            if matched is not None:
+                entry["file"] = matched["server_path"]
+                entry["relative_path"] = matched["relative_path"]
+                entry["sha256"] = matched["sha256"]
+                entry["bytes"] = matched["bytes"]
+                entry["saved_artifact"] = matched
+    updated["saved_pdfs"] = saved_pdfs
+    return saved_pdfs, updated
+
+
 async def run_literature_cli(
     *,
     settings: Settings,
@@ -583,48 +646,49 @@ async def run_literature_cli(
     question: str | None = None,
     source: str = "openalex",
     maximum: int = 10,
-    iterations: int = 3,
+    iterations: int = 2,
     search_json_path: str | None = None,
     lanes: bool = True,
     save_output: bool = True,
     conversation_id: str | None = None,
+    request_id: str | None = None,
+    scope_id: str | None = None,
     ledger: Ledger | None = None,
 ) -> dict[str, Any]:
-    """Invoke the real bioharness-literature CLI, persist artifact to authorized dir, and log in ledger."""
-    if not probe_cli_callable(settings.literature_cli, ("--help",))["callable"]:
-        raise DomainModuleError("LITERATURE_CLI_MISSING", "未检测到可调用的 bioharness-literature CLI。", 503)
+    """Invoke real `bioharness-literature search|fetch`, persist JSON & downloaded PDFs, and track lifecycle in ledger."""
     if operation not in {"search", "fetch"}:
         raise DomainModuleError("INVALID_OPERATION", "仅支持 search 或 fetch 操作。", 422)
+    if operation == "search" and (not question or not question.strip()):
+        raise DomainModuleError("QUESTION_REQUIRED", "执行文献检索需要提供检索问题。", 422)
+    if operation == "fetch" and (not search_json_path or not search_json_path.strip()):
+        raise DomainModuleError("SEARCH_JSON_REQUIRED", "执行文献获取需要指定工作区内的 search.json 路径。", 422)
 
     redact = path_redactor(workspace)
-    if operation == "search":
-        if not question or not question.strip():
-            raise DomainModuleError("QUESTION_REQUIRED", "请填写文献检索问题。", 422)
-        if not probe_cli_callable(settings.paperseek_cli, ("--help",))["callable"]:
-            raise DomainModuleError(
-                "LITERATURE_PROVIDER_UNAVAILABLE",
-                f"上游检索工具 {Path(settings.paperseek_cli).name} 未在当前服务环境中可用；"
-                "不伪造文献结果。可使用上方“审阅已有 search.json”或在环境配置 paperseek 后重试。",
-                503,
-                {"missing_provider": "paperseek"},
-            )
-    else:
-        if not search_json_path or not search_json_path.strip():
-            raise DomainModuleError("SEARCH_JSON_REQUIRED", "请指定工作区内的 search.json 文件。", 422)
-        if not probe_cli_callable(settings.scansci_cli, ("--help",))["callable"]:
-            raise DomainModuleError(
-                "LITERATURE_PROVIDER_UNAVAILABLE",
-                f"上游全文获取工具 {Path(settings.scansci_cli).name} 未在当前服务环境中可用；"
-                "不伪造 PDF 或下载记录。",
-                503,
-                {"missing_provider": "scansci-pdf"},
-            )
-
     input_meta: dict[str, Any] = (
         {"operation": "search", "question": question.strip() if question else "", "source": source, "maximum": maximum}
         if operation == "search"
         else {"operation": "fetch", "search_json_path": search_json_path, "lanes": lanes}
     )
+
+    search_file: Path | None = None
+    if operation == "fetch":
+        search_file = resolve_workspace_file(workspace, search_json_path or "")
+
+    ledger_ev_id: str | None = None
+    if ledger is not None:
+        try:
+            started = ledger.start_module_operation(
+                workspace.id,
+                module_id="literature",
+                operation=operation,
+                input_data=redact(input_meta),
+                conversation_id=conversation_id,
+                request_id=request_id,
+                scope_id=scope_id,
+            )
+            ledger_ev_id = started["id"]
+        except ValueError as exc:
+            raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
 
     tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-lit-"))
     os.chmod(tmpdir, 0o700)
@@ -642,7 +706,6 @@ async def run_literature_cli(
                 "--paperseek", settings.paperseek_cli,
             ]
         else:
-            search_file = resolve_workspace_file(workspace, search_json_path or "")
             argv = [
                 settings.literature_cli,
                 "fetch",
@@ -652,58 +715,85 @@ async def run_literature_cli(
             ]
             if not lanes:
                 argv.append("--no-lanes")
+
         try:
             payload = await runner.run_json(argv, timeout=min(120.0, settings.module_tool_timeout_seconds))
+            if not isinstance(payload, dict):
+                raise ToolError("TOOL_BAD_OUTPUT", "bioharness-literature did not return a JSON object")
         except ToolError as exc:
-            if ledger is not None:
-                ledger.record_module_operation(
-                    workspace.id,
-                    module_id="literature",
-                    operation=operation,
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
                     state="FAILED",
-                    input_data=redact(input_meta),
-                    error_data={"code": exc.code, "message": exc.message},
-                    conversation_id=conversation_id,
+                    error_data={"code": exc.code, "message": redact(exc.message)},
                 )
-            raise DomainModuleError(exc.code, exc.message, 502) from None
+            raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
 
+        if payload.get("ok") is False:
+            err_code = str(payload.get("error") or payload.get("code") or "LITERATURE_FAILED")
+            err_msg = redact(str(payload.get("message") or f"bioharness-literature {operation} failed"))
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
+                    state="FAILED",
+                    output_data=redact(payload),
+                    error_data={"code": err_code, "message": err_msg},
+                )
+            err_status = 503 if any(k in err_code.upper() for k in ("UNAVAILABLE", "NOT_FOUND", "MISSING")) else 502
+            raise DomainModuleError(err_code, err_msg, err_status)
+
+        saved_pdfs: list[dict[str, Any]] = []
         saved_artifact = None
         save_note = None
+        final_payload = payload
+
         if save_output:
-            art_file = out_dir / ("search.json" if operation == "search" else "downloads.json")
-            art_bytes = (
-                art_file.read_bytes()
-                if art_file.is_file()
-                else (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-            )
-            saved_artifact = inputs.save_module_artifact(
-                workspace,
-                "literature",
-                "search.json" if operation == "search" else "downloads.json",
-                art_bytes,
-            )
-            if saved_artifact is None:
-                save_note = "当前工作区未配置可写授权目录（upload_root），结果仅本次返回未落盘。"
+            if workspace.upload_root is None:
+                save_note = "当前工作区未配置可写授权目录（upload_root），检索/下载结果与 PDF 仅本次返回未落盘。"
+            else:
+                if operation == "fetch":
+                    art_file = out_dir / "downloads.json"
+                    raw_downloads = payload
+                    if art_file.is_file() and not art_file.is_symlink():
+                        try:
+                            parsed = json.loads(art_file.read_text(encoding="utf-8"))
+                            if isinstance(parsed, dict):
+                                raw_downloads = parsed
+                        except (OSError, json.JSONDecodeError):
+                            pass
+                    saved_pdfs, final_payload = _persist_literature_pdfs(
+                        workspace,
+                        out_dir,
+                        raw_downloads,
+                        max_upload_bytes=settings.max_upload_bytes,
+                    )
+                    art_bytes = (json.dumps(redact(final_payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                    saved_artifact = inputs.save_module_artifact(workspace, "literature", "downloads.json", art_bytes)
+                else:
+                    art_file = out_dir / "search.json"
+                    art_bytes = (
+                        art_file.read_bytes()
+                        if art_file.is_file() and not art_file.is_symlink()
+                        else (json.dumps(redact(payload), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+                    )
+                    saved_artifact = inputs.save_module_artifact(workspace, "literature", "search.json", art_bytes)
 
         recorded = False
-        if ledger is not None:
-            ledger.record_module_operation(
-                workspace.id,
-                module_id="literature",
-                operation=operation,
-                state="SUCCEEDED" if payload.get("ok") is not False else "FAILED",
-                input_data=redact(input_meta),
-                output_data=redact(payload),
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(
+                ledger_ev_id,
+                state="SUCCEEDED" if final_payload.get("ok") is not False else "FAILED",
+                output_data=redact(final_payload),
                 saved_artifact=saved_artifact,
-                conversation_id=conversation_id,
             )
             recorded = True
 
         return redact({
             "operation": operation,
             "cli": Path(settings.literature_cli).name,
-            "result": payload,
+            "result": final_payload,
             "saved_artifact": saved_artifact,
+            "saved_pdfs": saved_pdfs,
             "save_note": save_note,
             "recorded_in_ledger": recorded,
         })
@@ -722,9 +812,12 @@ async def run_statistics_report_binding(
     report_path: str | None = None,
     save_output: bool = True,
     conversation_id: str | None = None,
+    request_id: str | None = None,
+    scope_id: str | None = None,
     ledger: Ledger | None = None,
 ) -> dict[str, Any]:
-    """Run bioharness-statistics-report-binding render|verify or read-only bundle inspect."""
+    """Run bioharness-statistics-report-binding render|verify or read-only bundle inspect,
+    preserving real CLI error types and recording true execution lifecycle in the ledger."""
     if action not in {"inspect", "render", "verify"}:
         raise DomainModuleError("INVALID_ACTION", "仅支持 inspect / render / verify 操作。", 422)
 
@@ -756,7 +849,6 @@ async def run_statistics_report_binding(
         "tables": tables_list,
         "note": "数值与统计指标均直接取自模块结构化记录与 report_binding CLI，Web 前端未重算任何统计量。",
     }
-
     if action == "inspect":
         return redact({
             **base_resp,
@@ -767,17 +859,37 @@ async def run_statistics_report_binding(
             "recorded_in_ledger": False,
         })
 
-    if not probe_cli_callable(settings.statistics_cli, ("--help",))["callable"]:
-        raise DomainModuleError("STATISTICS_CLI_MISSING", "未检测到可调用的 bioharness-statistics-report-binding CLI。", 503)
     if not template_path or not template_path.strip():
         raise DomainModuleError("TEMPLATE_REQUIRED", "执行 render / verify 需要提供模板文件（template_path）。", 422)
     template_abs = resolve_workspace_file(workspace, template_path)
+    report_abs: Path | None = None
+    if action == "verify":
+        if not report_path or not report_path.strip():
+            raise DomainModuleError("REPORT_REQUIRED", "执行 verify 需要提供待核验报告文件（report_path）。", 422)
+        report_abs = resolve_workspace_file(workspace, report_path)
+
     input_meta = {
         "action": action,
         "records_path": records_path.strip(),
         "template_path": template_path.strip(),
         "report_path": report_path.strip() if report_path else None,
     }
+
+    ledger_ev_id: str | None = None
+    if ledger is not None:
+        try:
+            started = ledger.start_module_operation(
+                workspace.id,
+                module_id="statistics",
+                operation=action,
+                input_data=redact(input_meta),
+                conversation_id=conversation_id,
+                request_id=request_id,
+                scope_id=scope_id,
+            )
+            ledger_ev_id = started["id"]
+        except ValueError as exc:
+            raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
 
     tmpdir = Path(tempfile.mkdtemp(prefix="bhweb-stat-"))
     os.chmod(tmpdir, 0o700)
@@ -792,9 +904,7 @@ async def run_statistics_report_binding(
                 "--report", str(out_report),
             ]
         else:
-            if not report_path or not report_path.strip():
-                raise DomainModuleError("REPORT_REQUIRED", "执行 verify 需要提供待核验报告文件（report_path）。", 422)
-            report_abs = resolve_workspace_file(workspace, report_path)
+            assert report_abs is not None
             argv = [
                 settings.statistics_cli,
                 "verify",
@@ -805,7 +915,34 @@ async def run_statistics_report_binding(
             out_report = report_abs
 
         try:
-            binding_result = await runner.run_json(argv, timeout=min(60.0, settings.tool_timeout_seconds))
+            stdout, stderr, returncode = await runner.run_raw(argv, timeout=min(60.0, settings.tool_timeout_seconds))
+        except ToolError as exc:
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
+                    state="FAILED",
+                    error_data={"code": exc.code, "message": redact(exc.message)},
+                )
+            raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
+
+        stdout_text = stdout.decode("utf-8", errors="replace").strip()
+        stderr_text = redact(stderr.decode("utf-8", errors="replace").strip())
+
+        if returncode == 0:
+            try:
+                binding_result = json.loads(stdout_text)
+            except ValueError:
+                binding_result = None
+            if not isinstance(binding_result, dict):
+                err_msg = f"{Path(settings.statistics_cli).name} did not return a JSON object"
+                if ledger is not None and ledger_ev_id is not None:
+                    ledger.finish_module_operation(
+                        ledger_ev_id,
+                        state="FAILED",
+                        error_data={"code": "TOOL_BAD_OUTPUT", "message": err_msg},
+                    )
+                raise DomainModuleError("TOOL_BAD_OUTPUT", err_msg, 502)
+
             rendered_md = out_report.read_text(encoding="utf-8") if out_report.is_file() else None
             saved_artifact = None
             save_note = None
@@ -820,13 +957,10 @@ async def run_statistics_report_binding(
                     save_note = "当前工作区未配置可写授权目录（upload_root），渲染报告仅本次预览未落盘。"
 
             recorded = False
-            if ledger is not None:
-                ledger.record_module_operation(
-                    workspace.id,
-                    module_id="statistics",
-                    operation=action,
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
                     state="SUCCEEDED",
-                    input_data=redact(input_meta),
                     output_data=redact({
                         "status": str(binding_result.get("status") or "PASS"),
                         "action": action,
@@ -835,7 +969,6 @@ async def run_statistics_report_binding(
                         "rendered_markdown": rendered_md,
                     }),
                     saved_artifact=saved_artifact,
-                    conversation_id=conversation_id,
                 )
                 recorded = True
 
@@ -851,17 +984,28 @@ async def run_statistics_report_binding(
                 "recorded_in_ledger": recorded,
                 "error": None,
             })
-        except ToolError as exc:
+
+        # Non-zero exit: distinguish real REPORT_BINDING_FAIL mismatch from generic CLI/runtime crash!
+        parsed_err_json = None
+        if stdout_text:
+            try:
+                maybe = json.loads(stdout_text)
+                if isinstance(maybe, dict):
+                    parsed_err_json = maybe
+            except ValueError:
+                pass
+        is_binding_mismatch = (
+            "REPORT_BINDING_FAIL" in stderr_text
+            or (isinstance(parsed_err_json, dict) and str(parsed_err_json.get("status") or "").upper() == "FAIL")
+        )
+        if is_binding_mismatch:
+            err_msg = stderr_text or stdout_text or f"{Path(settings.statistics_cli).name} reported binding mismatch"
             recorded = False
-            if ledger is not None:
-                ledger.record_module_operation(
-                    workspace.id,
-                    module_id="statistics",
-                    operation=action,
+            if ledger is not None and ledger_ev_id is not None:
+                ledger.finish_module_operation(
+                    ledger_ev_id,
                     state="FAILED",
-                    input_data=redact(input_meta),
-                    error_data={"code": "REPORT_BINDING_FAIL", "message": exc.message},
-                    conversation_id=conversation_id,
+                    error_data={"code": "REPORT_BINDING_FAIL", "cli_exit_code": returncode, "message": err_msg},
                 )
                 recorded = True
             return redact({
@@ -869,12 +1013,24 @@ async def run_statistics_report_binding(
                 "status": "FAIL",
                 "template_file": template_path.strip(),
                 "report_file": report_path.strip() if report_path else None,
-                "binding": None,
+                "binding": parsed_err_json,
                 "rendered_markdown": None,
                 "saved_artifact": None,
                 "recorded_in_ledger": recorded,
-                "error": {"code": "REPORT_BINDING_FAIL", "message": exc.message},
+                "error": {"code": "REPORT_BINDING_FAIL", "cli_exit_code": returncode, "message": err_msg},
             })
+
+        cli_err_msg = (
+            f"{Path(settings.statistics_cli).name} exited with status {returncode}"
+            + (f": {stderr_text[:300]}" if stderr_text else "")
+        )
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(
+                ledger_ev_id,
+                state="FAILED",
+                error_data={"code": "TOOL_FAILED", "cli_exit_code": returncode, "message": cli_err_msg},
+            )
+        raise DomainModuleError("TOOL_FAILED", cli_err_msg, 502, {"cli_exit_code": returncode})
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -893,17 +1049,17 @@ async def run_protein_methods_cli(
     model_index: int | None = None,
     save_output: bool = True,
     conversation_id: str | None = None,
+    request_id: str | None = None,
+    scope_id: str | None = None,
     ledger: Ledger | None = None,
 ) -> dict[str, Any]:
-    """Invoke one of the 6 public bioharness-protein-methods CLI subcommands, save artifact, and log."""
+    """Invoke one of the 6 public bioharness-protein-methods CLI subcommands, save artifact, and track lifecycle."""
     if operation not in _PROTEIN_OPS:
         raise DomainModuleError(
             "UNSUPPORTED_PROTEIN_OPERATION",
             f"不支持的 protein-methods 子命令：{operation}",
             422,
         )
-    if not probe_cli_callable(settings.protein_cli, ("--version",))["callable"]:
-        raise DomainModuleError("PROTEIN_CLI_MISSING", "未检测到可调用的 bioharness-protein-methods CLI。", 503)
 
     input_abs = resolve_workspace_file(workspace, input_path)
     argv = [settings.protein_cli, operation, str(input_abs)]
@@ -937,20 +1093,34 @@ async def run_protein_methods_cli(
         input_meta["model_index"] = model_index
 
     redact = path_redactor(workspace)
-    try:
-        result = await runner.run_json(argv, timeout=min(120.0, settings.module_tool_timeout_seconds))
-    except ToolError as exc:
-        if ledger is not None:
-            ledger.record_module_operation(
+    ledger_ev_id: str | None = None
+    if ledger is not None:
+        try:
+            started = ledger.start_module_operation(
                 workspace.id,
                 module_id="protein-methods",
                 operation=operation,
-                state="FAILED",
                 input_data=redact(input_meta),
-                error_data={"code": exc.code, "message": exc.message},
                 conversation_id=conversation_id,
+                request_id=request_id,
+                scope_id=scope_id,
             )
-        raise DomainModuleError(exc.code, exc.message, 502) from None
+            ledger_ev_id = started["id"]
+        except ValueError as exc:
+            raise DomainModuleError("CONVERSATION_UNKNOWN", str(exc), 404) from None
+
+    try:
+        result = await runner.run_json(argv, timeout=min(120.0, settings.module_tool_timeout_seconds))
+        if not isinstance(result, dict):
+            raise ToolError("TOOL_BAD_OUTPUT", "bioharness-protein-methods did not return a JSON object")
+    except ToolError as exc:
+        if ledger is not None and ledger_ev_id is not None:
+            ledger.finish_module_operation(
+                ledger_ev_id,
+                state="FAILED",
+                error_data={"code": exc.code, "message": redact(exc.message)},
+            )
+        raise DomainModuleError(exc.code, redact(exc.message), _http_status_for_tool_error(exc.code)) from None
 
     saved_artifact = None
     save_note = None
@@ -966,16 +1136,12 @@ async def run_protein_methods_cli(
             save_note = "当前工作区未配置可写授权目录（upload_root），审计结果仅本次返回未落盘。"
 
     recorded = False
-    if ledger is not None:
-        ledger.record_module_operation(
-            workspace.id,
-            module_id="protein-methods",
-            operation=operation,
+    if ledger is not None and ledger_ev_id is not None:
+        ledger.finish_module_operation(
+            ledger_ev_id,
             state="SUCCEEDED" if result.get("status") != "not_evaluable" else "FAILED",
-            input_data=redact(input_meta),
             output_data=redact(result),
             saved_artifact=saved_artifact,
-            conversation_id=conversation_id,
         )
         recorded = True
 

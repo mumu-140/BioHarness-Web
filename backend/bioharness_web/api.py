@@ -132,6 +132,8 @@ class LiteratureRunBody(BaseModel):
     lanes: bool = True
     save_output: bool = True
     conversation_id: str | None = None
+    request_id: str | None = None
+    scope_id: str | None = None
 
 
 class StatisticsReportBindingBody(BaseModel):
@@ -141,6 +143,8 @@ class StatisticsReportBindingBody(BaseModel):
     report_path: str | None = None
     save_output: bool = True
     conversation_id: str | None = None
+    request_id: str | None = None
+    scope_id: str | None = None
 
 
 class ProteinRunBody(BaseModel):
@@ -160,6 +164,8 @@ class ProteinRunBody(BaseModel):
     model_index: int | None = None
     save_output: bool = True
     conversation_id: str | None = None
+    request_id: str | None = None
+    scope_id: str | None = None
 
 
 class MemoryProposeBody(BaseModel):
@@ -660,6 +666,8 @@ def create_router(
                 lanes=body.lanes,
                 save_output=body.save_output,
                 conversation_id=body.conversation_id,
+                request_id=body.request_id,
+                scope_id=body.scope_id,
                 ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:
@@ -684,6 +692,8 @@ def create_router(
                 report_path=body.report_path,
                 save_output=body.save_output,
                 conversation_id=body.conversation_id,
+                request_id=body.request_id,
+                scope_id=body.scope_id,
                 ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:
@@ -711,6 +721,8 @@ def create_router(
                 model_index=body.model_index,
                 save_output=body.save_output,
                 conversation_id=body.conversation_id,
+                request_id=body.request_id,
+                scope_id=body.scope_id,
                 ledger=runtime.ledger if runtime is not None else None,
             )
         except UnknownWorkspace as error:

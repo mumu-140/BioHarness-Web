@@ -111,10 +111,17 @@ async function apiJson(page, relUrl) {
       coreQuestion === verbatimQuestion && !coreQuestion.includes('附带研究资料'),
       `coreQuestion=${JSON.stringify(coreQuestion)}`,
     );
+    const coreAnswer = nowResp.body?.data?.answer || '';
+    const threadText = await page.getByTestId('bh-chat-route').innerText();
     check(
-      '2. Model provider actually received uploaded counts.csv path + SHA-256 separately',
-      firstPayloadText.includes('counts.csv') && firstPayloadText.includes('sha256='),
-      firstPayloadText.slice(0, 220),
+      '2. Uploaded counts.csv content was verified, bounded-read, and actually computed in analysis (G1=2.80x, G2=2.61x)',
+      firstPayloadText.includes('counts.csv') &&
+        firstPayloadText.includes('sha256=') &&
+        firstPayloadText.includes('G1,10.2,28.6') &&
+        coreAnswer.includes('G1=2.80x') &&
+        coreAnswer.includes('G2=2.61x') &&
+        threadText.includes('G1=2.80x'),
+      `coreAnswer=${coreAnswer}`,
     );
 
     // 3. Module artifact persistence -> one-click verify -> ledger -> attach to conversation -> real follow-up run
@@ -184,6 +191,19 @@ async function apiJson(page, relUrl) {
     await reuseCsv.waitFor({ timeout: 10000 });
     await reuseCsv.click();
     await page.getByTestId('bh-attached-chip-counts.csv').waitFor({ timeout: 10000 });
+
+    // Select model-deep + thorough strategy, reload page, and confirm model/strategy/attachment persist before switching!
+    await page.getByTestId('bh-quick-model-select').selectOption('env-default::model-deep');
+    await page.getByTestId('bh-strategy-select').selectOption('thorough');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByTestId('bh-attached-chip-counts.csv').waitFor({ timeout: 15000 });
+    const persistedModel = await page.getByTestId('bh-quick-model-select').inputValue();
+    const persistedStrat = await page.getByTestId('bh-strategy-select').inputValue();
+    check(
+      '7a. Reload preserves staged attachment, model override (model-deep), and strategy (thorough)',
+      persistedModel === 'env-default::model-deep' && persistedStrat === 'thorough',
+      `model=${persistedModel} strategy=${persistedStrat}`,
+    );
 
     // Switch workspace to "secondary"
     await page.getByTestId('bh-workspace-select').selectOption('secondary');

@@ -59,14 +59,24 @@ export default function BioHarnessDomainModulesPanel() {
   const {
     service,
     workspace,
+    selectedScopeId,
     selectedRequestId,
     linkedConversationId,
     stageTextInConversation,
     attachFileToConversation,
   } = useBioHarnessWorkspace();
-  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedRequestId ?? 'none'}`;
+  const contextKey = `${service ?? 'svc'}::${workspace ?? 'ws'}::${selectedScopeId ?? 'none'}::${selectedRequestId ?? 'none'}`;
   const contextKeyRef = useRef(contextKey);
   contextKeyRef.current = contextKey;
+  const wrapScopedError = (snapKey: string, err: unknown) => {
+    const wrapped = err instanceof Error ? err : new Error(String(err));
+    (wrapped as Error & { __bhSnapKey?: string }).__bhSnapKey = snapKey;
+    return wrapped;
+  };
+  const isStaleScopedError = (err: unknown): boolean => {
+    const key = (err as { __bhSnapKey?: string } | null)?.__bhSnapKey;
+    return Boolean(key && key !== contextKeyRef.current);
+  };
 
   const invalidateAfterModuleRun = (snapSvc: string | null, snapWs: string | null, snapConvo: string | null) => {
     if (!snapSvc || !snapWs) return;
@@ -105,11 +115,16 @@ export default function BioHarnessDomainModulesPanel() {
   const [litQuestion, setLitQuestion] = useState('');
   const [litRunResult, setLitRunResult] = useState<Record<string, unknown> | null>(null);
   const [litSavedArtifact, setLitSavedArtifact] = useState<WorkspaceInputFile | null>(null);
+  const [litSavedPdfs, setLitSavedPdfs] = useState<WorkspaceInputFile[]>([]);
   const litInspectMutation = useMutation({
     mutationFn: async (vars: { path: string; offset: number }) => {
       const snapKey = contextKeyRef.current;
-      const res = await inspectLiteratureArtifact(workspace!, { path: vars.path, offset: vars.offset, limit: 10 });
-      return { snapKey, res };
+      try {
+        const res = await inspectLiteratureArtifact(workspace!, { path: vars.path, offset: vars.offset, limit: 10 });
+        return { snapKey, res };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, res }) => {
       if (contextKeyRef.current !== snapKey) return;
@@ -117,7 +132,10 @@ export default function BioHarnessDomainModulesPanel() {
       setLitOffset(res.offset);
       setLitErr(null);
     },
-    onError: (err) => setLitErr(err instanceof Error ? err.message : String(err)),
+    onError: (err) => {
+      if (isStaleScopedError(err)) return;
+      setLitErr(err instanceof Error ? err.message : String(err));
+    },
   });
   const litRunMutation = useMutation({
     mutationFn: async () => {
@@ -125,24 +143,34 @@ export default function BioHarnessDomainModulesPanel() {
       const snapSvc = service;
       const snapWs = workspace;
       const snapConvo = linkedConversationId;
-      const res = await runLiteratureModule(workspace!, {
-        operation: 'search',
-        question: litQuestion.trim(),
-        maximum: 10,
-        iterations: 2,
-        save_output: true,
-        conversation_id: linkedConversationId ?? undefined,
-      });
-      return { snapKey, snapSvc, snapWs, snapConvo, res };
+      try {
+        const res = await runLiteratureModule(workspace!, {
+          operation: 'search',
+          question: litQuestion.trim(),
+          maximum: 10,
+          iterations: 2,
+          save_output: true,
+          conversation_id: linkedConversationId ?? undefined,
+          request_id: selectedRequestId ?? undefined,
+          scope_id: selectedScopeId ?? undefined,
+        });
+        return { snapKey, snapSvc, snapWs, snapConvo, res };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
       invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
       if (contextKeyRef.current !== snapKey) return;
       setLitRunResult(res.result);
       setLitSavedArtifact(res.saved_artifact ?? null);
+      setLitSavedPdfs(res.saved_pdfs ?? []);
       setLitErr(null);
     },
-    onError: (err) => setLitErr(err instanceof Error ? err.message : String(err)),
+    onError: (err) => {
+      if (isStaleScopedError(err)) return;
+      setLitErr(err instanceof Error ? err.message : String(err));
+    },
   });
 
   // --- Statistics state ---
@@ -168,15 +196,21 @@ export default function BioHarnessDomainModulesPanel() {
       const rec = (override?.records_path ?? statRecordsPath).trim();
       const tpl = (override?.template_path ?? statTemplatePath).trim() || undefined;
       const rep = (override?.report_path ?? statReportPath).trim() || undefined;
-      const res = await runStatisticsReportBinding(workspace!, {
-        action: act,
-        records_path: rec,
-        template_path: tpl,
-        report_path: rep,
-        save_output: true,
-        conversation_id: linkedConversationId ?? undefined,
-      });
-      return { snapKey, snapSvc, snapWs, snapConvo, res };
+      try {
+        const res = await runStatisticsReportBinding(workspace!, {
+          action: act,
+          records_path: rec,
+          template_path: tpl,
+          report_path: rep,
+          save_output: true,
+          conversation_id: linkedConversationId ?? undefined,
+          request_id: selectedRequestId ?? undefined,
+          scope_id: selectedScopeId ?? undefined,
+        });
+        return { snapKey, snapSvc, snapWs, snapConvo, res };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
       invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
@@ -187,7 +221,10 @@ export default function BioHarnessDomainModulesPanel() {
       }
       setStatErr(null);
     },
-    onError: (err) => setStatErr(err instanceof Error ? err.message : String(err)),
+    onError: (err) => {
+      if (isStaleScopedError(err)) return;
+      setStatErr(err instanceof Error ? err.message : String(err));
+    },
   });
 
   // --- Protein Methods state ---
@@ -203,15 +240,21 @@ export default function BioHarnessDomainModulesPanel() {
       const snapSvc = service;
       const snapWs = workspace;
       const snapConvo = linkedConversationId;
-      const res = await runProteinModule(workspace!, {
-        operation: protOp,
-        input_path: protInputPath.trim(),
-        reference_path: protRefPath.trim() || undefined,
-        mapping_path: protMapPath.trim() || undefined,
-        save_output: true,
-        conversation_id: linkedConversationId ?? undefined,
-      });
-      return { snapKey, snapSvc, snapWs, snapConvo, res };
+      try {
+        const res = await runProteinModule(workspace!, {
+          operation: protOp,
+          input_path: protInputPath.trim(),
+          reference_path: protRefPath.trim() || undefined,
+          mapping_path: protMapPath.trim() || undefined,
+          save_output: true,
+          conversation_id: linkedConversationId ?? undefined,
+          request_id: selectedRequestId ?? undefined,
+          scope_id: selectedScopeId ?? undefined,
+        });
+        return { snapKey, snapSvc, snapWs, snapConvo, res };
+      } catch (err) {
+        throw wrapScopedError(snapKey, err);
+      }
     },
     onSuccess: ({ snapKey, snapSvc, snapWs, snapConvo, res }) => {
       invalidateAfterModuleRun(snapSvc, snapWs, snapConvo);
@@ -219,7 +262,10 @@ export default function BioHarnessDomainModulesPanel() {
       setProtResult(res);
       setProtErr(null);
     },
-    onError: (err) => setProtErr(err instanceof Error ? err.message : String(err)),
+    onError: (err) => {
+      if (isStaleScopedError(err)) return;
+      setProtErr(err instanceof Error ? err.message : String(err));
+    },
   });
 
   // Reset module selections and results on workspace change to guarantee strict isolation
@@ -231,6 +277,7 @@ export default function BioHarnessDomainModulesPanel() {
     setLitQuestion('');
     setLitRunResult(null);
     setLitSavedArtifact(null);
+    setLitSavedPdfs([]);
     setStatAction('render');
     setStatRecordsPath('');
     setStatTemplatePath('');
@@ -244,7 +291,7 @@ export default function BioHarnessDomainModulesPanel() {
     setProtMapPath('');
     setProtResult(null);
     setProtErr(null);
-  }, [workspace]);
+  }, [workspace, selectedScopeId, selectedRequestId]);
 
   const isLinkedDelivered = !nowQuery.data?.ok || nowQuery.data.data?.phase === 'DELIVERED';
   const attachArtifact = (file: WorkspaceInputFile) =>

@@ -145,6 +145,26 @@
     2. `BioHarness-Modules` (`bioharness-module-scientific-review`)：`core_advisor.py` 当前仍经 `CodeArtsIntakeReviewer` 调用外部 CLI，未提供直连模型 API 适配器（Web 侧已动态探测并如实披露）。
     3. 上游检索/文献工具（`paperseek`、`scansci-pdf`、`paperqa2`）及 Statistics 临床亚组审查器（`PRODUCTION_NOT_ENABLED`）由部署环境与上游模块独立决定，Web 侧严格按实测可用状态开放或降级提示。
 
+### R3 终轮针对性修复与收尾（基线 `625f3de`，已完成并专项回归，暂未部署，2026-11-28）
+- [x] **1. Literature PDF 实际留存 + 附件有界安全读取与文件身份核验：**
+  - `backend/bioharness_web/domain_modules.py` 在 `run_literature_cli(operation="fetch")` 清理临时目录前，遍历非符号链接的常规 `.pdf` 文件并通过既有 `inputs.save_module_artifact()` 持久化至 `<upload_root>/module-artifacts/literature/`，同时重写落盘的 `downloads.json` 与返回 `entries` 指向持久 `$WORKSPACE/...` 路径与 SHA-256（不再残留已删除的 `/tmp` 路径），并随响应返回 `saved_pdfs`。
+  - `backend/bioharness_web/inputs.py` 复用 `evidence._open_checked`（`O_RDONLY | O_NOFOLLOW | O_NONBLOCK` + 文件描述符级复核）与 64 KiB 分块流式哈希（受 `evidence.HASH_LIMIT_BYTES` 64 MiB 约束）改造 `validate_attachments()`，并新增 `read_attachment_for_model()` 在运行期二次核验文件身份（`MATCHES_RECORD` / `DIFFERS_FROM_RECORD` / `UNAVAILABLE` / `NOT_CHECKED`）：对可读文本/表格/序列/JSON 附件提供有界头尾摘录（单文件上限 8,000 字符、总预算 16,000 字符、红线脱敏），对漂移文件拒绝向模型注入内容并触发 `ATTACHMENT_IDENTITY_DRIFT` 提示，对 PDF/图片等二进制附件仅核验摘要与魔数头而不灌入原始二进制。
+- [x] **2. 技术账本真实执行生命周期、状态、时间、原子性与归属：**
+  - `backend/bioharness_web/ledger.py` 复用既有 `ledger.sqlite3`（幂等补齐 `request_id`、`scope_id`、`run_id`、`operation_id`、`started_at`、`ended_at` 列），新增 `_tx()`（`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` 显式事务）与两阶段 `start_module_operation()` / `finish_module_operation()`：CLI 启动前记录 `STARTED` 与真实 `started_at`（校验 `conversation_id` 归属当前工作区并继承绑定 `request_id`），结束后原子写入终态与真实 `ended_at`；服务重启时 `recover()` 将未完成 `STARTED` 模块操作原子转为 `UNKNOWN`；`conversations()` 查询排除 `module:%` 合成运行以免覆盖聊天会话的 `last_run_state`。
+- [x] **3. 项目 / 请求 / 附件 / 异步响应隔离与重载续接：**
+  - `ui/client/src/host/workspace.tsx` 将 `pendingAttachments` 绑定至所属 `workspace` 防止跨工作区串扰，并按 `service::workspace::context` 隔离维护 `sessionStorage` 续接草稿（模型覆盖、运行策略、待附带附件，零凭据）；`BioHarnessChatRoute.tsx` 支持页面重载后恢复当前上下文的模型覆盖、策略与待附带附件（已有会话亦从 `run.started` 回溯恢复），并在提交成功后同步清空已提交附件草稿。
+  - `BioHarnessCapabilitiesRoute.tsx` 与 `BioHarnessDomainModulesPanel.tsx` 补齐全部异步 `onError` 回调的过期上下文守卫，并将 `scope_id`/`request_id` 传递至模块执行接口用于账本归属。
+- [x] **4. 移除不可靠模块能力推断，保留真实 CLI 错误类型：**
+  - 移除 `domain_modules.py` 中对 `scientific-review` 源码的关键字 grep 推断，已配置 `[advisor]` 诚实标注 `callable: None`（非盲目推断 `True`），对 `paperqa2` 与参考模块使用真实安装存在性检查。
+  - `cli.py` 复用 `_run()` 暴露 `run_raw()`；`domain_modules.py` 移除执行前同步探活对错误码的吞并，完整保留 `TOOL_UNAVAILABLE`（503）、`TOOL_TIMEOUT`（504）、`TOOL_BAD_OUTPUT`/`TOOL_FAILED`（502）与 `bioharness-literature` 的 `UPSTREAM_UNAVAILABLE`（503），仅在 `statistics` 实际返回 `REPORT_BINDING_FAIL` 数值不一致时输出 `REPORT_BINDING_FAIL`。
+- [x] **5. 针对性回归与实测验证上传数据被真实读取并用于分析：**
+  - **Python 隔离全量回归**：`pytest -q` **269 passed in 249.02s (0 failed, 0 skipped)**，含 `tests/backend/test_r3_audit_fixes.py` 新增 4 项（Literature PDF 持久化与 `downloads.json` 重写、CSV 有界读取/模型动态计算 `G1_fold_change=3.50x`/漂移拒绝、账本两阶段生命周期+重启 `UNKNOWN`+`last_run_state` 隔离、真实 CLI 错误码保真）。
+  - **前端检查（`node:24.22.3-slim`）**：`tsc --noEmit` **0 错误**；Jest **8 suites / 35 tests passed**；Vite 生产构建通过。
+  - **真实 Chromium 验收（5/5 R3 套件全通过，86/86 PASS）**：
+    - `ui_r3_audit_run.sh` **13/13 PASS** — 实证覆盖上传 `counts.csv` 经身份核验与有界读取后被模型动态解析并计算出 `G1=2.80x, G2=2.61x` 写入 Core 答案、重载后 `model-deep` + `thorough` + 待附带附件完整保留、双工作区与多项目零串扰、Statistics 落盘/核验/回附与中断续接+服务重启持久化。
+    - `ui_r3_2_run.sh` **17/17**、`ui_r3_3_run.sh` **22/22**、`ui_r3_4_run.sh` **14/14**、`ui_r3_5_run.sh` **20/20** 全部通过。
+  - **边界复核**：未新增数据库、状态机、门禁、调度框架或平行计划；`BioHarness-Core`、`BioHarness-Modules`、依赖文件及生产服务均**零改动**；外部模块缺口保持诚实披露。
+
 ## 4. 验收记录规则
 
 R3 开发检查点、缺口与验证结果只更新本文件相应小节（短摘要 + Git SHA/测试证据身份），上级只更新阶段状态。必要且实质的长期架构改变需使用者批准后更新现有架构文档；不新增平行计划。测试证据、截图、真实输入与凭据保持在授权的私有 CI/科研目录。

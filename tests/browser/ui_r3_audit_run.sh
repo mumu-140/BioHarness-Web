@@ -130,14 +130,22 @@ async def completions(request: Request):
         else:
             decision = {"text": "Resumed and delivered cleanly."}
     else:
+        import re as _re
+        g1 = _re.search(r"G1,([0-9.]+),([0-9.]+)", all_text)
+        g2 = _re.search(r"G2,([0-9.]+),([0-9.]+)", all_text)
+        computed_note = ""
+        if g1 and g2:
+            r1 = float(g1.group(2)) / float(g1.group(1))
+            r2 = float(g2.group(2)) / float(g2.group(1))
+            computed_note = f" [parsed_csv: G1={r1:.2f}x, G2={r2:.2f}x]"
         if len(tools_done) == 0:
             decision = {"tool_calls": [{"name": "science_plan", "arguments": {"plan": PLAN}}]}
         elif len(tools_done) == 1:
-            decision = {"tool_calls": [{"name": "science_submit", "arguments": SUBMIT_DONE}]}
+            decision = {"tool_calls": [{"name": "science_submit", "arguments": {**SUBMIT_DONE, "summary": "Parsed attached data." + computed_note}}]}
         elif len(tools_done) == 2:
-            decision = {"tool_calls": [{"name": "science_deliver", "arguments": DELIVER_DONE}]}
+            decision = {"tool_calls": [{"name": "science_deliver", "arguments": {**DELIVER_DONE, "answer": "Audit verified reply grounded in workspace inputs." + computed_note}}]}
         else:
-            decision = {"text": f"Audit verified reply using model={model}."}
+            decision = {"text": f"Audit verified reply using model={model}.{computed_note}"}
 
     async def gen():
         if "tool_calls" in decision:

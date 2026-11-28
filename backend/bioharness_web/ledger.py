@@ -14,6 +14,7 @@ import json
 import secrets
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,8 @@ CREATE TABLE IF NOT EXISTS workspace_module_events (
     id TEXT PRIMARY KEY,
     workspace TEXT NOT NULL,
     conversation_id TEXT,
+    request_id TEXT,
+    scope_id TEXT,
     module_id TEXT NOT NULL,
     operation TEXT NOT NULL,
     state TEXT NOT NULL,
@@ -66,6 +69,10 @@ CREATE TABLE IF NOT EXISTS workspace_module_events (
     output_json TEXT,
     error_json TEXT,
     saved_artifact_json TEXT,
+    run_id TEXT,
+    operation_id TEXT,
+    started_at TEXT,
+    ended_at TEXT,
     at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS module_events_by_workspace ON workspace_module_events(workspace, at DESC);
@@ -103,6 +110,38 @@ class Ledger:
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.executescript("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;" + _SCHEMA)
+        self._migrate_module_events_columns()
+
+    def _migrate_module_events_columns(self) -> None:
+        existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(workspace_module_events)").fetchall()
+        }
+        additions = (
+            ("request_id", "TEXT"),
+            ("scope_id", "TEXT"),
+            ("run_id", "TEXT"),
+            ("operation_id", "TEXT"),
+            ("started_at", "TEXT"),
+            ("ended_at", "TEXT"),
+        )
+        for col, col_type in additions:
+            if col not in existing:
+                self._db.execute(f"ALTER TABLE workspace_module_events ADD COLUMN {col} {col_type}")
+
+    @contextmanager
+    def _tx(self):
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                yield self._db
+                self._db.execute("COMMIT")
+            except BaseException:
+                try:
+                    self._db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
 
     def close(self) -> None:
         self._db.close()
@@ -131,6 +170,7 @@ class Ledger:
         rows = self._all(
             "SELECT c.*, "
             "(SELECT r.state FROM runs r WHERE r.conversation_id = c.id "
+            " AND (r.reason IS NULL OR r.reason NOT LIKE 'module:%') "
             " ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1) AS last_run_state, "
             "(SELECT e.data FROM events e WHERE e.conversation_id = c.id AND e.type = 'user.message' "
             " ORDER BY e.seq ASC LIMIT 1) AS _first_user_event, "
@@ -262,6 +302,191 @@ class Ledger:
     def operations(self, run_id: str) -> list[dict]:
         return self._all("SELECT * FROM operations WHERE run_id = ? ORDER BY started_at, id", run_id)
 
+    def start_module_operation(
+        self,
+        workspace: str,
+        *,
+        module_id: str,
+        operation: str,
+        input_data: Any = None,
+        conversation_id: str | None = None,
+        request_id: str | None = None,
+        scope_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically record the start of a real professional-module CLI invocation (`state='STARTED'`).
+
+        Validates that any supplied `conversation_id` belongs to `workspace` (never leaking across
+        workspaces) and inherits the conversation's bound `request_id` if none was supplied.
+        """
+        ev_id = new_id("mod")
+        started_at = _now()
+        bounded_in = bounded(input_data) if input_data is not None else None
+        valid_convo_id: str | None = None
+        resolved_req_id = request_id.strip() if isinstance(request_id, str) and request_id.strip() else None
+        resolved_scope_id = scope_id.strip() if isinstance(scope_id, str) and scope_id.strip() else None
+
+        with self._tx() as db:
+            if conversation_id:
+                row = db.execute(
+                    "SELECT id, request_id FROM conversations WHERE id = ? AND workspace = ?",
+                    (conversation_id, workspace),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"conversation {conversation_id} does not belong to workspace {workspace}")
+                valid_convo_id = str(row["id"])
+                if not resolved_req_id and row["request_id"]:
+                    resolved_req_id = str(row["request_id"])
+
+            db.execute(
+                "INSERT INTO workspace_module_events "
+                "(id, workspace, conversation_id, request_id, scope_id, module_id, operation, state, "
+                " input_json, output_json, error_json, saved_artifact_json, run_id, operation_id, "
+                " started_at, ended_at, at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'STARTED', ?, NULL, NULL, NULL, NULL, NULL, ?, NULL, ?)",
+                (
+                    ev_id,
+                    workspace,
+                    valid_convo_id,
+                    resolved_req_id,
+                    resolved_scope_id,
+                    module_id,
+                    operation,
+                    json.dumps(bounded_in, ensure_ascii=False, default=str) if bounded_in is not None else None,
+                    started_at,
+                    started_at,
+                ),
+            )
+
+        return {
+            "id": ev_id,
+            "workspace": workspace,
+            "conversation_id": valid_convo_id,
+            "request_id": resolved_req_id,
+            "scope_id": resolved_scope_id,
+            "module_id": module_id,
+            "operation": operation,
+            "state": "STARTED",
+            "started_at": started_at,
+            "ended_at": None,
+            "at": started_at,
+        }
+
+    def finish_module_operation(
+        self,
+        event_id: str,
+        *,
+        state: str,
+        output_data: Any = None,
+        error_data: Any = None,
+        saved_artifact: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically complete a STARTED professional-module invocation with real ended_at & terminal status.
+
+        When bound to a conversation, writes the completed technical `runs`, `operations`, and
+        `operation.started`/`operation.finished` entries in the SAME SQLite transaction with true
+        `started_at`/`ended_at` and terminal status (FINISHED/FAILED/INTERRUPTED), without polluting
+        active chat runs or `last_run_state`.
+        """
+        assert state in OPERATION_ENDED
+        ended_at = _now()
+        bounded_out = bounded(output_data) if output_data is not None else None
+        bounded_err = bounded(error_data) if error_data is not None else None
+
+        with self._tx() as db:
+            row = db.execute(
+                "SELECT * FROM workspace_module_events WHERE id = ? AND state = 'STARTED'",
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            rec = dict(row)
+            started_at = rec.get("started_at") or rec["at"]
+            valid_convo_id = rec.get("conversation_id")
+            rec_run_id: str | None = None
+            op_id: str | None = None
+
+            if valid_convo_id is not None:
+                rec_run_id = new_id("run")
+                op_id = new_id("op")
+                run_state = (
+                    "FINISHED"
+                    if state == "SUCCEEDED"
+                    else ("INTERRUPTED" if state == "UNKNOWN" else ("CANCELLED" if state == "CANCELLED" else "FAILED"))
+                )
+                db.execute(
+                    "INSERT INTO runs (id, conversation_id, state, started_at, ended_at, reason) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (rec_run_id, valid_convo_id, run_state, started_at, ended_at, f"module:{rec['module_id']}:{rec['operation']}"),
+                )
+                db.execute(
+                    "INSERT INTO operations (id, run_id, kind, name, state, started_at, ended_at) "
+                    "VALUES (?, ?, 'tool', ?, ?, ?, ?)",
+                    (op_id, rec_run_id, f"{rec['module_id']}:{rec['operation']}", state, started_at, ended_at),
+                )
+                started_payload: dict[str, Any] = {
+                    "operation_id": op_id,
+                    "kind": "tool",
+                    "name": f"{rec['module_id']}:{rec['operation']}",
+                    "server": rec["module_id"],
+                    "initiator": "user",
+                    "input": json.loads(rec["input_json"]) if rec["input_json"] else None,
+                }
+                if rec.get("request_id"):
+                    started_payload["request_id"] = rec["request_id"]
+                if rec.get("scope_id"):
+                    started_payload["scope_id"] = rec["scope_id"]
+                finished_payload: dict[str, Any] = {
+                    "operation_id": op_id,
+                    "kind": "tool",
+                    "name": f"{rec['module_id']}:{rec['operation']}",
+                    "server": rec["module_id"],
+                    "state": state,
+                    "output": bounded_out,
+                    "error": bounded_err,
+                }
+                if saved_artifact is not None:
+                    finished_payload["saved_artifact"] = saved_artifact
+                db.execute(
+                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
+                    (valid_convo_id, rec_run_id, "operation.started", json.dumps(started_payload, ensure_ascii=False, default=str), started_at),
+                )
+                db.execute(
+                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
+                    (valid_convo_id, rec_run_id, "operation.finished", json.dumps(finished_payload, ensure_ascii=False, default=str), ended_at),
+                )
+
+            db.execute(
+                "UPDATE workspace_module_events "
+                "SET state = ?, output_json = ?, error_json = ?, saved_artifact_json = ?, "
+                "    run_id = ?, operation_id = ?, ended_at = ? "
+                "WHERE id = ? AND state = 'STARTED'",
+                (
+                    state,
+                    json.dumps(bounded_out, ensure_ascii=False, default=str) if bounded_out is not None else None,
+                    json.dumps(bounded_err, ensure_ascii=False, default=str) if bounded_err is not None else None,
+                    json.dumps(saved_artifact, ensure_ascii=False, default=str) if saved_artifact is not None else None,
+                    rec_run_id,
+                    op_id,
+                    ended_at,
+                    event_id,
+                ),
+            )
+
+        return {
+            "id": event_id,
+            "workspace": rec["workspace"],
+            "conversation_id": valid_convo_id,
+            "request_id": rec.get("request_id"),
+            "scope_id": rec.get("scope_id"),
+            "module_id": rec["module_id"],
+            "operation": rec["operation"],
+            "state": state,
+            "saved_artifact": saved_artifact,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "at": started_at,
+        }
+
     def record_module_operation(
         self,
         workspace: str,
@@ -274,107 +499,33 @@ class Ledger:
         error_data: Any = None,
         saved_artifact: dict[str, Any] | None = None,
         conversation_id: str | None = None,
+        request_id: str | None = None,
+        scope_id: str | None = None,
     ) -> dict[str, Any]:
-        """Record a real professional-module CLI invocation in the existing technical ledger.
-
-        If `conversation_id` is supplied and belongs to `workspace`, also records a standard
-        `operations` + `operation.started`/`operation.finished` entry so `/w/executions` displays
-        the invocation with its domain output renderer without altering active chat run state.
-        """
-        assert state in OPERATION_ENDED
-        ev_id = new_id("mod")
-        at = _now()
-        bounded_in = bounded(input_data) if input_data is not None else None
-        bounded_out = bounded(output_data) if output_data is not None else None
-        bounded_err = bounded(error_data) if error_data is not None else None
-        valid_convo_id: str | None = None
-
-        with self._lock:
-            if conversation_id:
-                row = self._db.execute(
-                    "SELECT id FROM conversations WHERE id = ? AND workspace = ?",
-                    (conversation_id, workspace),
-                ).fetchone()
-                if row is not None:
-                    valid_convo_id = str(row["id"])
-
-            self._db.execute(
-                "INSERT INTO workspace_module_events "
-                "(id, workspace, conversation_id, module_id, operation, state, input_json, output_json, "
-                " error_json, saved_artifact_json, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    ev_id,
-                    workspace,
-                    valid_convo_id,
-                    module_id,
-                    operation,
-                    state,
-                    json.dumps(bounded_in, ensure_ascii=False, default=str) if bounded_in is not None else None,
-                    json.dumps(bounded_out, ensure_ascii=False, default=str) if bounded_out is not None else None,
-                    json.dumps(bounded_err, ensure_ascii=False, default=str) if bounded_err is not None else None,
-                    json.dumps(saved_artifact, ensure_ascii=False, default=str) if saved_artifact is not None else None,
-                    at,
-                ),
-            )
-
-            if valid_convo_id is not None:
-                # Attach a completed non-running technical record under this conversation so
-                # /w/executions observes the real module call without emitting chat run.started/finished.
-                rec_run_id = new_id("run")
-                op_id = new_id("op")
-                self._db.execute(
-                    "INSERT INTO runs (id, conversation_id, state, started_at, ended_at, reason) "
-                    "VALUES (?, ?, 'FINISHED', ?, ?, ?)",
-                    (rec_run_id, valid_convo_id, at, at, f"module:{module_id}:{operation}"),
-                )
-                self._db.execute(
-                    "INSERT INTO operations (id, run_id, kind, name, state, started_at, ended_at) "
-                    "VALUES (?, ?, 'tool', ?, ?, ?, ?)",
-                    (op_id, rec_run_id, f"{module_id}:{operation}", state, at, at),
-                )
-                started_payload = {
-                    "operation_id": op_id,
-                    "kind": "tool",
-                    "name": f"{module_id}:{operation}",
-                    "server": module_id,
-                    "initiator": "user",
-                    "input": bounded_in,
-                }
-                finished_payload: dict[str, Any] = {
-                    "operation_id": op_id,
-                    "kind": "tool",
-                    "name": f"{module_id}:{operation}",
-                    "server": module_id,
-                    "state": state,
-                    "output": bounded_out,
-                    "error": bounded_err,
-                }
-                if saved_artifact is not None:
-                    finished_payload["saved_artifact"] = saved_artifact
-                self._db.execute(
-                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
-                    (valid_convo_id, rec_run_id, "operation.started", json.dumps(started_payload, ensure_ascii=False, default=str), at),
-                )
-                self._db.execute(
-                    "INSERT INTO events (conversation_id, run_id, type, data, at) VALUES (?, ?, ?, ?, ?)",
-                    (valid_convo_id, rec_run_id, "operation.finished", json.dumps(finished_payload, ensure_ascii=False, default=str), at),
-                )
-
-        return {
-            "id": ev_id,
-            "workspace": workspace,
-            "conversation_id": valid_convo_id,
-            "module_id": module_id,
-            "operation": operation,
-            "state": state,
-            "saved_artifact": saved_artifact,
-            "at": at,
-        }
+        """Convenience wrapper delegating to atomic start_module_operation + finish_module_operation."""
+        started = self.start_module_operation(
+            workspace,
+            module_id=module_id,
+            operation=operation,
+            input_data=input_data,
+            conversation_id=conversation_id,
+            request_id=request_id,
+            scope_id=scope_id,
+        )
+        finished = self.finish_module_operation(
+            started["id"],
+            state=state,
+            output_data=output_data,
+            error_data=error_data,
+            saved_artifact=saved_artifact,
+        )
+        return finished or started
 
     def module_invocations(self, workspace: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = self._all(
-            "SELECT id, conversation_id, module_id, operation, state, input_json, error_json, "
-            "saved_artifact_json, at FROM workspace_module_events "
+            "SELECT id, conversation_id, request_id, scope_id, module_id, operation, state, "
+            "input_json, error_json, saved_artifact_json, started_at, ended_at, at "
+            "FROM workspace_module_events "
             "WHERE workspace = ? ORDER BY rowid DESC LIMIT ?",
             workspace,
             max(1, min(limit, 100)),
@@ -384,13 +535,17 @@ class Ledger:
             out.append({
                 "id": r["id"],
                 "conversation_id": r["conversation_id"],
+                "request_id": r["request_id"],
+                "scope_id": r["scope_id"],
                 "module_id": r["module_id"],
                 "operation": r["operation"],
                 "state": r["state"],
                 "input": json.loads(r["input_json"]) if r["input_json"] else None,
                 "error": json.loads(r["error_json"]) if r["error_json"] else None,
                 "saved_artifact": json.loads(r["saved_artifact_json"]) if r["saved_artifact_json"] else None,
-                "at": r["at"],
+                "started_at": r["started_at"] or r["at"],
+                "ended_at": r["ended_at"],
+                "at": r["started_at"] or r["at"],
             })
         return out
 
@@ -399,7 +554,7 @@ class Ledger:
         tool_rows = self._all(
             "SELECT o.name AS name, COUNT(*) AS cnt "
             "FROM operations o JOIN runs r ON r.id = o.run_id JOIN conversations c ON c.id = r.conversation_id "
-            "WHERE c.workspace = ? AND o.kind = 'tool' GROUP BY o.name",
+            "WHERE c.workspace = ? AND o.kind = 'tool' AND o.state != 'STARTED' GROUP BY o.name",
             workspace,
         )
         tools = {str(row["name"]): int(row["cnt"]) for row in tool_rows}
@@ -423,10 +578,11 @@ class Ledger:
             if isinstance(srv, str) and srv and "name" in data:
                 servers[srv] = servers.get(srv, 0) + 1
 
-        # Include workspace-level module invocations that were not already counted via a conversation op
+        # Include finished workspace-level module invocations not already counted via conversation ops
         mod_rows = self._all(
             "SELECT module_id, operation, COUNT(*) AS cnt FROM workspace_module_events "
-            "WHERE workspace = ? AND conversation_id IS NULL GROUP BY module_id, operation",
+            "WHERE workspace = ? AND conversation_id IS NULL AND state != 'STARTED' "
+            "GROUP BY module_id, operation",
             workspace,
         )
         extra_calls = 0
@@ -529,4 +685,16 @@ class Ledger:
             self.end_run(run["id"], "INTERRUPTED", "service restarted")
             self.append(run["conversation_id"], run["id"], "run.finished",
                         {"state": "INTERRUPTED", "reason": "service restarted"})
+        inflight_mods = self._all(
+            "SELECT id FROM workspace_module_events WHERE state = 'STARTED'"
+        )
+        for mod in inflight_mods:
+            self.finish_module_operation(
+                mod["id"],
+                state="UNKNOWN",
+                error_data={
+                    "code": "SERVICE_RESTARTED",
+                    "message": "the service restarted before the module outcome was recorded",
+                },
+            )
         return runs

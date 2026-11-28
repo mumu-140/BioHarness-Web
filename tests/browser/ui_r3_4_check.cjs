@@ -112,7 +112,7 @@ const check = (name, ok, detail = '') => results.push({ name, ok: !!ok, detail: 
     // 4. Scientific Review honest version & CodeArtsIntakeReviewer direct-API gap disclosure
     const revGap = await page.getByTestId('bh-review-api-gap-note').innerText();
     check('Scientific Review discloses CodeArtsIntakeReviewer direct model API gap honestly',
-      revGap.includes('CodeArtsIntakeReviewer') && revGap.includes('BioHarness-Modules'),
+      revGap.includes('[advisor]') && revGap.includes('BioHarness-Modules'),
       revGap);
 
     // 5. Protein Methods: run real bioharness-protein-methods structure-inventory on helix.pdb

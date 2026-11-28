@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { atom, useSetAtom } from 'jotai';
 import { Constants } from 'librechat-data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
-import type { BioHarnessMeta, EvidenceAnchor, WorkspaceInputFile } from './bioharness';
+import type { BioHarnessMeta, EvidenceAnchor, ModelOverride, RunStrategyOption, WorkspaceInputFile } from './bioharness';
 import { bhKeys, fetchMeta } from './bioharness';
 
 export const settingsRequestedTabAtom = atom<string | null>(null);
@@ -22,6 +22,12 @@ export interface PendingScopeDraft {
   mode: 'none' | 'existing' | 'new';
   scopeId?: string;
   parentId?: string;
+}
+
+export interface ConversationContinuationDraft {
+  modelOverride: ModelOverride | null;
+  strategy: RunStrategyOption['id'];
+  attachedInputs: WorkspaceInputFile[];
 }
 
 export interface BioHarnessWorkspaceContextValue {
@@ -67,6 +73,9 @@ export interface BioHarnessWorkspaceContextValue {
   getDraft: (conversationKey: string) => string;
   setDraft: (conversationKey: string, text: string) => void;
   clearDraft: (conversationKey: string) => void;
+  getContinuationDraft?: (conversationKey: string) => ConversationContinuationDraft | null;
+  setContinuationDraft?: (conversationKey: string, next: ConversationContinuationDraft) => void;
+  clearContinuationDraft?: (conversationKey: string) => void;
   openModelSettings: () => void;
   openCapabilitiesSettings: (tab?: 'skills' | 'bhMemory' | 'modules' | 'diagnostics') => void;
 }
@@ -74,6 +83,52 @@ export interface BioHarnessWorkspaceContextValue {
 const BioHarnessWorkspaceContext = createContext<BioHarnessWorkspaceContextValue | null>(null);
 
 const DRAFT_PREFIX = 'bh:draft:v1:';
+const CONT_PREFIX = 'bh:cont:v1:';
+
+function readStoredContinuation(storageKey: string): ConversationContinuationDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(CONT_PREFIX + storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ConversationContinuationDraft>;
+    const strategy =
+      parsed.strategy === 'concise' || parsed.strategy === 'thorough' || parsed.strategy === 'standard'
+        ? parsed.strategy
+        : 'standard';
+    const modelOverride =
+      parsed.modelOverride &&
+      typeof parsed.modelOverride.provider_id === 'string' &&
+      typeof parsed.modelOverride.model === 'string'
+        ? { provider_id: parsed.modelOverride.provider_id, model: parsed.modelOverride.model }
+        : null;
+    const attachedInputs = Array.isArray(parsed.attachedInputs)
+      ? parsed.attachedInputs.filter(
+          (item): item is WorkspaceInputFile =>
+            Boolean(item && typeof item.server_path === 'string' && typeof item.name === 'string'),
+        )
+      : [];
+    return { modelOverride, strategy, attachedInputs };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredContinuation(
+  storageKey: string,
+  draft: ConversationContinuationDraft | null,
+): void {
+  try {
+    if (
+      !draft ||
+      (!draft.modelOverride && draft.strategy === 'standard' && draft.attachedInputs.length === 0)
+    ) {
+      window.sessionStorage.removeItem(CONT_PREFIX + storageKey);
+    } else {
+      window.sessionStorage.setItem(CONT_PREFIX + storageKey, JSON.stringify(draft));
+    }
+  } catch {
+    /* ignore storage quota/privacy restrictions */
+  }
+}
 
 function readStoredDraft(storageKey: string): string {
   try {
@@ -147,15 +202,23 @@ export function BioHarnessWorkspaceProvider({
 
   const [branchSource, setBranchSource] = useState<BranchSourceRef | null>(null);
   const [pendingScopeDraft, setPendingScopeDraft] = useState<PendingScopeDraft | null>(null);
-  const [pendingAttachments, setPendingAttachments] = useState<WorkspaceInputFile[]>([]);
+  const [pendingAttachmentsBox, setPendingAttachmentsBox] = useState<{
+    workspace: string;
+    files: WorkspaceInputFile[];
+  } | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setPendingAttachments([]);
+    setPendingAttachmentsBox((prev) => (prev && prev.workspace === workspace ? prev : null));
   }, [workspace]);
 
+  const pendingAttachments = useMemo(
+    () => (pendingAttachmentsBox && pendingAttachmentsBox.workspace === workspace ? pendingAttachmentsBox.files : []),
+    [pendingAttachmentsBox, workspace],
+  );
+
   const clearPendingAttachments = useCallback(() => {
-    setPendingAttachments([]);
+    setPendingAttachmentsBox(null);
   }, []);
 
   useEffect(() => {
@@ -213,6 +276,25 @@ export function BioHarnessWorkspaceProvider({
     [draftScopeKey],
   );
 
+  const getContinuationDraft = useCallback(
+    (conversationKey: string) => readStoredContinuation(draftScopeKey(conversationKey)),
+    [draftScopeKey],
+  );
+
+  const setContinuationDraft = useCallback(
+    (conversationKey: string, next: ConversationContinuationDraft) => {
+      writeStoredContinuation(draftScopeKey(conversationKey), next);
+    },
+    [draftScopeKey],
+  );
+
+  const clearContinuationDraft = useCallback(
+    (conversationKey: string) => {
+      writeStoredContinuation(draftScopeKey(conversationKey), null);
+    },
+    [draftScopeKey],
+  );
+
   const selectWorkspace = useCallback(
     (ws: string) => {
       if (!workspaces.includes(ws)) {
@@ -220,7 +302,7 @@ export function BioHarnessWorkspaceProvider({
       }
       setBranchSource(null);
       setPendingScopeDraft(null);
-      setPendingAttachments([]);
+      setPendingAttachmentsBox(null);
       const next = new URLSearchParams();
       next.set('ws', ws);
       navigate(`/c/new?${next.toString()}`);
@@ -400,16 +482,23 @@ ${snippet}` : snippet;
       conversationId?: string | null;
       requestId?: string | null;
     }) => {
-      setPendingAttachments((prev) =>
-        prev.some((item) => item.server_path === file.server_path) ? prev : [...prev, file],
-      );
+      if (!workspace) {
+        return;
+      }
+      setPendingAttachmentsBox((prev) => {
+        const base = prev && prev.workspace === workspace ? prev.files : [];
+        const nextFiles = base.some((item) => item.server_path === file.server_path)
+          ? base
+          : [...base, file];
+        return { workspace, files: nextFiles };
+      });
       if (conversationId) {
         openConversation(conversationId, { requestId: requestId ?? null });
       } else {
         openNewResearch({ requestId: requestId ?? null });
       }
     },
-    [openConversation, openNewResearch],
+    [workspace, openConversation, openNewResearch],
   );
 
   const openCapabilitiesView = useCallback(
@@ -486,6 +575,9 @@ ${snippet}` : snippet;
       getDraft,
       setDraft,
       clearDraft,
+      getContinuationDraft,
+      setContinuationDraft,
+      clearContinuationDraft,
       openModelSettings,
       openCapabilitiesSettings,
     }),
@@ -516,6 +608,9 @@ ${snippet}` : snippet;
       getDraft,
       setDraft,
       clearDraft,
+      getContinuationDraft,
+      setContinuationDraft,
+      clearContinuationDraft,
       openModelSettings,
       openCapabilitiesSettings,
     ],
