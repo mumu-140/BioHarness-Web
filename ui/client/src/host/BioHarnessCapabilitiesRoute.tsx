@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   BookOpen,
+  Boxes,
   Brain,
   CheckCircle2,
   Cpu,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { Button, Input, Spinner } from '@librechat/client';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
+import BioHarnessDomainModulesPanel from './BioHarnessDomainModulesPanel';
 import {
   bhKeys,
   expandMemory,
@@ -53,7 +55,7 @@ import {
 import { formatCompactTime, useBhText } from './i18n';
 import { useBioHarnessWorkspace } from './workspace';
 
-type CapabilitiesSubTab = 'memory' | 'capabilities' | 'documents';
+type CapabilitiesSubTab = 'memory' | 'capabilities' | 'documents' | 'modules';
 type DocRole = 'contract' | 'guide' | 'status' | 'findings_index';
 
 const RESEARCH_AREAS = [
@@ -130,7 +132,7 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
 
   const rawTab = searchParams.get('tab');
   const activeTab: CapabilitiesSubTab =
-    rawTab === 'capabilities' || rawTab === 'documents' ? rawTab : 'memory';
+    rawTab === 'capabilities' || rawTab === 'documents' || rawTab === 'modules' ? rawTab : 'memory';
 
   const setActiveTab = (nextTab: CapabilitiesSubTab) => {
     const next = new URLSearchParams(searchParams);
@@ -458,6 +460,21 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
               >
                 <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>{tr('项目文档', 'Project Documents')}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'modules'}
+                data-testid="bh-cap-subtab-modules"
+                onClick={() => setActiveTab('modules')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === 'modules'
+                    ? 'bg-surface-hover text-text-primary shadow-2xs'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{tr('专业模块', 'Domain Modules')}</span>
               </button>
             </div>
           </div>
@@ -1569,6 +1586,8 @@ const BioHarnessCapabilitiesRoute = memo(function BioHarnessCapabilitiesRoute() 
               )}
             </div>
           )}
+          {/* ===================== TAB 4: R3.4 PROFESSIONAL SCIENTIFIC MODULES ===================== */}
+          {activeTab === 'modules' && <BioHarnessDomainModulesPanel />}
         </div>
       </div>
     </div>

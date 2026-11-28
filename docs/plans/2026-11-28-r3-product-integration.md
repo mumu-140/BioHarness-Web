@@ -88,14 +88,18 @@
   - 前端检查：`tsc --noEmit` 0 错误；Jest `7 suites / 39 tests passed`（含 `r3_3.spec.tsx` 与 `registry.spec.ts`）；Vite 生产构建成功（`ui/client/dist`）。
   - 真实 Chromium 验收（`firecrawl-playwright-service:latest`）：`ui_r3_3_run.sh` **22/22 PASS**（真实 `bioharness-memory-mcp` + `bioharness-host` + `bioharness-governance`，含 390px/320px）；既有回归 `ui_run.sh` **33/33 PASS**（`/skills` donor 守卫保持未挂载）、`ui_r3_2_run.sh` **17/17 PASS**、`ui_step3_run.sh` **28/28 PASS**、`ui_step4_run.sh` **27/27 PASS**、`ui_step5_run.sh` **30/30 PASS**。
 
-### R3.4 — 专业科研模块接入
+### R3.4 — 专业科研模块接入（已完成，2026-11-28）
 
-- [ ] 在现有通用 Module inspector 和工具路由上增加真实模块发现、调用可用性、观测记录、版本、参数、输出和证据链接。先复用通用视图；只有真实模块结果需要时增加小型领域渲染器。
-- [ ] **Literature：** 对接已授权公开接口，展示实际检索结果、论文身份、来源链接/可用原文片段、分页/截断状态和实际引用；不伪造全文或引文，不宣称未启用 provider 可用。
-- [ ] **Statistics：** 显示实际实验单位、数据粒度、分组/组合、分子分母、背景、方法/检验/模型、效应量、多重校正及结果；复用模块拥有的确定性报告渲染与 report_binding 验证。当前设计指导、已实现组件和生产可调用状态分开；Web 不重算或自行推断统计结论。
-- [ ] **Scientific Review：** 显示审查意见、依据、版本、分歧和一次修订后的实际记录。核实当前模块版本及直接模型 API 接缝；任何必要适配留在 Scientific Review 所有仓库，不引入外部 Agent 运行依赖或新的审查门禁。缺失、失败、延迟及不利意见均不自动阻断任务。
-- [ ] **领域分析/Workflow：** 只接入当前公开、可调用的能力，展示真实方法、参数、状态与返回的产物。未实现或仅参考的模块保留诚实说明及通用 inspector，不复现 DAP-seq/TF/序列算法。orrery 仅在现有来源核查确有需要时评估，不提前开发 R4 provenance 图。
-- [ ] 使用已有真实小规模科研场景验证已启用的各专业模块，核对模块公开响应与用户可见内容、原始来源及实际调用。隔离测试通过不等于科学方法正确或生产已启用；无法授权的模块须列明具体阻塞与所属仓库，其他独立任务继续。
+- [x] **通用 Module inspector 与领域渲染器：** 新增 `backend/bioharness_web/domain_modules.py`、`GET /api/workspaces/{ws}/domain-modules` 与 4 个受控模块调用/审阅端点，前端新增可复用的 `ui/client/src/host/BioHarnessDomainRenderers.tsx` 与 `/w/capabilities?tab=modules`（`BioHarnessDomainModulesPanel.tsx`），并在 `BioHarnessExecutionsRoute` 单条执行详情上方自动识别并呈现领域摘要卡，保留原有技术详情折叠与通用 inspector。
+- [x] **Literature：** 对接真实 `bioharness-literature` CLI 适配层及工作区 `search.json` / `downloads.json` 分页审阅（展示排名、标题、作者、年份、期刊、DOI/arXiv 与 `identifier_status`、摘要、公开来源链接或 PDF SHA-256、以及 `ranked_subset_not_exhaustive` 覆盖与截断提示）；上游 `paperseek` / `scansci-pdf` 不在默认 PATH 时诚实返回 HTTP 503 `LITERATURE_PROVIDER_UNAVAILABLE` 且不伪造结果；`paperqa2` 明确标注 `NOT_PRODUCTION_ENABLED`。
+- [x] **Statistics：** 对接真实 `bioharness-statistics-report-binding` CLI（`inspect` / `render` / `verify`），原样展示结构化统计记录的单位/粒度、人群与分组（`population`/`stratum`/`event`/`given`）、分子分母、效应量与置信区间、p 值与 FDR/多重校正、方法及确定性渲染 Markdown / SHA-256，并在篡改数字时准确捕获 `REPORT_BINDING_FAIL`；明确标注临床亚组/变更审查器为 `PRODUCTION_NOT_ENABLED`，前端绝不重算统计量。
+- [x] **Scientific Review：** 在 `BioHarnessWorkflowRoute` 与 `/w/capabilities?tab=modules` 以 `ScientificReviewCard` 非阻断展示 Core 记录的 `plan_review`、`step.last_review`、`open_concerns`、`verdict`、逐条 `Issue | Basis | Scientific impact`、建议、尝试次数与上一轮修订记录；实测已装版本 `current=0.6.7 (ed82a7b6)` / `0.7.1 (356a5c6, Rev 11)` 仍依赖 `CodeArtsIntakeReviewer` 外部 CLI，无直接模型 API 适配层，缺口归属 `BioHarness-Modules` 并已在界面明确披露。
+- [x] **领域分析/Workflow：** 接入已安装可调用的 `bioharness-protein-methods`（`0.2.0`，6 个结构化审计子命令，严格限制工作区相对路径与禁止符号链接逃逸）；`dapseq`（`SOURCE_HANDOFF_ONLY / NOT_PUBLISHED`）、`genome-web-tf`（`ENGINEERING_REFERENCE_ONLY / NOT_RUNNABLE`）与 `sequence`（`SOURCE_ARCHIVED / NOT_RUNNABLE`）均只读诚实披露且不提供运行按钮；未引入 `orrery` 或 R4 provenance 图。
+- [x] **R3.4 隔离真实模块场景验收记录（技术验证≠科学有效性或生产已启用）：**
+  - Python 隔离全量：`260 passed in 238.55s (0 failed, 0 skipped)`，含新增 `tests/backend/test_r3_domain_modules.py` 4 项（真实 `bioharness-statistics-report-binding` render/verify/漂移检测、真实 `bioharness-protein-methods structure-inventory` 与符号链接拒访、真实 `bioharness-literature` 适配层与分页审阅、未启用/不可运行模块边界检查）。
+  - 前端检查：`tsc --noEmit` 0 错误；Jest `8 suites / 43 tests passed`（含 `r3_4.spec.tsx`）；Vite 生产构建成功（12.87s）。
+  - 真实 Chromium 验收：`tests/browser/ui_r3_4_run.sh` **14/14 PASS**（覆盖 Literature 12 篇分页与截断声明、Statistics render PASS + 篡改 verify FAIL、Scientific Review 缺口声明、Protein Methods 真实 `helix.pdb` 审计、Execution 详情领域卡自动渲染、390px/320px 无溢出、零 pageerror/CSP/外联）。
+  - 外部阻塞/归属清单：`paperseek` 与 `scansci-pdf` 需由部署环境配置到 PATH 或环境变量（上游独立安装）；`paperqa2` 与 Statistics 临床审查器 `PRODUCTION_NOT_ENABLED`（`BioHarness-Modules`）；Scientific Review 直连模型 API 适配器归属 `BioHarness-Modules`；`dapseq`/`genome-web-tf`/`sequence` 不可运行（`BioHarness-Modules`）。
 
 ### R3.5 — 产品级联合验收与收尾
 

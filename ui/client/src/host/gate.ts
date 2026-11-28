@@ -50,6 +50,12 @@ const APPROVED_API: Array<{ method: string; path: RegExp }> = [
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/expand$/ },
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/report-use$/ },
   { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/memory\/propose$/ },
+  /* R3.4: Professional scientific modules discovery & bounded CLI invocation */
+  { method: 'GET', path: /^\/api\/workspaces\/[^/]+\/domain-modules$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/modules\/literature\/inspect$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/modules\/literature\/run$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/modules\/statistics\/report-binding$/ },
+  { method: 'POST', path: /^\/api\/workspaces\/[^/]+\/modules\/protein\/run$/ },
 ];
 
 export const NOT_PROVIDED = 'NOT_PROVIDED_BY_HOST';

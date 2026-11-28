@@ -22,6 +22,7 @@ import { formatOpKindLabel, formatOpStateLabel, useBhText } from './i18n';
 import { assertObservationOwner, resolveBoundConversation } from './scientificViews';
 import { useBioHarnessConversationEvents } from './events';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
+import { ObservedDomainOutputBanner } from './BioHarnessDomainRenderers';
 
 const KIND_OPTIONS = ['all', 'core', 'hook', 'model', 'tool'] as const;
 const STATE_OPTIONS = ['all', 'STARTED', 'SUCCEEDED', 'REFUSED', 'FAILED', 'UNKNOWN', 'CANCELLED'] as const;
@@ -94,7 +95,7 @@ function PayloadBlock({ label, value }: { label: string; value: unknown }) {
 
 const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
   const { zh, tr } = useBhText();
-  const { meta, service, workspace, selectedRequestId, linkedConversationId } =
+  const { meta, service, workspace, selectedRequestId, linkedConversationId, openCapabilitiesView } =
     useBioHarnessWorkspace();
   const runtimeEnabled = meta?.runtime?.enabled === true;
 
@@ -253,6 +254,12 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                 {selectedItem.note && (
                   <p className="text-text-secondary text-xs">{selectedItem.note}</p>
                 )}
+
+                <ObservedDomainOutputBanner
+                  output={selectedItem.output}
+                  name={selectedItem.name}
+                  server={selectedItem.server}
+                />
 
                 <details
                   key={selectedItem.id}
@@ -453,9 +460,21 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                   data-testid="bh-modules-section"
                   className="border-border-light bg-surface-primary/50 space-y-2 rounded-xl border p-3 text-xs"
                 >
-                  <div className="flex items-center gap-1.5 font-semibold">
-                    <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Configured module tool servers ({modulesQuery.data.servers.length})</span>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Configured module tool servers ({modulesQuery.data.servers.length})</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="bh-exec-open-domain-modules-btn"
+                      onClick={() => openCapabilitiesView({ tab: 'modules' })}
+                      className="h-7 px-2 text-[11px]"
+                    >
+                      {tr('打开专业科研模块中心', 'Open Scientific Modules')}
+                    </Button>
                   </div>
                   <p className="text-text-tertiary text-[11px]">{modulesQuery.data.note}</p>
                   {modulesQuery.data.servers.length === 0 ? (

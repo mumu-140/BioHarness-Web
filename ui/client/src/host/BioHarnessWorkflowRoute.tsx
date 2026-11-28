@@ -30,6 +30,7 @@ import { isCurrentPlanAttempt, matchesSnapshot, resolveBoundConversation, useSci
 import { useBioHarnessWorkspace } from './workspace';
 import { formatPhaseLabel, useBhText } from './i18n';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
+import { ScientificReviewCard } from './BioHarnessDomainRenderers';
 import BioHarnessPlanGraph from './BioHarnessPlanGraph';
 
 const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
@@ -239,18 +240,27 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
             </div>
           )}
 
-          {nowData?.open_concerns && nowData.open_concerns.length > 0 && (
-            <div
-              data-testid="bh-workflow-advisory-concerns"
-              className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs"
-            >
-              <span className="text-text-primary font-medium">Advisory review notes (non-blocking): </span>
-              {nowData.open_concerns.map((c, idx) => (
-                <span key={`${c.about}-${idx}`}>
-                  {idx > 0 ? '; ' : ''}
-                  <code className="font-mono">{c.about}</code>: {c.concern}
-                </span>
-              ))}
+          {((nowData?.open_concerns && nowData.open_concerns.length > 0) ||
+            Boolean(nowData?.plan_review)) && (
+            <div data-testid="bh-workflow-advisory-concerns" className="space-y-2">
+              {Boolean(nowData?.plan_review) && (
+                <ScientificReviewCard
+                  title={zh ? '计划科学审查意见（非阻断）' : 'Plan Scientific Review (Advisory, non-blocking)'}
+                  advice={nowData?.plan_review as Record<string, unknown>}
+                  openConcerns={nowData?.open_concerns}
+                />
+              )}
+              {!nowData?.plan_review && nowData?.open_concerns && nowData.open_concerns.length > 0 && (
+                <div className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs">
+                  <span className="text-text-primary font-medium">Advisory review notes (non-blocking): </span>
+                  {nowData.open_concerns.map((c, idx) => (
+                    <span key={`${c.about}-${idx}`}>
+                      {idx > 0 ? '; ' : ''}
+                      <code className="font-mono">{c.about}</code>: {c.concern}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -380,15 +390,25 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                   </div>
                 </div>
 
-                {progressById.get(activeStep.id)?.review && (
-                  <div className="bg-surface-secondary/60 rounded-lg p-3 text-xs">
-                    <div className="text-text-tertiary font-semibold uppercase tracking-wide">
-                      Recorded review (advisory — non-blocking)
-                    </div>
-                    <p className="text-text-primary mt-1 whitespace-pre-wrap">
-                      {progressById.get(activeStep.id)!.review}
-                    </p>
-                  </div>
+                {(progressById.get(activeStep.id)?.review ||
+                  (nowData?.step?.id === activeStep.id && nowData.step.last_review)) && (
+                  <ScientificReviewCard
+                    title={zh ? '步骤科学审查记录（非阻断）' : 'Recorded step review (advisory — non-blocking)'}
+                    advice={
+                      (nowData?.step?.id === activeStep.id
+                        ? (nowData.step.last_review as Record<string, unknown> | undefined)
+                        : undefined) ?? null
+                    }
+                    reviewLabel={progressById.get(activeStep.id)?.review}
+                    attempts={progressById.get(activeStep.id)?.attempts}
+                    previousAttempt={
+                      nowData?.step?.id === activeStep.id
+                        ? ((nowData.step as unknown as Record<string, unknown>).previous_attempt as
+                            | { status?: string; summary?: string }
+                            | undefined)
+                        : undefined
+                    }
+                  />
                 )}
 
                 <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">

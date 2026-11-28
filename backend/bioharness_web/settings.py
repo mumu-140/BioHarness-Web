@@ -44,6 +44,11 @@ class Settings:
     access_token: str
     core_cli: str = "bioharness-host"
     governance_cli: str = "bioharness-governance"
+    literature_cli: str = "bioharness-literature"
+    paperseek_cli: str = "paperseek"
+    scansci_cli: str = "scansci-pdf"
+    statistics_cli: str = "bioharness-statistics-report-binding"
+    protein_cli: str = "bioharness-protein-methods"
     host: str = "127.0.0.1"
     port: int = 8080
     poll_interval_seconds: float = 5.0
@@ -128,6 +133,11 @@ class Settings:
             access_token=get("ACCESS_TOKEN"),
             core_cli=get("CORE_CLI", "bioharness-host"),
             governance_cli=get("GOVERNANCE_CLI", "bioharness-governance"),
+            literature_cli=get("LITERATURE_CLI", "bioharness-literature"),
+            paperseek_cli=get("PAPERSEEK_CLI", "paperseek"),
+            scansci_cli=get("SCANSCI_CLI", "scansci-pdf"),
+            statistics_cli=get("STATISTICS_CLI", "bioharness-statistics-report-binding"),
+            protein_cli=get("PROTEIN_CLI", "bioharness-protein-methods"),
             host=get("HOST", "127.0.0.1"),
             port=int(get("PORT", "8080")),
             poll_interval_seconds=poll,

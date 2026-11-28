@@ -199,11 +199,11 @@ export function BioHarnessModulesSettings() {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => openCapabilitiesView({ tab: 'capabilities' })}
+          onClick={() => openCapabilitiesView({ tab: 'modules' })}
           className="gap-1.5 text-xs"
         >
           <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{tr('查看详情', 'Inspect Details')}</span>
+          <span>{tr('打开专业科研模块工作台', 'Open Scientific Modules')}</span>
         </Button>
       </div>
 

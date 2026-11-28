@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import capabilities, evidence, inputs
+from . import capabilities, domain_modules, evidence, inputs
 from .cli import ToolError
 from .model_config import ModelConfigStore
 from .runtime import Runtime, RuntimeRefusal, run_strategies
@@ -104,6 +104,46 @@ class MemoryReportUseBody(BaseModel):
     task_ref: str = Field(min_length=1, max_length=128)
     stage: Literal["selected", "consumed", "outcome_reported"]
     outcome: Literal["reported_success", "reported_failure", "reported_unknown"] | None = None
+
+
+class LiteratureInspectBody(BaseModel):
+    path: str
+    offset: int = Field(default=0, ge=0, le=10000)
+    limit: int = Field(default=25, ge=1, le=100)
+
+
+class LiteratureRunBody(BaseModel):
+    operation: Literal["search", "fetch"]
+    question: str | None = None
+    source: str = "openalex"
+    maximum: int = Field(default=10, ge=1, le=50)
+    iterations: int = Field(default=3, ge=1, le=10)
+    search_json_path: str | None = None
+    lanes: bool = True
+
+
+class StatisticsReportBindingBody(BaseModel):
+    action: Literal["inspect", "render", "verify"] = "inspect"
+    records_path: str
+    template_path: str | None = None
+    report_path: str | None = None
+
+
+class ProteinRunBody(BaseModel):
+    operation: Literal[
+        "task-review",
+        "manifest-review",
+        "structure-inventory",
+        "structure-compare",
+        "run-audit",
+        "outcome-audit",
+    ]
+    input_path: str
+    reference_path: str | None = None
+    mapping_path: str | None = None
+    mode: str | None = None
+    verify_files: bool = False
+    model_index: int | None = None
 
 
 class MemoryProposeBody(BaseModel):
@@ -538,6 +578,102 @@ def create_router(
             raise HTTPException(
                 exc.status,
                 {"origin": "bioharness-module-memory", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.get("/workspaces/{workspace_id}/domain-modules")
+    def workspace_domain_modules(workspace_id: str):
+        try:
+            ws = sources.workspace(workspace_id)
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        return domain_modules.build_domain_modules_snapshot(
+            settings=settings,
+            workspace=ws,
+            ledger=runtime.ledger if runtime is not None else None,
+        )
+
+    @router.post("/workspaces/{workspace_id}/modules/literature/inspect")
+    def literature_inspect(workspace_id: str, body: LiteratureInspectBody):
+        try:
+            ws = sources.workspace(workspace_id)
+            return domain_modules.inspect_literature_artifact(
+                ws, body.path, offset=body.offset, limit=body.limit
+            )
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        except domain_modules.DomainModuleError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-literature", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/modules/literature/run")
+    async def literature_run(workspace_id: str, body: LiteratureRunBody):
+        try:
+            ws = sources.workspace(workspace_id)
+            return await domain_modules.run_literature_cli(
+                settings=settings,
+                runner=sources.runner,
+                workspace=ws,
+                operation=body.operation,
+                question=body.question,
+                source=body.source,
+                maximum=body.maximum,
+                iterations=body.iterations,
+                search_json_path=body.search_json_path,
+                lanes=body.lanes,
+            )
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        except domain_modules.DomainModuleError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-literature", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/modules/statistics/report-binding")
+    async def statistics_report_binding(workspace_id: str, body: StatisticsReportBindingBody):
+        try:
+            ws = sources.workspace(workspace_id)
+            return await domain_modules.run_statistics_report_binding(
+                settings=settings,
+                runner=sources.runner,
+                workspace=ws,
+                action=body.action,
+                records_path=body.records_path,
+                template_path=body.template_path,
+                report_path=body.report_path,
+            )
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        except domain_modules.DomainModuleError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-statistics", "code": exc.code, "message": exc.message, "detail": exc.detail},
+            ) from None
+
+    @router.post("/workspaces/{workspace_id}/modules/protein/run")
+    async def protein_run(workspace_id: str, body: ProteinRunBody):
+        try:
+            ws = sources.workspace(workspace_id)
+            return await domain_modules.run_protein_methods_cli(
+                settings=settings,
+                runner=sources.runner,
+                workspace=ws,
+                operation=body.operation,
+                input_path=body.input_path,
+                reference_path=body.reference_path,
+                mapping_path=body.mapping_path,
+                mode=body.mode,
+                verify_files=body.verify_files,
+                model_index=body.model_index,
+            )
+        except UnknownWorkspace as error:
+            raise _http_error(error) from None
+        except domain_modules.DomainModuleError as exc:
+            raise HTTPException(
+                exc.status,
+                {"origin": "bioharness-module-protein-methods", "code": exc.code, "message": exc.message, "detail": exc.detail},
             ) from None
 
     @router.post("/workspaces/{workspace_id}/inputs", status_code=201)

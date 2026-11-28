@@ -604,6 +604,8 @@ export const bhKeys = {
     ['bh', service, workspace, 'diagnostics'] as const,
   memoryStatus: (service: string, workspace: string) =>
     ['bh', service, workspace, 'memory-status'] as const,
+  domainModules: (service: string, workspace: string) =>
+    ['bh', service, workspace, 'domain-modules'] as const,
 };
 
 export function stableSelectorKey(selector: Record<string, string | number | boolean | undefined>): string {
@@ -1751,4 +1753,261 @@ export async function proposeMemory(
     body: JSON.stringify(body),
   });
   return parseJsonOrError(res);
+}
+
+
+/* ===================== R3.4 Professional Scientific Modules ===================== */
+
+export interface DomainModuleEntry {
+  id: string;
+  title: string;
+  owner: string;
+  command: string | null;
+  version: string | null;
+  source_sha: string | null;
+  declared: boolean;
+  installed: boolean;
+  callable: boolean;
+  inspectable: boolean;
+  actually_used: boolean;
+  use_count: number;
+  status: string;
+  note: string;
+  providers?: Record<
+    string,
+    { command?: string; available: boolean; status?: string; role?: string }
+  >;
+  actions?: string[];
+  subcomponents?: Record<string, string>;
+  operations?: string[];
+  releases?: Array<{ sha: string; version: string | null }>;
+  advisor_config?: {
+    configured: boolean;
+    factory: string | null;
+    timeout_seconds?: number | null;
+    parse_error?: boolean;
+  };
+  direct_model_api_gap_note?: string;
+}
+
+export interface DomainModulesResponse {
+  service: string;
+  workspace: string;
+  observed_at: string;
+  modules: DomainModuleEntry[];
+  workspace_files: {
+    json: string[];
+    templates: string[];
+    structures: string[];
+  };
+  observed_usage: {
+    servers: Record<string, number>;
+    tools: Record<string, number>;
+    total_tool_calls: number;
+  };
+}
+
+export interface LiteraturePaperRecord {
+  rank?: number;
+  record_index?: number;
+  title?: string;
+  authors?: string[] | string;
+  year?: number | string;
+  venue?: string;
+  doi?: string;
+  identifier?: string | null;
+  identifier_status?: string;
+  abstract?: string;
+  url?: string;
+  pdf_url?: string;
+  source?: string;
+  provider?: string;
+  status?: string;
+  reason?: string;
+  file?: string;
+  bytes?: number;
+  sha256?: string;
+  record_indices?: number[];
+  [key: string]: unknown;
+}
+
+export interface LiteratureInspectResponse {
+  operation: 'search' | 'fetch';
+  source_file: string;
+  sha256: string;
+  upstream_contract?: string;
+  question?: string;
+  source?: string;
+  query?: string;
+  coverage?: string;
+  reported_total_results?: number | null;
+  returned_records?: number;
+  input_records?: number;
+  requested_identifiers?: number;
+  downloaded_identifiers?: number;
+  unresolved_records?: number;
+  validation_scope?: string;
+  parameters?: Record<string, unknown>;
+  total_items: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  items: LiteraturePaperRecord[];
+}
+
+export interface LiteratureRunResponse {
+  operation: 'search' | 'fetch';
+  cli: string;
+  result: Record<string, unknown>;
+}
+
+export interface StatisticsRecord {
+  metric_id: string;
+  kind?: string;
+  unit?: string;
+  value?: number | string;
+  numerator?: number;
+  denominator?: number;
+  population?: string;
+  stratum?: string;
+  event?: Record<string, unknown>;
+  given?: Record<string, unknown>;
+  method?: string;
+  ci_low?: number;
+  ci_high?: number;
+  ci?: [number, number];
+  CI?: [number, number];
+  ci_level?: number;
+  p_value?: number;
+  p_adjusted?: number;
+  fdr?: number;
+  q_value?: number;
+  status?: string;
+  display_decimals?: number;
+  [key: string]: unknown;
+}
+
+export interface StatisticsReportBindingResponse {
+  action: 'inspect' | 'render' | 'verify';
+  status: string;
+  cli: string;
+  records_file: string;
+  records_sha256: string;
+  template_file?: string | null;
+  report_file?: string | null;
+  records: StatisticsRecord[];
+  tables: Array<Record<string, unknown>>;
+  binding: {
+    status?: string;
+    action?: string;
+    bound_statements?: number;
+    bound_tables?: number;
+    bound_total?: number;
+    report?: string;
+    report_sha256?: string;
+  } | null;
+  rendered_markdown: string | null;
+  error?: { code: string; message: string } | null;
+  note: string;
+}
+
+export type ProteinOperation =
+  | 'structure-inventory'
+  | 'structure-compare'
+  | 'task-review'
+  | 'manifest-review'
+  | 'run-audit'
+  | 'outcome-audit';
+
+export interface ProteinRunResponse {
+  operation: ProteinOperation;
+  cli: string;
+  input_file: string;
+  result: Record<string, unknown>;
+}
+
+export async function fetchDomainModules(workspace: string): Promise<DomainModulesResponse> {
+  const res = await hostFetch(`/api/workspaces/${encodeURIComponent(workspace)}/domain-modules`);
+  return parseJsonOrError<DomainModulesResponse>(res);
+}
+
+export async function inspectLiteratureArtifact(
+  workspace: string,
+  body: { path: string; offset?: number; limit?: number },
+): Promise<LiteratureInspectResponse> {
+  const res = await hostFetch(
+    `/api/workspaces/${encodeURIComponent(workspace)}/modules/literature/inspect`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  return parseJsonOrError<LiteratureInspectResponse>(res);
+}
+
+export async function runLiteratureModule(
+  workspace: string,
+  body: {
+    operation: 'search' | 'fetch';
+    question?: string;
+    source?: string;
+    maximum?: number;
+    iterations?: number;
+    search_json_path?: string;
+    lanes?: boolean;
+  },
+): Promise<LiteratureRunResponse> {
+  const res = await hostFetch(
+    `/api/workspaces/${encodeURIComponent(workspace)}/modules/literature/run`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  return parseJsonOrError<LiteratureRunResponse>(res);
+}
+
+export async function runStatisticsReportBinding(
+  workspace: string,
+  body: {
+    action: 'inspect' | 'render' | 'verify';
+    records_path: string;
+    template_path?: string;
+    report_path?: string;
+  },
+): Promise<StatisticsReportBindingResponse> {
+  const res = await hostFetch(
+    `/api/workspaces/${encodeURIComponent(workspace)}/modules/statistics/report-binding`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  return parseJsonOrError<StatisticsReportBindingResponse>(res);
+}
+
+export async function runProteinModule(
+  workspace: string,
+  body: {
+    operation: ProteinOperation;
+    input_path: string;
+    reference_path?: string;
+    mapping_path?: string;
+    mode?: string;
+    verify_files?: boolean;
+    model_index?: number;
+  },
+): Promise<ProteinRunResponse> {
+  const res = await hostFetch(
+    `/api/workspaces/${encodeURIComponent(workspace)}/modules/protein/run`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  return parseJsonOrError<ProteinRunResponse>(res);
 }

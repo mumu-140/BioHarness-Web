@@ -54,7 +54,7 @@ export interface BioHarnessWorkspaceContextValue {
     requestId?: string | null;
     conversationId?: string | null;
     scopeId?: string | null;
-    tab?: 'memory' | 'capabilities' | 'documents';
+    tab?: 'memory' | 'capabilities' | 'documents' | 'modules';
   }) => void;
   stageTextInConversation: (opts: { conversationId: string | null; requestId: string | null; snippet: string }) => void;
   getDraft: (conversationKey: string) => string;
@@ -377,7 +377,7 @@ ${snippet}` : snippet;
       requestId?: string | null;
       conversationId?: string | null;
       scopeId?: string | null;
-      tab?: 'memory' | 'capabilities' | 'documents';
+      tab?: 'memory' | 'capabilities' | 'documents' | 'modules';
     }) => {
       const next = new URLSearchParams();
       if (workspace) {
