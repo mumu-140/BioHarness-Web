@@ -1,8 +1,8 @@
 # BioHarness Research Workspace V2 — Product Plan
 
-**Status (2026-11-28): R2 complete in source; R3 next; R4 pending.** The adopted `ui/` and native backend passed Steps 1–5 and independent hardening. Production cutover is a separate owner decision.
+**Status (2026-11-28): R2 accepted and privately deployed; R3 plan approved; R4 pending.** The adopted `ui/` and native backend passed Steps 1–5, independent hardening and private deployment smoke checks. Further production cutover requires separate owner approval.
 
-**Active TODO:** §17.3. Fixed design/technology: §17.4–17.5. W0–W5 and prior execution records are history, not parallel work queues. The complete pre-consolidation decisions, test counts and provenance are retained in this file at Git `3091fea51b2532c6eaff45b3723e67fd6ff68b6b` and [the W0 audit](../audits/w0-integration-review.md). Raw receipts remain private.
+**Active roadmap index:** §17.3. R3 detailed implementation: [approved R3 plan](2026-11-28-r3-product-integration.md). Fixed design/technology: §17.4–17.5. W0–W5 and prior execution records are history, not parallel work queues. The complete pre-consolidation decisions, test counts and provenance are retained in this file at Git `3091fea51b2532c6eaff45b3723e67fd6ff68b6b` and [the W0 audit](../audits/w0-integration-review.md). Raw receipts remain private.
 
 ## 1. Purpose
 
@@ -295,14 +295,11 @@ New Core endpoints or Core schema changes without a separately reviewed demonstr
 Use bounded real-project checks throughout, separating fixture transport tests, read-only project walkthroughs and actual scientific execution/evaluation.
 
 - [x] **R1 — Historical workbench and contracts.** Behavior carried forward; custom four-zone frontend retired.
-- [x] **R2 — Adopted frontend, native sessions and HITL.** §17.4 Steps 1–5 and independent audit accepted in source. Real model Core EXPLAIN/EVALUATE/ANALYZE loops, native A1 confirmation, read-only multi-branch walkthrough and restart recovery recorded in §17.5. Existing deployment unchanged.
-- [ ] **R3 — Memory Curator, Skills/Resources and domain Modules.**
-  - Memory: T1/T2/T3 independent of FAST/STANDARD/DEEP; DEEP and TaskMemoryGraph only through exposed owner interfaces. Curator proposal/review, exact T3 source verification, operator-gated source registration, applicability/conflict/use feedback. Acceptance: isolated recall → propose → T3 verify → publish → recall without bypassing module authority.
-  - Resources, Skills and Documents: declared / installed / callable / actually used; existing project documents and redacted diagnostics, no duplicate registry.
-  - Literature, Statistics, Scientific Review and analysis/workflow inspectors: actual sources/passages, units/grain/groups/denominators/tests/effect sizes/correction, deterministic report binding, actual versions/parameters/results and non-blocking review. Direct Review API adaptation stays in its owner module. Evaluate orrery for provenance if useful. Common inspector remains available for unsupported modules.
+- [x] **R2 — Adopted frontend, native sessions and HITL.** §17.4 Steps 1–5 and independent audit accepted in source. Real model Core EXPLAIN/EVALUATE/ANALYZE loops, native A1 confirmation, read-only multi-branch walkthrough and restart recovery recorded in §17.5. R2 privately deployed at the accepted source baseline `6de1b15`; existing release topology preserved.
+- [ ] **R3 — Memory Curator, Skills/Resources, domain Modules and researcher-facing product completeness.** [Approved detailed implementation plan](2026-11-28-r3-product-integration.md) owns the R3.1–R3.5 task checklist: public-capability verification → basic project/input/model/mode/localization interaction → Memory/Skills/Resources/Documents → professional Modules → real-browser product acceptance. Retain all original R3 scientific capability and owner-boundary requirements there; do not duplicate the detailed TODO here.
 - [ ] **R4 — Results, provenance/comparison, remote compute and Desktop readiness.** Complete six content dimensions (Data, Methods, Results, Evidence, Comparison, Findings), recorded provenance edges, research-wide search, version/parameter/input comparison, negative findings/counterevidence and recorded downstream reuse impact. Expand supported artifacts based on real need. Add actual external executor handle recovery and deliberate retry; verify genuine concurrent-host STATE_CHANGED handling, partial Module outputs and real long-running work. Conduct real multi-branch scientific project acceptance and independent Eval (including actual Memory-use evidence for the owner's ON/OFF comparison when needed). Prepare thin Tauri client over the same remote API/SSE; sidecar only when justified. Verify larger workloads, deployment/rollback and real scientific workflow end-to-end.
 
-**Release:** private R2 cutover requires explicit approval, not an R3 scientific gate. Public distribution requires reviewing dependency/license findings and authentication/TLS. Version differences and advisory disagreements do not automatically stop research.
+**Release:** private R2 cutover is complete. Any subsequent release switch requires explicit approval, not an R3 scientific gate. Public distribution requires reviewing dependency/license findings and authentication/TLS. Version differences and advisory disagreements do not automatically stop research.
 
 ### 17.4 Upstream-based UI replacement design (2026-11-27)
 
@@ -472,4 +469,4 @@ Old `frontend/` and superseded browser scripts are absent from the source tree; 
 
 ## 18. Change control
 
-This is the single active BioHarness-Web roadmap (covering V2 delivery through V3 product-architecture upgrade R1–R4). Update this file in place as decisions are verified. Keep stable product rules in AGENTS.md and the architecture contract in docs/architecture.md. Do not add parallel TODO files, repeated plans or run-log documents.
+This is the single active BioHarness-Web roadmap index (V2 delivery through V3 R1–R4). Keep stage status and cross-stage decisions here; the linked R3 detailed implementation plan owns only its subordinate checklist and acceptance summaries. No duplicated checklist, competing roadmap, repeated architecture plan or run-log document. Keep stable rules in AGENTS.md and architecture in docs/architecture.md.
