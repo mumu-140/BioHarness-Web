@@ -26,12 +26,41 @@
 
 ## 3. 实施顺序（本文件唯一详细 TODO）
 
-### R3.1 — 能力核查与最小产品规划
+### R3.1 — 能力核查与最小产品规划（已完成，2026-11-28）
 
-- [ ] 读取 Web AGENTS、README、architecture、上级路线及冻结设计；核对 Core 与 Modules 的规则、现行公共合同、当前分支/安装/配置。检查实际公开工具 schema、资源声明、可用性和必要的只读响应，而非从 README 推断生产可用。
-- [ ] 建立精简能力对照表（随本节更新）：用户动作 | 权威仓库与精确接口/版本 | 当前是否可用 | 复用的 Web 入口 | 最小缺口 | 验证证据。涵盖项目/子项目、资料、模型、研究策略、Memory/Curator、Resources/Skills/Documents、Literature、Statistics、Review 和现有领域模块。
-- [ ] 复用已借鉴的 hello-ui、diagram-design（上级 §17.4 已记录来源与冻结原则）及实际可用的产品规划/浏览器验收 Skills。先读现有参考和相关 Skill 的真实说明；缺少 Skill 不作为开发阻断，不下载未知组件、不另建 Skill 或参考仓库。只补入口、状态、可读性及任务闭环。
-- [ ] 对照 UX-01–UX-14，确认关键用户路径、错误/空/加载/部分/不可用状态、中文术语及验收样例；在本文记录尚需使用者决定的真实接口缺口。不另建设计方案或重复选型。核查结束后直接进入 R3.2 的可实施部分。
+- [x] 读取 Web AGENTS、README、architecture、上级路线及冻结设计；核对 Core 与 Modules 的规则、现行公共合同、当前分支/安装/配置。检查实际公开工具 schema、资源声明、可用性和必要的只读响应，而非从 README 推断生产可用。
+- [x] 建立精简能力对照表（随本节更新）：用户动作 | 权威仓库与精确接口/版本 | 当前是否可用 | 复用的 Web 入口 | 最小缺口 | 验证证据。涵盖项目/子项目、资料、模型、研究策略、Memory/Curator、Resources/Skills/Documents、Literature、Statistics、Review 和现有领域模块。
+- [x] 复用已借鉴的 hello-ui、diagram-design（上级 §17.4 已记录来源与冻结原则）及实际可用的产品规划/浏览器验收 Skills。先读现有参考和相关 Skill 的真实说明；缺少 Skill 不作为开发阻断，不下载未知组件、不另建 Skill 或参考仓库。只补入口、状态、可读性及任务闭环。
+- [x] 对照 UX-01–UX-14，确认关键用户路径、错误/空/加载/部分/不可用状态、中文术语及验收样例；在本文记录尚需使用者决定的真实接口缺口。不另建设计方案或重复选型。核查结束后直接进入 R3.2 的可实施部分。
+
+#### R3.1 核实基线与精简能力对照表（2026-11-28 实测）
+
+- **仓库与安装核实**：Web `feat/v3-r3-product-integration`（基于 `0bf9382` / R2 基线 `6de1b15`）；Core 源码 `main` `69f2fbf`，已安装 `bioharness-host` 为 `fc093d7`（`fc093d7..69f2fbf` 仅 `docs/architecture/module-plugin-contract.md` 变更，运行合同一致）；Modules 当前检出 `3acc891`（`feat/statistics-full-report-binding-20261123`）、`main` 为 `43706d9`；隔离构建/测试工具为 `node:24.22.3-slim`、`.venv` Python 3.12 与 `firecrawl-playwright-service:latest`（Playwright Chromium）。
+- **设计参考与技能核实**：复用冻结的 `research-workspace-ui-design.html`（`diagram-design` `795eec4` 删除优先/单焦点/低密度 + `hello-ui` 单任务与完整状态覆盖）及现有浏览器验收脚本 `tests/browser/ui_step{3,4,5}_run.sh`；不新增设计体系或外部 UI 依赖。
+
+| 用户动作 | 权威仓库与精确接口/版本 | 当前是否可用 | 复用的 Web 入口 | 最小缺口 | 验证证据 |
+|---|---|---|---|---|---|
+| 创建/进入科研项目与任意层级子项目（UX-01/02） | Core `69f2fbf` / 已装 `fc093d7`：`science_begin(question, scope={id,create,parent_id,related_request_ids})`；Governance `0.1.2` (`ed82a7b6`)：`tree`/`context`/`routes` | **可用**（必须随真实首条科学问题声明，不含独立标题字段） | `BioHarnessSidebarSection` (`rc-tree`)、`BioHarnessChatRoute`、`/c/new` | 侧栏当前把 Core 数据源下拉放主位且缺“新建项目/子项目”向导；树节点以原始 ID 为主 | 实读 `scope.py`/`view.py`；隔离 `bioharness-governance tree` 返回 `ok:true` |
+| 上传小型研究资料/引用服务器授权数据（UX-03/10/13） | Core `evidence_roots` 约束 + Governance `evidence` SHA-256 锚点校验；Web `settings.py` `Workspace.evidence_roots` | **部分可用**（已有只读证据预览；缺受限上传/输入引用接口） | `BioHarnessComposer`（LibreChat 附件交互）、`BioHarnessEvidenceRoute` | Web 需最小受限输入上传/列表接口（显式 `upload_root`、大小/类型/SHA-256/禁覆盖/禁软链逃逸），无授权目录时明示只读 | 实读 `settings.py`/`api.py`/`BioHarnessComposer.tsx` |
+| 日常任务模型选择（UX-07） | Web `model_config.py`（`GET/PUT /api/model-config`）+ `provider.py` `ModelClient.snapshot()` | **部分可用**（仅全局槽位配置，无按次/快捷模型选择） | `BioHarnessRequestHeader`、`BioHarnessComposer`、Settings `models` | 头部模型按钮直通管理员 Provider 表单；需分离快捷模型切换与 Provider 密钥管理，并在 Run 记录实际模型 | 实读 `model_config.py`/`provider.py`/`runtime.py` |
+| 快速/深度研究策略（UX-04） | Core 5 调用主线不变（`EXPLAIN`/`EVALUATE`/`ANALYZE` 由 Core 判定）；Web `runtime.py` `max_model_turns_per_run`/`model_context_chars` | **需明确边界**（宿主预算策略可在 Web 真实生效；`reasoning_effort` 因第三方网关兼容性差异未默认启用） | `BioHarnessComposer`（与模型切换并列，和 Memory 检索深度严格分离） | 仅提供真实生效的宿主执行预算策略（默认标准 vs 紧凑快速/深度轮次），不改变五调用或证据标准；透传 `reasoning_effort` 待使用者确认 | 实读 `provider.py`/`runtime.py`/`settings.py` |
+| 记忆检索（T1/T2/T3 与 FAST/STANDARD/DEEP）（UX-05） | Modules `bioharness-module-memory` `ed82a7b6` (`bioharness-memory-mcp`)：`memory_recall(mode=FAST|STANDARD)`、`memory_expand(detail=T1|T2|T3)`、`memory_report_use`、`memory_status`、`memory_diagnose` | **部分可用**（FAST/STANDARD 与 T1/T2/T3 已公开；**DEEP 抛出 `RECALL_MODE_NOT_IMPLEMENTED`**） | 新增侧栏二级入口与 Settings `memory` 标签 + 通用 MCP 宿主转发 | Web 需只读/受控 BFF 路由转发配置好的 Memory MCP，独立暴露信息层（T1/T2/T3）与检索层（FAST/STANDARD，显式标注 DEEP 不可用） | 实读已装 `mcp_server.py`/`task_recall.py`（L257） |
+| Memory Curator 审核发布与来源登记（UX-05） | Modules `bioharness-module-memory`：`curator-releases/18a47a87` `inbox_curator.py`（运维 CLI）；`curation.py`（Python 库）；`source_registration.py`（明确禁 MCP 的运维 CLI） | **存在外部接口缺口**（MCP 仅暴露 `capture_candidate`/`propose_scientific`/`propose_theme`/`diagnose`，无公开 inspect/publish/register 接口） | Memory 工作台候选与诊断区 | Web 可支持候选提案、健康诊断与只读收件箱清单（若显式配置只读命令）；**互动审批发布与 T3 来源登记需 `bioharness-module-memory` 暴露受控公开接口** | 实读 `mcp_server.py`/`inbox_curator.py`/`source_registration.py` |
+| Skills / Resources / Project Documents（UX-05） | Core `bioharness-host doctor` / `science_now` `[[resources]]`；Governance `context(documents={contract,guide,status,findings_index})`；workspace `SKILL.md`；Web MCP 发现与 SQLite 账本 | **可用**（四态数据源全部真实存在） | 侧栏“能力与记忆”二级入口、Settings `skills`/`modules`/`diagnostics` | Web 需聚合 Declared/Installed/Callable/Actually Used 四态只读投影与项目文档查看器，不另建 Registry | 隔离实测 `bioharness-host doctor` 与 `governance context` |
+| Literature 文献检索与获取（R3.4） | Modules `bioharness-module-literature` `ed82a7b6`：`bioharness-literature search|fetch`；`paperqa2` `0.2.0`（未生产启用） | **部分可用**（CLI 已装，但默认 PATH 无 `paperseek`/`scansci-pdf`；`paperseek` 位于独立 venv，本机无 `scansci-pdf`） | `BioHarnessExecutionsRoute` 通用 Module Inspector + 文献领域渲染器 | 需在 Web 暴露真实模块发现/调用观测及文献记录/分页/截断/来源渲染，如实标注未启用 provider | 实测 `bioharness-literature --help` 与本机 PATH 检查 |
+| Statistics 统计语义与报告绑定（R3.4） | Modules `bioharness-module-statistics` `3acc891` / 已装 `31f30d15`：`bioharness-statistics-report-binding render|verify` + `STATISTICS_AGENT_GUIDE.md` | **部分可用**（`report_binding` CLI 可调用；旧临床审查组件 `PRODUCTION_NOT_ENABLED`） | Module Inspector + 统计报告绑定渲染器 | Web 渲染实验单位/分组/分母/检验/效应量/校正与 `report_binding verify` 结果，不在前端重算 | 实测 `bioharness-statistics-report-binding --help` |
+| Scientific Review 科学审查（R3.4） | Modules `bioharness-module-scientific-review`：已装 `current=ed82a7b6 (0.6.7)`，另装 `356a5c6 (0.7.1 / Rev 11)`（直消费 `AdviceRequest`，仍通过 `CodeArtsIntakeReviewer`） | **部分可用（存在直连 API 缺口）**（Core 已记录审查意见与 `未评审`；但 0.7.1 仍依赖外部 `codearts` 命令而非直连模型 API） | Workflow/Request/Executions 审查意见卡片 | Web 完整呈现 Core 记录的审查 verdict/issues/basis/版本/分歧/修订记录（永不阻断）；直连模型 API 适配归 `BioHarness-Modules` | 实读 `356a5c6` `core_advisor.py` 与 `README.md` |
+| 领域分析/Workflow 模块（R3.4） | Modules `protein-methods` `0.2.0` (`6e2ad135`, CLI 已装 6 子命令)；`dapseq`/`genome-web-tf`/`sequence`（参考/归档，不可运行） | **部分可用**（仅 `protein-methods` 可调用；其余为 `REFERENCE/NOT_RUNNABLE`） | 通用 Module Inspector | 只接入已公开可调用能力，参考模块诚实标为不可运行，不复现生物信息学算法 | 实测 `bioharness-protein-methods --version` (`0.2.0`) |
+
+#### UX-01–UX-14 关键路径、状态与中文术语约束
+
+- **术语统一（简体中文优先，保留英文完整支持）**：科研项目（Project/根 Scope）、子项目（Sub-scope）、科研问题/请求（Request）、运行环境/数据来源（Core Workspace，降为次级数据源切换）、输入资料（Input Files，与“Core 已核验科研证据”严格区分）、执行预算策略（默认标准/紧凑快速/深度轮次，与 Memory `FAST/STANDARD/DEEP` 严格分离）、已声明/已安装/可调用/实际已用（Declared/Installed/Callable/Actually Used）。保留通用缩写：`CSV/TSV/FASTA/PDF/SHA-256/DOI/MCP/CLI/SSE/T1/T2/T3/FAST/STANDARD/DEEP`。
+- **关键状态覆盖**：每个新增入口均区分 `空状态`（引导真实下一步动作）、`加载中`、`部分/截断`、`陈旧（503 保留上次确认时间与刷新）`、`错误` 与 `未配置/不可用（明确责任方与原因）`。
+- **待使用者决策的真实外部接口缺口（不阻断 R3.2–R3.5 其余授权开发）**：
+  1. **Memory Curator 公开接口（归属 `BioHarness-Modules`）**：当前 `bioharness-memory-mcp` 仅支持提案与诊断，不含受控 `inspect`/`publish` 与 `source_registration` 公开工具；R3.3 将先对接已公开的 8 个 MCP 工具及可选只读清单，是否批准后续在 `BioHarness-Modules` 增补受控 Curator 公开接口？
+  2. **Memory `DEEP` 检索模式（归属 `BioHarness-Modules`）**：当前 `TaskMemoryRecall.recall` 仅开放 `FAST`/`STANDARD`，`DEEP` 抛出 `RECALL_MODE_NOT_IMPLEMENTED`；R3.3 将如实标注 `DEEP` 不可用，是否计划在 Modules 侧公开 `DEEP`？
+  3. **Scientific Review 直连模型 API 适配（归属 `BioHarness-Modules`）**：已安装的 0.7.1 (`356a5c6`) 仍经 `CodeArtsIntakeReviewer` 调用外部 CLI；R3.4 将在 Web 完整展示 Core 审查记录且不阻断任务，是否批准在 Modules 侧补充直连模型 API 适配器？
+  4. **研究策略是否透传 `reasoning_effort`（Web 配置项）**：R3.2 先落地真实生效的宿主轮次/上下文预算策略（兼容全部 OpenAI 兼容网关）；若需针对特定模型透传 `reasoning_effort`，建议作为 Provider 模型级显式可选配置，避免不支持该字段的网关报 400。
 
 **明确的现状约束：** Core 当前的 scope 声明以首条真实科学请求为起点，支持稳定 parent_id 和多层级路径；不能脱离首个请求创建假项目。Core 三种任务类型 EXPLAIN/EVALUATE/ANALYZE 与 Memory 三档检索 FAST/STANDARD/DEEP 是不同维度。源码中已有 Memory DEEP 实现并不证明当前 Web 工具接口已公开。此阶段要核实“快速/深度研究模式”的真正产品语义，不自行定义第二种科研主线。
 
