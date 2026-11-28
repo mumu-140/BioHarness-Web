@@ -146,6 +146,13 @@ function check(name, pass, detail = '') {
     const execRows = await page.locator('[data-testid^="bh-exec-row-"]').count();
     check('Execution records load independently on direct /w/executions reload', execRows >= 2, `rows=${execRows}`);
 
+    await Promise.all([
+      page.waitForResponse(r => r.url().includes('/invocations?') && r.status() === 200),
+      page.getByTestId('bh-executions-refresh-btn').click(),
+    ]);
+    await page.getByTestId('bh-executions-list').waitFor({ timeout: 15000 });
+    check('Manual refresh preserves the execution view and refetches the bound conversation', true);
+
     // Filter by kind='model' and inspect single record detail
     await page.getByTestId('bh-exec-kind-model').click();
     const firstExecRow = page.locator('[data-testid^="bh-exec-row-"]').first();

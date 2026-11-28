@@ -198,19 +198,20 @@ def test_open_verified_content_serves_verified_pdf_and_refuses_drift(workspace, 
     pdf_bytes = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
     path = workspace_dir / "report.pdf"
     path.write_bytes(pdf_bytes)
-    fd, meta = evidence.open_verified_content(workspace, item(path, pdf_bytes))
-    try:
-        assert meta["media_type"] == "application/pdf"
-        assert meta["current_file_identity"] == "MATCHES_RECORD"
-        assert meta["size_bytes"] == len(pdf_bytes)
-        assert os.read(fd, 100) == pdf_bytes
-    finally:
-        os.close(fd)
+    data, meta = evidence.read_verified_content(workspace, item(path, pdf_bytes))
+    assert meta["media_type"] == "application/pdf"
+    assert meta["current_file_identity"] == "MATCHES_RECORD"
+    assert meta["size_bytes"] == len(pdf_bytes)
+    assert data == pdf_bytes
+    # A writer modifying the source after capture cannot change returned bytes.
+    path.write_bytes(b"changed in place")
+    assert data == pdf_bytes
+    assert hashlib.sha256(data).hexdigest() == meta["sha256"]
 
     # Drift detection: modifying file after recording refuses serving bytes as recorded version.
     path.write_bytes(pdf_bytes + b"tampered")
     with pytest.raises(evidence.EvidenceContentError) as exc:
-        evidence.open_verified_content(workspace, item(path, pdf_bytes))
+        evidence.read_verified_content(workspace, item(path, pdf_bytes))
     assert exc.value.status == 409
     assert exc.value.code == "EVIDENCE_CONTENT_DRIFT"
 
@@ -219,22 +220,22 @@ def test_open_verified_content_refuses_unsupported_and_oversized_and_html_runs_a
     bam = workspace_dir / "reads.bam"
     bam.write_bytes(b"\x00\x01\x02")
     with pytest.raises(evidence.EvidenceContentError) as exc:
-        evidence.open_verified_content(workspace, item(bam, b"\x00\x01\x02"))
+        evidence.read_verified_content(workspace, item(bam, b"\x00\x01\x02"))
     assert exc.value.status == 415
     assert exc.value.code == "UNSUPPORTED_MEDIA_FORMAT"
 
     html = workspace_dir / "plot.html"
     html_bytes = b"<html><script>alert(1)</script></html>"
     html.write_bytes(html_bytes)
-    fd, meta = evidence.open_verified_content(workspace, item(html, html_bytes))
-    os.close(fd)
+    data, meta = evidence.read_verified_content(workspace, item(html, html_bytes))
+    assert data == html_bytes
     assert meta["media_type"] == "text/plain; charset=utf-8"
 
     big = workspace_dir / "big.pdf"
     big.write_bytes(b"%PDF-1.4\n" + b"0" * 100)
     monkeypatch.setattr(evidence, "HASH_LIMIT_BYTES", 32)
     with pytest.raises(evidence.EvidenceContentError) as exc2:
-        evidence.open_verified_content(workspace, item(big, big.read_bytes()))
+        evidence.read_verified_content(workspace, item(big, big.read_bytes()))
     assert exc2.value.status == 409
     assert exc2.value.code == "EVIDENCE_EXCEEDS_HASH_BUDGET"
 
@@ -280,7 +281,8 @@ def test_table_page_paginates_honestly_and_never_infers_truncated_totals(workspa
     assert trunc["truncated"] is True
     assert trunc["total_rows"] is None
     assert trunc["total_rows_known"] is False
-    assert trunc["has_more"] is True
+    assert trunc["has_more"] is False
+    assert trunc["preview_rows"] == trunc["returned_rows"]
 
     # Drift refuses serving table rows as recorded version
     path.write_bytes(data + b"G4\t9\t0\n")
@@ -288,3 +290,43 @@ def test_table_page_paginates_honestly_and_never_infers_truncated_totals(workspa
     assert drifted["content_available"] is False
     assert drifted["current_file_identity"] == "DIFFERS_FROM_RECORD"
     assert drifted["unavailable_reason"] == "CONTENT_DIFFERS_FROM_RECORD"
+
+def test_verified_table_never_parses_post_hash_mutation(workspace, workspace_dir, monkeypatch):
+    path = workspace_dir / "table.csv"
+    original = b"gene,value\nA,1\n"
+    path.write_bytes(original)
+    capture = evidence._capture_verified_bytes
+    def mutate_after_capture(handle, expected_sha):
+        data, digest = capture(handle, expected_sha)
+        path.write_bytes(b"gene,value\nB,9\n")
+        return data, digest
+    monkeypatch.setattr(evidence, "_capture_verified_bytes", mutate_after_capture)
+    table = evidence.table_page(workspace, item(path, original))
+    assert table["rows"] == [{"__row_index": 1, "c0": "A", "c1": "1"}]
+
+
+def test_multiline_csv_truncation_stops_at_complete_record(workspace, workspace_dir):
+    path = workspace_dir / "multiline.csv"
+    complete = b'gene,value\nA,1\nB,2\n'
+    data = complete + b'C,"first line\nsecond line"\nD,4\n'
+    path.write_bytes(data)
+    cap = len(complete + b'C,"first line\n')
+    page = evidence.table_page(workspace, item(path, data), offset=0, limit=1, parse_limit_bytes=cap)
+    assert page["truncated"] and page["total_rows"] is None
+    assert page["preview_rows"] == 2 and page["has_more"]
+    end = evidence.table_page(workspace, item(path, data), offset=1, limit=1, parse_limit_bytes=cap)
+    assert end["rows"][0]["c0"] == "B"
+    assert not end["has_more"]
+    empty = evidence.table_page(workspace, item(path, data), offset=2, limit=1, parse_limit_bytes=cap)
+    assert empty["rows"] == [] and not empty["has_more"]
+    full = evidence.table_page(workspace, item(path, data))
+    assert full["rows"][2]["c1"] == "first line\nsecond line"
+    assert full["total_rows"] == 4
+
+
+def test_csv_malformed_record_explicitly_unavailable(workspace, workspace_dir):
+    path = workspace_dir / "malformed.csv"
+    data = b'gene,value\nA,"unterminated\n'
+    path.write_bytes(data)
+    page = evidence.table_page(workspace, item(path, data))
+    assert not page["content_available"] and page["unavailable_reason"] == "TABLE_PARSE_ERROR"

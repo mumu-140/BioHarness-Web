@@ -30,7 +30,6 @@ import type {
   EvidenceAnchor,
   EvidencePreviewResponse,
   NowData,
-  RoutesData,
   Snapshot,
   TreeData,
   WorkspaceConversation,
@@ -48,6 +47,7 @@ import {
 import { hostFetch } from './gate';
 import { useBioHarnessVersionStream } from './events';
 import { useBioHarnessWorkspace } from './workspace';
+import { matchesSnapshot, resolveBoundConversation, useScientificRoutePages } from './scientificViews';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 import BioHarnessPdfViewer from './BioHarnessPdfViewer';
 
@@ -180,7 +180,7 @@ const SandboxedHtmlViewer = memo(function SandboxedHtmlViewer({
 
 const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { meta, service, workspace, selectedRequestId, selectedScopeId, linkedConversationId } =
+  const { meta, service, workspace, selectedRequestId, linkedConversationId } =
     useBioHarnessWorkspace();
 
   const runtimeEnabled = meta?.runtime?.enabled === true;
@@ -213,15 +213,11 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
     refetchOnWindowFocus: false,
   });
 
-  const resolvedConversationId = useMemo(() => {
-    if (linkedConversationId) {
-      return linkedConversationId;
-    }
-    if (!selectedRequestId) {
-      return null;
-    }
-    return (conversationsQuery.data ?? []).find((c) => c.request_id === selectedRequestId)?.id ?? null;
-  }, [linkedConversationId, selectedRequestId, conversationsQuery.data]);
+  const resolvedConversation = resolveBoundConversation(conversationsQuery.data, workspace,
+    selectedRequestId, linkedConversationId);
+  const resolvedConversationId = resolvedConversation?.id ?? null;
+  const bindingProblem = Boolean(linkedConversationId && !resolvedConversation && runtimeEnabled &&
+    !conversationsQuery.isLoading);
 
   useBioHarnessVersionStream(service, workspace, selectedRequestId);
 
@@ -246,22 +242,16 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
     refetchOnWindowFocus: false,
   });
 
+  const selectedNow = matchesSnapshot(nowQuery.data, service, workspace) &&
+    nowQuery.data.ok && nowQuery.data.data?.request_id === selectedRequestId ? nowQuery.data.data : null;
+  const selectedTree = matchesSnapshot(treeQuery.data, service, workspace) &&
+    treeQuery.data.ok ? treeQuery.data.data : null;
+  const treeBinding = selectedTree?.request_binding;
   const effectiveScopeId =
-    (nowQuery.data?.ok && typeof nowQuery.data.data?.scope_context?.scope_id === 'string'
-      ? nowQuery.data.data.scope_context.scope_id
-      : null) ??
-    (treeQuery.data?.ok ? treeQuery.data.data?.request_binding?.scope_id ?? null : null) ??
-    selectedScopeId;
-
-  const routesQuery = useQuery<Snapshot<RoutesData>>({
-    queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'routes', {
-      scope_id: effectiveScopeId ?? undefined,
-    }),
-    queryFn: () => fetchView<RoutesData>(workspace!, 'routes', { scope_id: effectiveScopeId! }),
-    enabled: Boolean(service && workspace && effectiveScopeId),
-    staleTime: 15_000,
-    refetchOnWindowFocus: false,
-  });
+    (typeof selectedNow?.scope_context?.scope_id === 'string' ? selectedNow.scope_context.scope_id : null) ??
+    (treeBinding?.request_id === selectedRequestId ? treeBinding.scope_id ?? null : null);
+  const routesQuery = useScientificRoutePages(service, workspace, effectiveScopeId,
+    Boolean(selectedRequestId));
 
   const contextQuery = useQuery<Snapshot<ContextData>>({
     queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'context', {
@@ -278,16 +268,13 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
     refetchOnWindowFocus: false,
   });
 
-  const evidenceRefs = useMemo(
-    () =>
-      collectRequestEvidenceRefs(
-        selectedRequestId,
-        routesQuery.data?.ok ? routesQuery.data.data : null,
-        contextQuery.data?.ok ? contextQuery.data.data : null,
-        treeQuery.data?.ok ? treeQuery.data.data : null,
-      ),
-    [selectedRequestId, routesQuery.data, contextQuery.data, treeQuery.data],
-  );
+  const selectedContext = matchesSnapshot(contextQuery.data, service, workspace) &&
+    contextQuery.data.ok ? contextQuery.data.data : null;
+  const evidenceRefs = collectRequestEvidenceRefs(selectedRequestId, routesQuery.routesData,
+    selectedContext, selectedTree);
+  const evidenceReadUnavailable = Boolean(routesQuery.isError || contextQuery.isError || treeQuery.isError ||
+    (contextQuery.data && !selectedContext) || (treeQuery.data && !selectedTree));
+  const completeEvidenceHistory = Boolean(effectiveScopeId && routesQuery.confirmed && !evidenceReadUnavailable);
 
   const activeRefMeta = useMemo(() => {
     if (!activeAnchor) return null;
@@ -337,8 +324,8 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
   const formatKind = classifyEvidenceFormat(displayName, displayKind);
 
   const changedWarnings =
-    nowQuery.data?.ok && Array.isArray(nowQuery.data.data?.evidence_changed_since_submission)
-      ? nowQuery.data.data!.evidence_changed_since_submission!
+    selectedNow && Array.isArray(selectedNow.evidence_changed_since_submission)
+      ? selectedNow.evidence_changed_since_submission!
       : [];
 
   return (
@@ -354,6 +341,10 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {bindingProblem && <p role="alert" className="p-3 text-xs">
+          The conversation link is not verified for this request. Choose the correct conversation
+          from the sidebar; recorded evidence remains independently inspectable.
+        </p>}
         <div className="mx-auto w-full max-w-5xl space-y-4">
           {!selectedRequestId ? (
             <div
@@ -446,7 +437,8 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                     </p>
                     <p className="mt-0.5 opacity-90">
                       BioHarness does not present drifted bytes as the recorded version in structured
-                      or document viewers.
+                      or document viewers. This affects only the preview, not the research run.
+                      If the version difference changes scientific choices, discuss it with the user.
                     </p>
                   </div>
                 </div>
@@ -469,7 +461,7 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                     'Governance could not resolve this recorded evidence anchor.'}
                 </div>
               ) : formatKind === 'pdf' ? (
-                <BioHarnessPdfViewer workspace={workspace} anchor={activeAnchor} title={displayName} />
+                <BioHarnessPdfViewer key={JSON.stringify([service, workspace, activeAnchor])} workspace={workspace} anchor={activeAnchor} title={displayName} />
               ) : formatKind === 'table' ? (
                 <Suspense
                   fallback={
@@ -480,13 +472,14 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                   }
                 >
                   <BioHarnessEvidenceTable
+                    key={JSON.stringify([service, workspace, activeAnchor])}
                     service={service}
                     workspace={workspace}
                     anchor={activeAnchor}
                   />
                 </Suspense>
               ) : formatKind === 'image' ? (
-                <VerifiedImageViewer workspace={workspace} anchor={activeAnchor} alt={displayName} />
+                <VerifiedImageViewer key={JSON.stringify([service, workspace, activeAnchor])} workspace={workspace} anchor={activeAnchor} alt={displayName} />
               ) : formatKind === 'html' && preview?.content_available && preview.content !== null ? (
                 preview.current_file_identity === 'DIFFERS_FROM_RECORD' ? (
                   <div
@@ -580,7 +573,22 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                 </div>
               )}
 
-              {(routesQuery.isLoading || contextQuery.isLoading) && evidenceRefs.length === 0 ? (
+              {(!effectiveScopeId || evidenceReadUnavailable || routesQuery.partial) && (
+                <p role="status" className="text-text-secondary text-xs">
+                  {evidenceReadUnavailable ? 'Evidence sources are temporarily unavailable. ' :
+                    !effectiveScopeId ? 'No verified scoped route history is available. ' :
+                    'Route history is only partially loaded. '}
+                  Loaded exact references remain available; incomplete reads do not establish absence.
+                </p>
+              )}
+              {routesQuery.hasNextPage && (
+                <Button type="button" variant="outline" size="sm" disabled={routesQuery.isFetching}
+                  onClick={() => void routesQuery.fetchNextPage()}>
+                  Load more recorded submissions
+                </Button>
+              )}
+              {((routesQuery.isFetching && !routesQuery.routesData) || contextQuery.isFetching ||
+                treeQuery.isFetching || nowQuery.isFetching) && evidenceRefs.length === 0 ? (
                 <div className="text-text-secondary flex items-center gap-2 py-6 text-sm">
                   <Spinner className="h-4 w-4" />
                   <span>Loading recorded evidence references…</span>
@@ -590,7 +598,8 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                   data-testid="bh-evidence-empty-list"
                   className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border p-6 text-center text-xs"
                 >
-                  No recorded evidence references found for this request yet.
+                  {completeEvidenceHistory ? 'No recorded evidence references found for this request.' :
+                    'No references in the available records; complete history has not been confirmed.'}
                 </div>
               ) : (
                 <div className="border-border-light bg-surface-primary overflow-hidden rounded-xl border">

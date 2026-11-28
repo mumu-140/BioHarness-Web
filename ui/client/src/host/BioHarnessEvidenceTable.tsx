@@ -119,12 +119,15 @@ const BioHarnessEvidenceTable = memo(function BioHarnessEvidenceTable({
             Rows {startRow}–{endRow}{' '}
             {table.total_rows_known && typeof table.total_rows === 'number'
               ? `of ${table.total_rows.toLocaleString()} total`
-              : '(total rows unknown — truncated at server parse bound)'}
+              : '(full row count unknown — bounded preview)'}
             {' · '}
             {table.columns.length} columns{table.columns_truncated ? ' (columns capped)' : ''}
           </div>
           <div className="text-text-tertiary text-[11px]">
             Sorting & column filters apply to currently loaded rows only ({table.sort_scope}).
+            {table.truncated && <> Preview contains {table.preview_rows ?? 'an unknown number of'} complete rows.
+              {!table.has_more && ' End of available preview; further source rows may exist.'}</>}
+            {table.cells_truncated && ' Long cell values shortened for preview.'}
           </div>
         </div>
 

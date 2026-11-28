@@ -316,7 +316,7 @@ def create_router(
         if not raw or raw.get("ok") is not True or not isinstance(item, dict):
             raise HTTPException(404, redact(source_error(GOVERNANCE, raw or {})))
         try:
-            fd, meta = await asyncio.to_thread(evidence.open_verified_content, workspace, item)
+            data, meta = await asyncio.to_thread(evidence.read_verified_content, workspace, item)
         except evidence.EvidenceContentError as err:
             raise HTTPException(err.status, {"origin": "web", "code": err.code,
                                              "message": err.message, **err.extra}) from None
@@ -329,7 +329,6 @@ def create_router(
         try:
             start, end, is_partial = evidence.parse_byte_range(range_header, size)
         except evidence.EvidenceContentError as err:
-            os.close(fd)
             headers = {"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes", "Cache-Control": "no-store"}
             raise HTTPException(416, {"origin": "web", "code": err.code, "message": err.message},
                                 headers=headers) from None
@@ -350,31 +349,12 @@ def create_router(
         status_code = 206 if is_partial else 200
 
         if request.method == "HEAD":
-            os.close(fd)
             return Response(status_code=status_code, media_type=meta["media_type"], headers=headers)
 
-        def _stream_fd():
-            try:
-                if size == 0 or length == 0:
-                    return
-                with os.fdopen(fd, "rb", closefd=True) as handle:
-                    handle.seek(start)
-                    remaining = length
-                    while remaining > 0:
-                        chunk = handle.read(min(65536, remaining))
-                        if not chunk:
-                            break
-                        remaining -= len(chunk)
-                        yield chunk
-            except Exception:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
-                raise
-
-        return StreamingResponse(
-            _stream_fd(),
+        # Return only bytes from the immutable buffer whose exact SHA-256 was
+        # checked. Each range request independently verifies that same anchor.
+        return Response(
+            content=data[start:end + 1] if length else b"",
             status_code=status_code,
             media_type=meta["media_type"],
             headers=headers,

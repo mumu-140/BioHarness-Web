@@ -349,6 +349,8 @@ export interface EvidenceTableData {
   delimiter?: string;
   columns: EvidenceTableColumn[];
   columns_truncated?: boolean;
+  cells_truncated?: boolean;
+  preview_rows?: number;
   rows: Array<Record<string, unknown>>;
   offset: number;
   limit: number;
@@ -385,6 +387,7 @@ export interface Snapshot<T = Record<string, unknown>> {
   source_version: Record<string, string> | null;
   content_sha256: string;
   warnings: string[];
+  shortened?: unknown;
 }
 
 export interface ProviderItem {

@@ -22,9 +22,10 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { Button, Spinner, useMediaQuery } from '@librechat/client';
-import type { NowData, RoutesData, Snapshot, WorkspaceConversation } from './bioharness';
+import type { NowData, Snapshot, WorkspaceConversation } from './bioharness';
 import { bhKeys, fetchConversations, fetchView } from './bioharness';
 import { useBioHarnessVersionStream } from './events';
+import { isCurrentPlanAttempt, matchesSnapshot, resolveBoundConversation, useScientificRoutePages } from './scientificViews';
 import { useBioHarnessWorkspace } from './workspace';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 import BioHarnessPlanGraph from './BioHarnessPlanGraph';
@@ -69,15 +70,11 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
     refetchOnWindowFocus: false,
   });
 
-  const resolvedConversationId = useMemo(() => {
-    if (linkedConversationId) {
-      return linkedConversationId;
-    }
-    if (!selectedRequestId) {
-      return null;
-    }
-    return (conversationsQuery.data ?? []).find((c) => c.request_id === selectedRequestId)?.id ?? null;
-  }, [linkedConversationId, selectedRequestId, conversationsQuery.data]);
+  const resolvedConversation = resolveBoundConversation(conversationsQuery.data, workspace,
+    selectedRequestId, linkedConversationId);
+  const resolvedConversationId = resolvedConversation?.id ?? null;
+  const bindingProblem = Boolean(linkedConversationId && !resolvedConversation && runtimeEnabled &&
+    !conversationsQuery.isLoading);
 
   useBioHarnessVersionStream(service, workspace, selectedRequestId);
 
@@ -91,37 +88,25 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
     refetchOnWindowFocus: false,
   });
 
-  /* Retain last confirmed snapshot on transient 503/tool error and disclose staleness explicitly. */
-  const lastConfirmedRef = useRef<{ requestId: string | null; snapshot: Snapshot<NowData> | null }>({
-    requestId: null,
-    snapshot: null,
+  // A last-confirmed plan is usable only under its complete scientific identity.
+  const snapshotOwner = JSON.stringify([service, workspace, selectedRequestId]);
+  const lastConfirmedRef = useRef<{ owner: string; snapshot: Snapshot<NowData> | null }>({
+    owner: snapshotOwner, snapshot: null,
   });
-  if (selectedRequestId !== lastConfirmedRef.current.requestId) {
-    lastConfirmedRef.current = { requestId: selectedRequestId, snapshot: null };
+  if (snapshotOwner !== lastConfirmedRef.current.owner) {
+    lastConfirmedRef.current = { owner: snapshotOwner, snapshot: null };
   }
-  if (nowQuery.data?.ok && nowQuery.data.data) {
-    lastConfirmedRef.current = { requestId: selectedRequestId, snapshot: nowQuery.data };
+  const confirmedNow = matchesSnapshot(nowQuery.data, service, workspace) && nowQuery.data.ok &&
+    nowQuery.data.data?.request_id === selectedRequestId ? nowQuery.data : null;
+  if (confirmedNow && !nowQuery.isError) {
+    lastConfirmedRef.current = { owner: snapshotOwner, snapshot: confirmedNow };
   }
-
-  const effectiveSnapshot = nowQuery.data?.ok
-    ? nowQuery.data
-    : lastConfirmedRef.current.snapshot;
-  const isStale = Boolean(
-    effectiveSnapshot && (nowQuery.isError || (nowQuery.data && !nowQuery.data.ok)),
-  );
+  const effectiveSnapshot = confirmedNow ?? lastConfirmedRef.current.snapshot;
+  const isStale = Boolean(effectiveSnapshot && (nowQuery.isError || !confirmedNow));
   const nowData = effectiveSnapshot?.data ?? null;
-  const scopeId =
-    typeof nowData?.scope_context?.scope_id === 'string' ? nowData.scope_context.scope_id : null;
-
-  const routesQuery = useQuery<Snapshot<RoutesData>>({
-    queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'routes', {
-      scope_id: scopeId ?? undefined,
-    }),
-    queryFn: () => fetchView<RoutesData>(workspace!, 'routes', { scope_id: scopeId! }),
-    enabled: Boolean(service && workspace && scopeId && activeStepId),
-    staleTime: 15_000,
-    refetchOnWindowFocus: false,
-  });
+  const scopeId = typeof nowData?.scope_context?.scope_id === 'string'
+    ? nowData.scope_context.scope_id : null;
+  const routesQuery = useScientificRoutePages(service, workspace, scopeId, Boolean(activeStepId));
 
   const steps = nowData?.plan?.steps ?? [];
   const progressSteps = nowData?.progress?.steps ?? [];
@@ -131,14 +116,11 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
   );
   const activeStep = activeStepId ? steps.find((s) => s.id === activeStepId) ?? null : null;
 
-  const stepSubmissions = useMemo(() => {
-    if (!activeStepId || !selectedRequestId || !routesQuery.data?.ok || !routesQuery.data.data) {
-      return [];
-    }
-    return routesQuery.data.data.attempts.filter(
-      (a) => a.request_id === selectedRequestId && a.step_id === activeStepId,
-    );
-  }, [activeStepId, selectedRequestId, routesQuery.data]);
+  // Keep historical and version-unknown attempts visible. Only an exact owner
+  // version match is associated with the current plan; none of this gates a run.
+  const stepSubmissions = (routesQuery.routesData?.attempts ?? []).filter(
+    (a) => a.request_id === selectedRequestId && a.step_id === activeStepId);
+  const currentVersion = nowData?.plan_version;
 
   const openStep = (stepId: string) => {
     setLastSelectedStepId(stepId);
@@ -176,6 +158,10 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className={fullscreen ? 'w-full' : 'mx-auto w-full max-w-5xl space-y-4'}>
+          {bindingProblem && <p role="alert" className="p-3 text-xs">
+            The conversation link is not verified for this workspace/request. Select the correct
+            conversation before discussing this step; the scientific plan remains available.
+          </p>}
           {isStale && effectiveSnapshot && (
             <div
               role="alert"
@@ -353,11 +339,32 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                 {/* Recorded submissions & evidence links for this step */}
                 <div className="border-border-light border-t pt-3 text-xs">
                   <div className="text-text-tertiary font-semibold uppercase">
-                    Recorded submissions & evidence ({stepSubmissions.length})
+                    Recorded submissions & evidence ({stepSubmissions.length} loaded)
                   </div>
+                  {routesQuery.isLoading && scopeId ? <p>Loading recorded route history…</p> : null}
+                  {!scopeId || routesQuery.isError || routesQuery.partial ? (
+                    <p role="status" className="text-text-secondary mt-1">
+                      {!scopeId ? 'No public scoped route history is available for this request. ' :
+                        routesQuery.isError ? 'Route history unavailable; loaded records may be incomplete. ' :
+                        'Only part of the route history is loaded. '}
+                      This does not establish absence of submissions or stop research.
+                    </p>
+                  ) : null}
+                  <p className="text-text-secondary mt-1">
+                    Only recorded matching plan versions are current-plan submissions.
+                    Historical or version-unknown records remain inspectable; discuss consequential
+                    differences with the user before changing the scientific decision.
+                  </p>
+                  {routesQuery.hasNextPage && (
+                    <Button type="button" variant="outline" size="sm"
+                      disabled={routesQuery.isFetching} onClick={() => void routesQuery.fetchNextPage()}>
+                      Load more recorded submissions
+                    </Button>
+                  )}
                   {stepSubmissions.length === 0 ? (
                     <p className="text-text-tertiary mt-1">
-                      No Governance submissions recorded for this step yet.
+                      {routesQuery.confirmed ? 'No submissions recorded for this step.' :
+                        'No matching submission in the available records.'}
                     </p>
                   ) : (
                     <ul className="mt-2 space-y-2">
@@ -369,6 +376,12 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="font-mono font-medium">
                               Submission #{sub.submission_index} · {sub.submission_status}
+                            </span>
+                            <span className="text-text-secondary">
+                              {isCurrentPlanAttempt(sub, currentVersion)
+                                ? 'Current plan version'
+                                : 'Historical / version-unverified'}
+                              {typeof sub.plan_version === 'number' ? <> · v{sub.plan_version}</> : ' · version unknown'}
                             </span>
                             {sub.at && <span className="text-text-tertiary">{sub.at}</span>}
                           </div>

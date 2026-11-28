@@ -124,18 +124,32 @@ def preview(workspace: Workspace, item: dict[str, Any], max_bytes: int) -> dict[
         return result
     with os.fdopen(descriptor, "rb") as handle:
         size = os.fstat(handle.fileno()).st_size
+        captured = None
         if size <= HASH_LIMIT_BYTES:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
-            result["current_file_identity"] = (
-                "MATCHES_RECORD" if digest == item.get("sha256") else "DIFFERS_FROM_RECORD")
-            handle.seek(0)
-        truncated = size > max_bytes
-        if truncated:
-            head = handle.read(max_bytes // 2)
-            handle.seek(size - (max_bytes - max_bytes // 2))
-            raw = head + _OMITTED + handle.read(max_bytes - max_bytes // 2)
+            # Hash and display the same bounded immutable bytes. An opened fd alone
+            # does not protect against in-place writes by another process.
+            data = handle.read(HASH_LIMIT_BYTES + 1)
+            if len(data) <= HASH_LIMIT_BYTES:
+                captured = data
+                size = len(data)
+                digest = hashlib.sha256(data).hexdigest()
+                result["current_file_identity"] = (
+                    "MATCHES_RECORD" if digest == item.get("sha256") else "DIFFERS_FROM_RECORD")
+        if captured is not None:
+            truncated = size > max_bytes
+            raw = (captured[:max_bytes // 2] + _OMITTED +
+                   captured[-(max_bytes - max_bytes // 2):]) if truncated else captured
         else:
-            raw = handle.read()
+            # Large or growing live files are only unverified bounded excerpts.
+            size = os.fstat(handle.fileno()).st_size
+            handle.seek(0)
+            truncated = size > max_bytes
+            if truncated:
+                head = handle.read(max_bytes // 2)
+                handle.seek(max(0, size - (max_bytes - max_bytes // 2)))
+                raw = head + _OMITTED + handle.read(max_bytes - max_bytes // 2)
+            else:
+                raw = handle.read(max_bytes)
     result.update(size_bytes=size, truncated=truncated, format=_format_for(path.name))
     if b"\x00" in raw:
         result["unavailable_reason"] = "BINARY_PREVIEW_NOT_SUPPORTED"
@@ -259,85 +273,66 @@ def parse_byte_range(
     return (start, end, True)
 
 
-def open_verified_content(workspace: Workspace, item: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """Open and SHA-256-verify a recorded evidence file for bounded byte/range delivery.
+def _capture_verified_bytes(handle, expected_sha: str) -> tuple[bytes, str]:
+    """Verify exactly the bounded immutable bytes that will be parsed or returned.
 
-    Refuses to serve bytes if the file is outside configured roots, exceeds the 64 MiB
-    verification budget, has drifted from its recorded SHA-256, or is an unsupported format.
-    Caller owns the returned file descriptor on success.
+    The caller owns the open, containment-checked file. Never hash an fd then
+    reread mutable source bytes under the old digest. No persistent copy/cache.
     """
+    size = os.fstat(handle.fileno()).st_size
+    data = None if size > HASH_LIMIT_BYTES else handle.read(HASH_LIMIT_BYTES + 1)
+    if data is None or len(data) > HASH_LIMIT_BYTES:
+        raise EvidenceContentError(
+            409, "EVIDENCE_EXCEEDS_HASH_BUDGET",
+            "file exceeds the verification budget and cannot be verified as the recorded snapshot",
+            current_file_identity="NOT_CHECKED", size_bytes=max(size, len(data or b"")),
+            hash_limit_bytes=HASH_LIMIT_BYTES,
+        )
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != expected_sha:
+        raise EvidenceContentError(
+            409, "EVIDENCE_CONTENT_DRIFT",
+            "current file bytes differ from the recorded SHA-256 snapshot; refusing to serve drifted bytes as recorded",
+            current_file_identity="DIFFERS_FROM_RECORD", recorded_sha256=expected_sha,
+            size_bytes=len(data),
+        )
+    return data, digest
+
+
+def read_verified_content(workspace: Workspace, item: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    """Capture a verified file version for bounded byte/range delivery."""
     kind = str(item.get("kind"))
     source = str(item.get("source") or "")
     expected_sha = str(item.get("sha256") or "")
     if kind != "file":
         raise EvidenceContentError(
-            404,
-            "CONTENT_NOT_EXPOSED_BY_PUBLIC_INTERFACE",
+            404, "CONTENT_NOT_EXPOSED_BY_PUBLIC_INTERFACE",
             "only recorded file evidence can be streamed; text snapshots are not exposed by public CLI",
         )
     path = _allowed_file(workspace, source)
     descriptor = _open_checked(workspace, path) if path is not None else None
     if descriptor is None or path is None:
         raise EvidenceContentError(
-            404,
-            "NOT_AVAILABLE_IN_CONFIGURED_ROOTS",
+            404, "NOT_AVAILABLE_IN_CONFIGURED_ROOTS",
             "recorded file is not available inside configured workspace roots",
             current_file_identity="NOT_CHECKED",
         )
-    suffix = path.suffix.lower()
-    mime_entry = _CONTENT_MIME_BY_SUFFIX.get(suffix)
-    if mime_entry is None:
-        os.close(descriptor)
-        raise EvidenceContentError(
-            415,
-            "UNSUPPORTED_MEDIA_FORMAT",
-            f"format '{suffix or 'unknown'}' is not supported for direct browser viewing",
-            current_file_identity="NOT_CHECKED",
-        )
-    try:
-        st = os.fstat(descriptor)
-        size = st.st_size
-        if size > HASH_LIMIT_BYTES:
-            os.close(descriptor)
+    with os.fdopen(descriptor, "rb") as handle:
+        suffix = path.suffix.lower()
+        mime_entry = _CONTENT_MIME_BY_SUFFIX.get(suffix)
+        if mime_entry is None:
             raise EvidenceContentError(
-                409,
-                "EVIDENCE_EXCEEDS_HASH_BUDGET",
-                "file exceeds the 64 MiB verification budget and cannot be verified as the recorded snapshot",
+                415, "UNSUPPORTED_MEDIA_FORMAT",
+                f"format '{suffix or 'unknown'}' is not supported for direct browser viewing",
                 current_file_identity="NOT_CHECKED",
-                size_bytes=size,
-                hash_limit_bytes=HASH_LIMIT_BYTES,
             )
-        # Hash via dup'd fd so os.fdopen closing does not close the caller's descriptor.
-        dup_fd = os.dup(descriptor)
-        with os.fdopen(dup_fd, "rb") as hash_handle:
-            digest = hashlib.file_digest(hash_handle, "sha256").hexdigest()
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        if digest != expected_sha:
-            os.close(descriptor)
-            raise EvidenceContentError(
-                409,
-                "EVIDENCE_CONTENT_DRIFT",
-                "current file bytes differ from the recorded SHA-256 snapshot; refusing to serve drifted bytes as recorded",
-                current_file_identity="DIFFERS_FROM_RECORD",
-                recorded_sha256=expected_sha,
-                size_bytes=size,
-            )
-        media_type, is_inline = mime_entry
-        meta = {
-            "name": path.name,
-            "safe_name": safe_disposition_name(path.name),
-            "media_type": media_type,
-            "inline": is_inline,
-            "size_bytes": size,
-            "sha256": digest,
-            "current_file_identity": "MATCHES_RECORD",
-        }
-        return descriptor, meta
-    except EvidenceContentError:
-        raise
-    except Exception:
-        os.close(descriptor)
-        raise
+        data, digest = _capture_verified_bytes(handle, expected_sha)
+    media_type, is_inline = mime_entry
+    return data, {
+        "name": path.name, "safe_name": safe_disposition_name(path.name),
+        "media_type": media_type, "inline": is_inline, "size_bytes": len(data),
+        "sha256": digest, "current_file_identity": "MATCHES_RECORD",
+    }
 
 
 def table_page(
@@ -395,44 +390,44 @@ def table_page(
         return result
 
     with os.fdopen(descriptor, "rb") as handle:
-        size = os.fstat(handle.fileno()).st_size
-        result["size_bytes"] = size
-        if size > HASH_LIMIT_BYTES:
-            result["unavailable_reason"] = "EVIDENCE_EXCEEDS_HASH_BUDGET"
+        try:
+            data, _ = _capture_verified_bytes(handle, expected_sha)
+        except EvidenceContentError as err:
+            result.update(err.extra)
+            result["unavailable_reason"] = (
+                "CONTENT_DIFFERS_FROM_RECORD" if err.code == "EVIDENCE_CONTENT_DRIFT" else err.code)
             return result
-        digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        if digest != expected_sha:
-            result["current_file_identity"] = "DIFFERS_FROM_RECORD"
-            result["unavailable_reason"] = "CONTENT_DIFFERS_FROM_RECORD"
-            return result
-        result["current_file_identity"] = "MATCHES_RECORD"
-        handle.seek(0)
-        raw = handle.read(parse_limit_bytes + 1)
-
-    truncated = len(raw) > parse_limit_bytes
+    result["size_bytes"] = len(data)
+    result["current_file_identity"] = "MATCHES_RECORD"
+    truncated = len(data) > parse_limit_bytes
+    raw = data[:parse_limit_bytes]
     if truncated:
-        raw = raw[:parse_limit_bytes]
-        # Drop any partial trailing line so we never parse a torn record.
-        last_nl = raw.rfind(b"\n")
-        if last_nl > 0:
-            raw = raw[:last_nl + 1]
-
+        # csv.reader handles quoted multiline records. A physical newline is
+        # only a safe *input* bound, not a guarantee of a complete CSV record.
+        last_nl = max(raw.rfind(b"\n"), raw.rfind(b"\r"))
+        raw = raw[:last_nl + 1] if last_nl >= 0 else b""
     if b"\x00" in raw:
         result["unavailable_reason"] = "BINARY_PREVIEW_NOT_SUPPORTED"
         return result
-
-    text = raw.decode("utf-8", errors="replace").lstrip("\ufeff")
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        result["unavailable_reason"] = "UNSUPPORTED_TABLE_ENCODING"
+        return result
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
     try:
         header = next(reader)
     except StopIteration:
         result.update(
-            content_available=True,
+            content_available=not truncated,
+            unavailable_reason="TABLE_HEADER_OUTSIDE_PREVIEW_BUDGET" if truncated else None,
             delimiter="tab" if delimiter == "\t" else "comma",
-            total_rows=0 if not truncated else None,
-            total_rows_known=not truncated,
-            truncated=truncated,
+            total_rows=0 if not truncated else None, total_rows_known=not truncated,
+            truncated=truncated, preview_rows=0,
         )
+        return result
+    except csv.Error:
+        result["unavailable_reason"] = "TABLE_PARSE_ERROR"
         return result
 
     if len(header) > TABLE_MAX_COLUMNS:
@@ -448,39 +443,35 @@ def table_page(
 
     page_rows: list[dict[str, Any]] = []
     seen_data_rows = 0
-    has_more = False
-    for raw_row in reader:
-        if not raw_row and seen_data_rows == 0:
-            continue
-        if seen_data_rows >= offset and len(page_rows) < limit:
-            record: dict[str, Any] = {"__row_index": seen_data_rows + 1}
-            for idx, col in enumerate(columns):
-                val = raw_row[idx] if idx < len(raw_row) else ""
-                if len(val) > TABLE_MAX_CELL_CHARS:
-                    val = val[:TABLE_MAX_CELL_CHARS] + "…"
-                record[col["id"]] = val
-            page_rows.append(record)
-        elif seen_data_rows >= offset + limit:
-            has_more = True
-            if truncated:
-                # We already know total is unknown; stop scanning once page + has_more is settled.
-                seen_data_rows += 1
-                break
-        seen_data_rows += 1
-
-    if truncated:
-        has_more = True
-
+    cells_truncated = False
+    try:
+        for raw_row in reader:
+            if not raw_row and seen_data_rows == 0:
+                continue
+            if seen_data_rows >= offset and len(page_rows) < limit:
+                record: dict[str, Any] = {"__row_index": seen_data_rows + 1}
+                for idx, col in enumerate(columns):
+                    val = raw_row[idx] if idx < len(raw_row) else ""
+                    if len(val) > TABLE_MAX_CELL_CHARS:
+                        val = val[:TABLE_MAX_CELL_CHARS] + "…"
+                        cells_truncated = True
+                    record[col["id"]] = val
+                page_rows.append(record)
+            seen_data_rows += 1
+    except csv.Error as err:
+        # Only ignore a torn final quoted record at the deliberately cut boundary.
+        # Other malformed or over-budget records are not silently treated as data.
+        if not (truncated and str(err) == "unexpected end of data"):
+            result["unavailable_reason"] = "TABLE_PARSE_ERROR"
+            return result
     result.update(
         content_available=True,
         delimiter="tab" if delimiter == "\t" else "comma",
-        columns=columns,
-        columns_truncated=columns_truncated,
-        rows=page_rows,
-        returned_rows=len(page_rows),
-        has_more=has_more,
+        columns=columns, columns_truncated=columns_truncated,
+        cells_truncated=cells_truncated, rows=page_rows, returned_rows=len(page_rows),
+        has_more=seen_data_rows > offset + len(page_rows),
+        preview_rows=seen_data_rows,
         total_rows=None if truncated else seen_data_rows,
-        total_rows_known=not truncated,
-        truncated=truncated,
+        total_rows_known=not truncated, truncated=truncated,
     )
     return result

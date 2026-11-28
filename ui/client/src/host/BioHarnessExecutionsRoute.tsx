@@ -6,18 +6,19 @@
  * Queries `GET .../invocations` (cursor-paginated) and `GET .../modules` directly, completely
  * independent of whether the Conversation component is mounted.
  */
-import React, { memo, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { memo, useMemo, useState } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Activity, ArrowLeft, Cpu, RefreshCw, Search } from 'lucide-react';
 import { Button, Spinner } from '@librechat/client';
 import type {
-  InvocationItem,
   InvocationsResponse,
   ModulesResponse,
   WorkspaceConversation,
 } from './bioharness';
 import { bhKeys, fetchConversations, fetchInvocations, fetchModules } from './bioharness';
 import { useBioHarnessWorkspace } from './workspace';
+import { assertObservationOwner, resolveBoundConversation } from './scientificViews';
+import { useBioHarnessConversationEvents } from './events';
 import BioHarnessRequestHeader from './BioHarnessRequestHeader';
 
 const KIND_OPTIONS = ['all', 'core', 'hook', 'model', 'tool'] as const;
@@ -90,67 +91,55 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
     refetchOnWindowFocus: false,
   });
 
-  const resolvedConversationId = useMemo(() => {
-    if (linkedConversationId) {
-      return linkedConversationId;
-    }
-    const list = conversationsQuery.data ?? [];
-    if (selectedRequestId) {
-      return list.find((c) => c.request_id === selectedRequestId)?.id ?? null;
-    }
-    return list[0]?.id ?? null;
-  }, [linkedConversationId, selectedRequestId, conversationsQuery.data]);
-
-  const firstPageQuery = useQuery<InvocationsResponse>({
-    queryKey: bhKeys.invocations(service ?? 'svc', workspace ?? '', resolvedConversationId ?? '', null),
-    queryFn: () => fetchInvocations(workspace!, resolvedConversationId!, { limit: 25 }),
-    enabled: Boolean(service && workspace && resolvedConversationId && runtimeEnabled),
+  const conversation = resolveBoundConversation(conversationsQuery.data, workspace,
+    selectedRequestId, linkedConversationId);
+  const resolvedConversationId = conversation?.id ?? null;
+  const identity = JSON.stringify([service, workspace, selectedRequestId, resolvedConversationId]);
+  const bindingProblem = Boolean(linkedConversationId && !conversation && !conversationsQuery.isLoading);
+  const pagesQuery = useInfiniteQuery<InvocationsResponse>({
+    queryKey: [...bhKeys.invocations(service ?? 'svc', workspace ?? '', resolvedConversationId ?? ''),
+      conversation?.request_id],
+    queryFn: async ({ pageParam = null }) => assertObservationOwner(
+      await fetchInvocations(workspace!, conversation!.id, { limit: 25, before: pageParam }),
+      service!, workspace!, conversation!),
+    getNextPageParam: (last) => last.next_before ?? undefined,
+    enabled: Boolean(service && workspace && conversation && runtimeEnabled),
     staleTime: 5_000,
     refetchOnWindowFocus: false,
   });
-
+  const firstPageQuery = { ...pagesQuery, data: pagesQuery.data?.pages[0] };
+  const pages = pagesQuery.data?.pages ?? [];
+  const nextCursor = pagesQuery.hasNextPage ? (pages[pages.length - 1]?.next_before ?? null) : null;
+  const loadingMore = pagesQuery.isFetchingNextPage;
+  const loadMoreError = pagesQuery.isError && pages.length > 0 ? (pagesQuery.error as Error)?.message : null;
   const modulesQuery = useQuery<ModulesResponse>({
-    queryKey: bhKeys.modules(service ?? 'svc', workspace ?? '', resolvedConversationId ?? ''),
-    queryFn: () => fetchModules(workspace!, resolvedConversationId!),
-    enabled: Boolean(service && workspace && resolvedConversationId && runtimeEnabled),
+    queryKey: [...bhKeys.modules(service ?? 'svc', workspace ?? '', resolvedConversationId ?? ''),
+      conversation?.request_id],
+    queryFn: async () => assertObservationOwner(await fetchModules(workspace!, conversation!.id),
+      service!, workspace!, conversation!),
+    enabled: Boolean(service && workspace && conversation && runtimeEnabled),
     staleTime: 10_000,
     refetchOnWindowFocus: false,
   });
+  // Existing conversation events refresh observations even when chat is not mounted.
+  const executionLog = useBioHarnessConversationEvents(service, runtimeEnabled ? workspace : null,
+    runtimeEnabled ? resolvedConversationId : null);
 
-  const [olderItems, setOlderItems] = useState<InvocationItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<string>('all');
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setOlderItems([]);
-    setNextCursor(null);
-    setLoadMoreError(null);
-    setSelectedId(null);
-  }, [workspace, resolvedConversationId]);
-
-  useEffect(() => {
-    if (firstPageQuery.data && olderItems.length === 0) {
-      setNextCursor(firstPageQuery.data.next_before);
-    }
-  }, [firstPageQuery.data, olderItems.length]);
+  const [selection, setSelection] = useState<{ identity: string; id: string } | null>(null);
+  const selectedId = selection?.identity === identity ? selection.id : null;
+  const setSelectedId = (id: string | null) => setSelection(id ? { identity, id } : null);
 
   const allLoadedItems = useMemo(() => {
-    const first = firstPageQuery.data?.items ?? [];
     const seen = new Set<string>();
-    const combined: InvocationItem[] = [];
-    for (const item of [...first, ...olderItems]) {
-      if (!seen.has(item.id)) {
-        seen.add(item.id);
-        combined.push(item);
-      }
-    }
-    return combined;
-  }, [firstPageQuery.data, olderItems]);
+    return (pagesQuery.data?.pages ?? []).flatMap((p) => p.items).filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [pagesQuery.data]);
 
   const filteredItems = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -171,22 +160,8 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
   );
 
   const handleLoadOlder = async () => {
-    if (!workspace || !resolvedConversationId || nextCursor === null || loadingMore) {
-      return;
-    }
-    setLoadingMore(true);
-    setLoadMoreError(null);
-    try {
-      const page = await fetchInvocations(workspace, resolvedConversationId, {
-        before: nextCursor,
-        limit: 25,
-      });
-      setOlderItems((prev) => [...prev, ...page.items]);
-      setNextCursor(page.next_before);
-    } catch (err) {
-      setLoadMoreError((err as Error)?.message || 'Failed to load older records');
-    } finally {
-      setLoadingMore(false);
+    if (pagesQuery.hasNextPage && !pagesQuery.isFetching) {
+      await pagesQuery.fetchNextPage();
     }
   };
 
@@ -198,11 +173,16 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
     >
       <BioHarnessRequestHeader
         activeTab="executions"
-        requestId={firstPageQuery.data?.request_id ?? selectedRequestId}
+        requestId={conversation?.request_id ?? selectedRequestId}
         conversationId={resolvedConversationId}
+        sseConnected={executionLog.connected}
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {bindingProblem && <p role="alert" className="p-3 text-xs">
+          The requested conversation is not verified for this workspace/request. Select the correct
+          conversation from the sidebar. Existing research runs are not interrupted.
+        </p>}
         <div className="mx-auto w-full max-w-5xl space-y-4">
           {!runtimeEnabled ? (
             <div className="border-border-light bg-surface-primary/60 rounded-xl border p-6 text-center text-sm">
@@ -292,7 +272,6 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                   size="sm"
                   data-testid="bh-executions-refresh-btn"
                   onClick={() => {
-                    setOlderItems([]);
                     void firstPageQuery.refetch();
                     void modulesQuery.refetch();
                   }}
@@ -355,16 +334,19 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
 
                 <span className="text-text-tertiary text-[11px]" data-testid="bh-exec-page-disclosure">
                   Showing {filteredItems.length} of {allLoadedItems.length} loaded
-                  {nextCursor !== null ? ' (more older records available)' : ' (all loaded)'}
+                  {firstPageQuery.isError ? ' (refresh unavailable)' : nextCursor !== null ? ' (more older records available)' : firstPageQuery.data ? ' (all loaded)' : ' (not yet confirmed)'}
                 </span>
               </div>
 
+              {firstPageQuery.isError && allLoadedItems.length > 0 && (
+                <p role="alert" className="text-xs">Execution refresh unavailable; showing last loaded observations.</p>
+              )}
               {firstPageQuery.isLoading ? (
                 <div className="text-text-secondary flex items-center gap-2 py-6 text-sm">
                   <Spinner className="h-4 w-4" />
                   <span>Loading execution records…</span>
                 </div>
-              ) : firstPageQuery.isError ? (
+              ) : firstPageQuery.isError && allLoadedItems.length === 0 ? (
                 <div role="alert" className="border-status-error-border bg-status-error-subtle rounded-xl border p-3 text-xs">
                   {(firstPageQuery.error as Error)?.message || 'Failed to load execution records.'}
                 </div>
@@ -426,7 +408,7 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
                     variant="outline"
                     size="sm"
                     data-testid="bh-exec-load-older-btn"
-                    disabled={loadingMore}
+                    disabled={pagesQuery.isFetching}
                     onClick={() => void handleLoadOlder()}
                     className="text-xs"
                   >
@@ -436,6 +418,9 @@ const BioHarnessExecutionsRoute = memo(function BioHarnessExecutionsRoute() {
               )}
 
               {/* Configured module discovery summary */}
+              {modulesQuery.isError && <p role="alert" className="text-xs">
+                Module observations unavailable; this does not establish that modules were unused.
+              </p>}
               {modulesQuery.data && (
                 <section
                   data-testid="bh-modules-section"

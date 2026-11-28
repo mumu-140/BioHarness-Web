@@ -43,8 +43,8 @@ const EMPTY_LOG: ConversationEventLog = {
   connectSeq: 0,
 };
 
-function makeOwnerKey(workspace: string | null, conversationId: string | null): string | null {
-  return workspace && conversationId ? `${workspace}::${conversationId}` : null;
+function makeOwnerKey(service: string | null, workspace: string | null, conversationId: string | null): string | null {
+  return service && workspace && conversationId ? JSON.stringify([service, workspace, conversationId]) : null;
 }
 
 export function useBioHarnessConversationEvents(
@@ -53,7 +53,7 @@ export function useBioHarnessConversationEvents(
   conversationId: string | null,
 ): ConversationEventLog {
   const queryClient = useQueryClient();
-  const ownerKey = makeOwnerKey(workspace, conversationId);
+  const ownerKey = makeOwnerKey(service, workspace, conversationId);
   const [scoped, setScoped] = useState<ScopedEventState>({ ownerKey, log: EMPTY_LOG });
   const processedRef = useRef<{ ownerKey: string | null; seq: number }>({
     ownerKey: null,
@@ -76,6 +76,10 @@ export function useBioHarnessConversationEvents(
     source.onopen = () => {
       if (closed) {
         return;
+      }
+      if (service) {
+        void queryClient.invalidateQueries({ queryKey: bhKeys.invocations(service, workspace, conversationId) }, { cancelRefetch: false });
+        void queryClient.invalidateQueries({ queryKey: bhKeys.modules(service, workspace, conversationId) }, { cancelRefetch: false });
       }
       setScoped((prev) => {
         if (prev.ownerKey !== ownerKey) {
@@ -194,7 +198,7 @@ export function useBioHarnessConversationEvents(
       closed = true;
       source.close();
     };
-  }, [workspace, conversationId, ownerKey]);
+  }, [service, workspace, conversationId, ownerKey, queryClient]);
 
   /* Synchronously isolate rendered state: never leak another conversation/workspace even for 1 frame. */
   const effectiveLog = scoped.ownerKey === ownerKey ? scoped.log : EMPTY_LOG;
@@ -220,7 +224,13 @@ export function useBioHarnessConversationEvents(
 
     let invalidateViews = false;
     let invalidateConversation = false;
+    let invalidateObservations = false;
     for (const event of fresh) {
+      if (event.type === 'operation.started' || event.type === 'operation.finished' ||
+          event.type === 'module.discovery' || event.type === 'run.started' ||
+          event.type === 'run.finished' || event.type === 'run.cancel_requested') {
+        invalidateObservations = true;
+      }
       if (
         event.type === 'operation.finished' &&
         (event.data?.kind === 'core' || event.data?.kind === 'hook')
@@ -242,6 +252,10 @@ export function useBioHarnessConversationEvents(
       }
     }
 
+    if (invalidateObservations) {
+      void queryClient.invalidateQueries({ queryKey: bhKeys.invocations(service, workspace, conversationId) }, { cancelRefetch: false });
+      void queryClient.invalidateQueries({ queryKey: bhKeys.modules(service, workspace, conversationId) }, { cancelRefetch: false });
+    }
     if (invalidateViews) {
       void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
     }

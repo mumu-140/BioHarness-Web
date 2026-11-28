@@ -4,6 +4,8 @@ import {
   type PlanStep,
   type TreeScopeNode,
 } from '../bioharness';
+import type { RoutesData, Snapshot } from '../bioharness';
+import { resolveBoundConversation, assertObservationOwner, isCurrentPlanAttempt, matchesSnapshot, nextRouteOffset } from '../scientificViews';
 import { layoutPlanGraph } from '../BioHarnessPlanGraph';
 import { buildResearchTreeNodes } from '../BioHarnessSidebarSection';
 
@@ -125,5 +127,57 @@ describe('Step 4 scientific views and evidence helpers', () => {
     expect(classifyEvidenceFormat('summary.json', 'file')).toBe('code');
     expect(classifyEvidenceFormat('reads.bam', 'file')).toBe('unsupported');
     expect(classifyEvidenceFormat('inline-note', 'text')).toBe('unsupported');
+  });
+});
+
+describe('Scientific view identity and version boundaries', () => {
+  const a = { id: 'conv-a', workspace: 'ws-a', request_id: 'req-a', created_at: '' };
+  const b = { id: 'conv-b', workspace: 'ws-a', request_id: 'req-b', created_at: '' };
+  const other = { ...a, workspace: 'ws-b' };
+
+  it('never trusts a contradictory URL binding or guesses a first conversation', () => {
+    expect(resolveBoundConversation([a, b, other], 'ws-a', 'req-a', 'conv-b')).toBeNull();
+    expect(resolveBoundConversation([a, b, other], 'ws-a', null, null)).toBeNull();
+    expect(resolveBoundConversation([a, b, other], 'ws-b', 'req-a', 'conv-a')).toEqual(other);
+    expect(resolveBoundConversation([a, b, other], 'ws-a', 'req-a', null)).toEqual(a);
+  });
+
+  it('rejects a late or wrongly owned execution page before caching it', () => {
+    const page = { service: 'svc-a', workspace: 'ws-a', request_id: 'req-a', conversation_id: 'conv-a' };
+    expect(assertObservationOwner(page, 'svc-a', 'ws-a', a)).toEqual(page);
+    expect(() => assertObservationOwner(page, 'svc-a', 'ws-a', b)).toThrow();
+    expect(() => assertObservationOwner(page, 'svc-b', 'ws-a', a)).toThrow();
+    expect(() => assertObservationOwner(page, 'svc-a', 'ws-b', other)).toThrow();
+  });
+
+  it('does not promote historical or unknown versions to current-plan evidence', () => {
+    const attempt = { request_id: 'req-a', submission_index: 1, step_id: 'S1',
+      plan_version: 1, submission_status: 'DONE', summary: 'old', evidence: [] };
+    expect(isCurrentPlanAttempt(attempt, 1)).toBe(true);
+    expect(isCurrentPlanAttempt(attempt, 2)).toBe(false);
+    expect(isCurrentPlanAttempt(attempt, undefined)).toBe(false);
+    expect(isCurrentPlanAttempt({ ...attempt, plan_version: undefined }, undefined)).toBe(false);
+  });
+
+  it('checks snapshot service and workspace even for identical request IDs', () => {
+    const snapshot = { service: 'svc-a', workspace: 'ws-a' } as Snapshot<unknown>;
+    expect(matchesSnapshot(snapshot, 'svc-a', 'ws-a')).toBe(true);
+    expect(matchesSnapshot(snapshot, 'svc-a', 'ws-b')).toBe(false);
+    expect(matchesSnapshot(snapshot, 'svc-b', 'ws-a')).toBe(false);
+  });
+
+  it('does not claim a next route page beyond the confirmed cursor or loop on empty reads', () => {
+    const attempt = { request_id: 'req-a', submission_index: 1, step_id: 'S1',
+      submission_status: 'DONE', summary: '', evidence: [] };
+    const page: Snapshot<RoutesData> = {
+      service: 'svc-a', workspace: 'ws-a', view: 'routes', selector: { scope_id: 'P' },
+      source: { owner: 'governance', interface: 'public' }, observed_at: '', ok: true,
+      error: null, source_version: null, content_sha256: '', warnings: [],
+      data: { scope_id: 'P', offset: 0, attempt_count: 2, attempts: [attempt] },
+    };
+    expect(nextRouteOffset(page)).toBe(1);
+    expect(nextRouteOffset({ ...page, data: { ...page.data!, offset: 1 } })).toBeUndefined();
+    expect(nextRouteOffset({ ...page, data: { ...page.data!, attempts: [] } })).toBeUndefined();
+    expect(nextRouteOffset({ ...page, data: { ...page.data!, attempt_count: undefined } })).toBeUndefined();
   });
 });
