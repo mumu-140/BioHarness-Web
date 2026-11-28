@@ -1,67 +1,57 @@
 # BioHarness Research Workspace
 
-**状态：W1 读侧与 W2 原生运行时已实现，并在合成夹具上通过后端、契约、组件和真实浏览器测试；真实模型已在 Linux 隔离环境完成一个合成 EXPLAIN 闭环，实际调用 Core 和 Project Governance，并在两次提供商响应失败后显式恢复到交付；真实科研项目与三类任务完整验收仍开放；W3 的通用调用检查器、分页时间线和 Module 发现状态已与最新后端集成，并通过 Linux 合成工作区联合测试；真实专业 Module 与科研项目验收仍开放。** Web 已作为独立常驻组件接入正式安装的 Core/Governance 公开 CLI，并完成私有 Linux 的读侧与重启冒烟；这不是完整科研或公开服务验收。部署与回退见[部署说明](docs/deployment.md)。本仓库提供 BioHarness 的第一方 Web 科研工作台，原 Observatory 已退役为历史资料。产品目的、规则和唯一实施路线见本 README、[AGENTS.md](AGENTS.md)、[架构](docs/architecture.md)及[V2 计划](docs/plans/2026-11-25-research-workspace-v2.md)。
+BioHarness 的第一方科研工作台。组织研究项目、推进科学问题、查看方法、执行记录、证据与结果。Web 后端直接调用模型 API，不依赖外部 Agent 产品。
 
-## 产品目的
+**当前状态：R2 源码与集成验收完成，R3 为下一开发阶段（2026-11-28）。** 唯一前端为 `ui/`，基于 LibreChat 完整应用底座和 dsh-context 科研视图组织。旧自研前端已退役。现有私有部署仍使用此前发布版本，新版本切换须另行批准。
 
-BioHarness Research Workspace 为科研人员提供一个能够理解、组织、推进、检查和持续开展科研工作的统一环境。
-
-它需要让研究人员直接看到：
-- 长期科研项目、科学目标、研究分支和历史路线；
-- Core 当前持有的科研问题、Requirements、动态计划和下一步工作；
-- 每个科研步骤使用的方法、数据、参数和专业 Modules；
-- Modules 实际提供的结果、工具调用、来源和证据；
-- 结果、反证、未解决问题、科学评审和结论之间的关系；
-- Memory 如何被检索、展开、采用，以及后续任务是否真正受益。
-
-**核心界面是科研过程和证据，而不是聊天记录或日志控制台。**
-
-## 固定产品方向
-
-1. **先 Web，后 Desktop。** Desktop 后续使用同一套前端和应用接口，默认是连接远端 BioHarness 服务的 Tauri 薄封装；本地 Sidecar 仅在真实需求证明后评估。
-2. **原生 Model API。** Web 后端直接调用模型提供商 API，自身承担模型与工具调用循环，不依赖 Claude Code、Codex、CodeArts 或其他外部 Agent。
-3. **Core 是唯一科研主线。** Web 使用 Core 当前公开接口，遵循 Core 返回的下一步安排，不另建科研状态机。
-4. **Modules 保持独立。** Memory、文献、统计、评审和领域计算仍归 BioHarness-Modules；Web 负责呈现与调用公开能力；Modules 中原预留 Research Workspace 不再独立开发，唯一产品入口归本仓。
-5. **科研可视化优先。** 科研树、科研流程、证据溯源和执行轨迹是不同视图，不能混成一个泛化流程图。
-6. **V1 不构成兼容约束。** 原有只读 PostgreSQL 模型、页面、API 和部署方案均可按 V2 需要重构或删除。保留 Git 历史及明确归档的设计记录即可。
-7. **旧自研 UI 已在源码树退役，替代前端完成 §17.4 第一至第五步源码验收。** 2026-11-27 冻结对话、流程、证据分离页面设计与 §17.5 成熟复用选型（LibreChat `v0.8.9` 底座 + `dsh-context` 视图组织 + `@rc-component/tree` / `@xyflow/react` / `@dagrejs/dagre` / AG Grid Community / 自托管 PDF.js `v6.5.438` / 自托管 Monaco）。§17.4 第 1–5 步与独立复核收口已在仓库源码中完成，`frontend/` 与旧 `tests/browser/{run.sh,check.cjs}` 已从工作树移除（保留于 Git 历史），新前端产物位于 `ui/client/dist`；详见[唯一路线 §17.4–17.5](docs/plans/2026-11-25-research-workspace-v2.md#174-upstream-based-ui-replacement-design-2026-11-27)。**线上私有部署替换尚未执行，需另行明确批准。**
-
-## 项目职责
+## 系统职责
 
 | 项目 | 权威职责 |
 |---|---|
-| [BioHarness Core](https://github.com/mumu-140/BioHarness) | 唯一科研主线、原始问题、目标、Requirements、计划、评审、提交和交付 |
-| [BioHarness-Modules](https://github.com/mumu-140/BioHarness-Modules) | Project Governance、Memory、Literature、Scientific Review、Statistics 和领域能力 |
-| **BioHarness-Web** | 科研工作台、直接模型 API、工具执行宿主、可视化和交互 |
-| [BioHarness-Eval](https://github.com/mumu-140/BioHarness-Eval) | 独立科研过程和结果评价 |
+| [BioHarness Core](https://github.com/mumu-140/BioHarness) | 唯一科研主线：原始问题、目标、Requirements、计划、下一步、审查、提交和交付 |
+| [BioHarness-Modules](https://github.com/mumu-140/BioHarness-Modules) | Project Governance、Memory、Literature、Scientific Review、Statistics、领域计算 |
+| **BioHarness-Web** | 原生模型与工具执行宿主、会话、技术恢复、科研交互和证据投影 |
+| [BioHarness-Eval](https://github.com/mumu-140/BioHarness-Eval) | 独立评价，不参与生产运行 |
 
-## 阅读顺序
+Core 决定科学进程，Modules 提供专业能力，Web 的技术账本只记录会话、运行、操作和观测事件。版本差异、分歧和审查意见作为提示；涉及实质性科学决策时询问使用者，不增加自动暂停门槛。
 
-1. [AGENTS.md](AGENTS.md)：开发和集成规则。
-2. [docs/architecture.md](docs/architecture.md)：产品架构和职责边界。
-3. [docs/plans/2026-11-25-research-workspace-v2.md](docs/plans/2026-11-25-research-workspace-v2.md)：唯一路线、TODO 和验收条件。
-4. [docs/deployment.md](docs/deployment.md)：目标部署原则。
-5. [docs/audits/w0-integration-review.md](docs/audits/w0-integration-review.md)：W0 实际验证、开源复用决策及尚未完成的 API 接入检查。
-6. [docs/history/README.md](docs/history/README.md)：旧 Observatory 文档的历史定位。
+## 当前能力
 
-## 当前实现状态
+- 独立对话、科研流程、证据页面及执行记录；支持多项目、多层科研树、历史请求、原生用户确认、后台运行。
+- Python/FastAPI 后端直接调用配置的模型 API、Core 公开 CLI 和配置的 MCP 工具；服务端模型设置、实际模型归属、SSE 重连及未知结果恢复。
+- React Flow/Dagre 科研计划、rc-tree 导航，Request 与 Scope 证据历史分离。
+- 有界、身份核验的 AG Grid Community 表格、自托管 PDF.js、Monaco、图片及静态 HTML 预览；区分历史、未验证、截断和不可用内容。
+- R3 接入 Memory Curator、Skills/Resources 和专业模块；R4 完成结果比较、远程计算恢复及 Desktop 准备。未完成能力不作已实现声明。
 
-W1 读侧已替换旧的 PostgreSQL Observatory：FastAPI 后端只通过公开 CLI 读取 Core `science_now` 和 Project Governance `tree/context/routes/evidence`，不保存科研状态、没有数据库、没有写接口；React 前端提供科研树、科研流程图、检查器和证据预览。接口与快照约定见[架构 10.3 节](docs/architecture.md)，运行方式见[部署说明](docs/deployment.md)。
+## 仓库入口
 
-W2 原生运行时：配置模型端点后，后端直接调用模型 API，由宿主以用户原文调用 `science_begin`，把 Core 的答复交给模型，执行模型提出的 Core 调用和已配置的 MCP 工具，并由 Core 的 hook 决定一轮是否可以结束；对话、执行轨迹与取消见[架构 10.4 节](docs/architecture.md)。
+| 位置 | 用途 |
+|---|---|
+| `backend/bioharness_web/` | 唯一 Web 后端 |
+| `ui/` | 固定上游应用前端、必要 UI packages、BioHarness host 适配和依赖锁 |
+| `tests/` | 后端、公共契约和浏览器回归 |
+| [AGENTS.md](AGENTS.md) | 开发、职责及安全规则 |
+| [架构](docs/architecture.md) | 当前架构、接口与交互边界 |
+| [唯一路线与 TODO](docs/plans/2026-11-25-research-workspace-v2.md) | R3/R4、固定复用选择、验收与历史索引 |
+| [部署说明](docs/deployment.md) | 配置、部署、回退及运行约束 |
+| [ui/README.md](ui/README.md) | 上游来源、修改边界、构建入口 |
+| [W0 审核](docs/audits/w0-integration-review.md)、[历史资料](docs/history/README.md) | 既有证据，不是并行计划 |
 
-W3 提供已记录调用的分页查询、时间线、通用调用/Module 检查器与工具服务器发现状态，保留 MCP 的有界结构化返回，并明确展示错误与省略标记。它们是 Web 运行观察，不是科研状态或独立验证，接口见[架构 10.5 节](docs/architecture.md)。
+## 验证与运行
 
-真实模型已完成短流式工具往返与一个合成 EXPLAIN 任务：同一请求只开始一次，完成两步有证据的提交后正式交付；期间两次提供商响应失败分别通过显式恢复继续，原题、计划与已有提交未重建。关闭模型通道后的重启读取也已通过。前后端联合后，新增真实模型浏览器合成 EXPLAIN 检查 10/10：运行中刷新后接续同一请求，实际调用 Governance，单次计划/提交/交付完成且本次未观察到提供商失败；离线重启保留交付和未评审披露。联合回归：后端 234、前端 54、标准浏览器 36、W3 6、只读模式 3 项通过。单次无故障不代表持续可靠性、真实科研质量、全上下文容量或生产部署验收。尚未实现：Scientific Review 的直连适配（归该模块）、长时外部作业、真实专业 Module 的完整结果适配和 Desktop。尚未验证：真实科研项目上的验收、较大规模图的渲染、Chromium 以外的浏览器。
-
-以下命令仅在获授权 Linux 的仓库外隔离验证副本中执行，不在开发工作树或 Mac/Windows 上直接运行测试；公开 Core/Governance CLI 应预先安装。
+在获授权 Linux 的仓库外隔离副本中验证；预装公开 Core/Governance CLI。前端使用 Node 24.22.3、npm 11.13.0 及现有锁文件。
 
 ```bash
-uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
-env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY .venv/bin/python -m pytest  # 避免代理拦截 loopback 模拟端点；契约测试需已安装公开 Core/Governance CLI
-cd ui && npm ci --ignore-scripts && npm run build && (cd client && npx tsc --noEmit -p tsconfig.json && npx jest --watchAll=false) && cd ..
-tests/browser/ui_run.sh <带 Node 与 Playwright Chromium 的容器镜像>         # 只读与安全边界检查
-tests/browser/ui_step3_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 原生对话/SSE/HITL/模型配置
-tests/browser/ui_step4_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 科研树/流程/执行记录/证据视图
-tests/browser/ui_step5_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 行为等价/主题/键盘/窄屏/重启恢复
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -e '.[dev]'
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY .venv/bin/python -m pytest
+(cd ui && npm ci --ignore-scripts && npm run build)
+(cd ui/client && npx tsc --noEmit -p tsconfig.json && npx jest --watchAll=false)
+# 已授权的 Node / Playwright Chromium 镜像，以实际镜像名替换 IMAGE：
+tests/browser/ui_run.sh IMAGE
+tests/browser/ui_step3_run.sh IMAGE
+tests/browser/ui_step4_run.sh IMAGE
+tests/browser/ui_step5_run.sh IMAGE
 ```
+
+后端提供 `ui/client/dist`，按部署说明配置后用 `python -m bioharness_web` 启动。私有工作区、凭据、运行账本、测试原始产物和发布目录独立管理，不提交到仓库。

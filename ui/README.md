@@ -2,9 +2,7 @@
 
 This directory is the LibreChat frontend adopted as the application foundation
 (roadmap §17.4–17.5), built without LibreChat's API server, database, Agent/Assistants/MCP
-services or telemetry. As of roadmap §17.4 Step 5 (2026-11-28), this directory replaces the
-retired custom `frontend/` in repository source (retained in Git history). Live production
-deployment switching remains separately approved.
+services or telemetry. This is the sole application frontend after R2 source acceptance. The retired custom frontend is retained in Git history. Production cutover requires separate approval.
 
 ## Origin
 
@@ -35,21 +33,11 @@ Every changed non-JSON file carries a comment starting `BioHarness: changed from
 - Upstream test files of removed features were deleted (`skills` routes, Speech settings,
   one spec importing the server package); specs of changed components were updated.
 
-`client/src/host/` is new BioHarness code, not upstream: the request gate (`gate.ts`),
-start-up/sign-in mappings (`routes.ts`, `session.ts`, `install.ts`), BioHarness HTTP/SSE/workspace
-bindings (`bioharness.ts`, `events.ts`, `workspace.tsx`), the Step 3 vertical-slice adapters
-(`BioHarnessSidebarSection.tsx`, `BioHarnessChatRoute.tsx`, `BioHarnessComposer.tsx`,
-`BioHarnessChatBanners.tsx`, `BioHarnessModelsSettings.tsx`), and the Step 4 scientific views and
-evidence viewers (`BioHarnessRequestHeader.tsx`, `BioHarnessWorkflowRoute.tsx`,
-`BioHarnessPlanGraph.tsx`, `BioHarnessExecutionsRoute.tsx`, `BioHarnessEvidenceRoute.tsx`,
-`BioHarnessEvidenceTable.tsx`, `BioHarnessPdfViewer.tsx`, `BioHarnessEvidenceCodeViewer.tsx`)
-seated inside LibreChat's adopted shell, sidebar, ChatScreen/MessagesView/Markdown,
-ComposerFrame/ComposerField/ComposerActions, Table, ImagePreview, and SettingsDialog.
-Donor VitePWA service-worker registration is disabled (`vite.config.ts`).
+`client/src/host/` contains BioHarness session, API/SSE, workspace, model-setting, native chat, workflow, execution and evidence bindings. Retain the adopted application shell and mature components. Donor VitePWA service-worker registration is disabled. Fixed component pins and dependency/license findings are maintained in the [sole roadmap §17.5](../docs/plans/2026-11-25-research-workspace-v2.md).
 
 ## Build and check
 
-Needs Node 24.22.3 and npm 11.13.0 (`.nvmrc`, `packageManager`).
+Use Node 24.22.3 and npm 11.13.0 (`.nvmrc`, `packageManager`) in an authorized repository-external Linux validation copy.
 
     npm ci --ignore-scripts
     npm run build            # data-provider, client package, chat, then client/dist
@@ -59,4 +47,4 @@ Needs Node 24.22.3 and npm 11.13.0 (`.nvmrc`, `packageManager`).
     ../tests/browser/ui_step4_run.sh <image with Node and Playwright Chromium>
     ../tests/browser/ui_step5_run.sh <image with Node and Playwright Chromium>
 
-Serve `client/dist` with the unchanged backend through `BIOHARNESS_WEB_STATIC_DIR`.
+Serve `client/dist` with the BioHarness backend through `BIOHARNESS_WEB_STATIC_DIR`. No donor server is required.
