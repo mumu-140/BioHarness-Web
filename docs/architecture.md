@@ -1,6 +1,6 @@
 # BioHarness Research Workspace — Architecture
 
-**Status:** R2 source and integrated acceptance complete (2026-11-28). The adopted frontend and native Web runtime are implemented in `ui/` and `backend/`. The existing private deployment has not switched to this release. R3/R4 domain integration and long-running scientific acceptance remain open in the [sole roadmap](plans/2026-11-25-research-workspace-v2.md).
+**Status (2026-11-28):** R2 has been privately deployed. R3 Web-owned integration and isolated product acceptance are complete in `ui/` and `backend/`, but have not replaced the private R2 release. Missing upstream Module interfaces, live-provider scientific acceptance and subsequent production cutover remain separate. A native Subagent backend and its subordinate R4.1 plan exist on the isolated `feat/native-subagent-20261128` branch based on an earlier R3 revision, **not** in this R3 source; see the [sole roadmap](plans/2026-11-25-research-workspace-v2.md).
 
 ## 1. Product purpose
 

@@ -1,6 +1,6 @@
 # Deployment Principles
 
-**Status:** a private Linux deployment exists. R2 is accepted in repository source; the adopted frontend has not replaced the running release. The private release manifest, configuration and receipts identify the actual installed version.
+**Status (2026-11-28):** a private Linux deployment runs the accepted R2 release (`6de1b15`). R3 source and isolated product acceptance are newer than that release and are **not deployed**; R4 native Subagent code is on a separate development branch, disabled by default and not integrated. The private release manifest, configuration and receipts remain authoritative for the installed version; any subsequent cutover requires separate owner approval.
 
 ## 1. Deployment shape
 

@@ -1,6 +1,6 @@
 # R3 — 科研能力接入与产品化实施方案
 
-**状态：2026-11-28，使用者已批准规划，待实施。**
+**状态（2026-11-28）：R3.1–R3.5 Web 实现、独立审查修复与隔离产品验收完成；上游模块接口、真实模型科学验证及 R3 生产切换均单独待完成。**
 
 **上级唯一索引：** [V2/V3 主路线 §17.3](2026-11-25-research-workspace-v2.md#173-phased-v3-roadmap-r1r4-and-continuous-real-project-acceptance)。
 本文件是 R3 的详细实施清单，不是独立路线、第二份架构或其他仓库的开发计划。R3 的阶段状态只在上级索引汇总；具体 R3.1–R3.5 进度只在本文更新。完成后保留为该阶段的可追溯记录。
@@ -176,3 +176,26 @@
 R3 开发检查点、缺口与验证结果只更新本文件相应小节（短摘要 + Git SHA/测试证据身份），上级只更新阶段状态。必要且实质的长期架构改变需使用者批准后更新现有架构文档；不新增平行计划。测试证据、截图、真实输入与凭据保持在授权的私有 CI/科研目录。
 
 每一阶段执行 check → apply → verify。仅在实际依赖未满足时标记受影响的子项；科学审查与版本分歧不成为全局任务停止条件。所有实现状态、技术验收与科研有效性分别报告。
+
+## 5. 外部模块能力缺口清单与验收条件
+
+**核查基线：** `BioHarness-Modules main@1694834` 的模块 README 和实际源码；Web R3 功能提交 `33b65e5`。以下仅记录已经核实的公开接口、模块责任与缺口；**不在 Web 侧代写科学能力，不添加 Core 状态或门禁**。尚未上线的接口不等于模块整体不可用。
+
+| ID / 重要性 | 归属模块或维护方 | 已有能力与实际缺口 | 应由归属方交付的验收条件 | Web 当前应如何处理 |
+| --- | --- | --- | --- | --- |
+| M1 / 优先 | `bioharness-module-memory` | 已有 `memory_propose_scientific`、`memory_propose_theme`、检索/展开/反馈；**公开 MCP 不含** `inspect_proposal`、`publish_reviewed`。内部 Curator/CLI 不等于 Web 可审核发布。 | 模块公开可审查提案、来源/冲突检查、发布/回滚和修订身份的受控调用；保持 Memory 唯一权威存储。 | 仅展示候选与实际已返回的状态；不直接写 Memory SQLite，不模拟发布。 |
+| M2 / 优先 | `bioharness-module-memory` | **公开 MCP 不含** `source_registration`；T3 来源的登记不能靠 Web 路径字符串宣称完成。 | 模块公开来源登记，验证用户授权、来源指纹、原始证据与重复登记语义，返回实际来源身份。 | 显示未登记与来源链接，不私自构建另一套来源库。 |
+| M3 / 优先 | `bioharness-module-memory` | 存在两跳 `TaskMemoryGraphBuilder` 最小基础，但当前 `TaskMemoryRecall.recall(mode='DEEP')` 抛出 `RECALL_MODE_NOT_IMPLEMENTED`；**是公开召回链路未接通，而非图构建思路完全缺失**。 | 由模块接通有界 DEEP，两跳候选的来源、适用条件、反例和截断状态可观察；以实际问题及独立评价验证收益。 | FAST/STANDARD 正常运行，DEEP 如实标不可用；不由 Web 另建检索/关系引擎。 |
+| M4 / 独立性改进 | `bioharness-module-scientific-review` | Core 可选 `[advisor]` 已可使用 `build_advisor`，当前 `core_advisor.py` 走 `CodeArtsIntakeReviewer` 外部 CLI；尚无直接使用模型 API 的模块适配器。**现有 Scientific Review 并非整体不可用。** | 在原模块内实现原生 Provider adapter，遵守 Core 既有 INTAKE/PLAN/WORK/DELIVERY advice 合同；缺失/超时/不利建议继续非阻断，做真实模型验收。 | 只投影 Core 的原样审查意见/未评审/错误；不在 Web 自建 Reviewer 或审批门禁。 |
+| D1 / 部署依赖 | Literature 上游工具与部署维护者 | `bioharness-literature search/fetch` CLI 存在；检索依赖 `paperseek`，下载依赖 `scansci-pdf`。本轮核查使用的交互式 shell PATH 未发现后两者，**未因此断言生产容器状态**；`paperqa2` 尚未生产启用。 | 在实际执行环境配置真实可调用上游 CLI/授权服务；小规模实测检索身份→下载→PDF 留存 SHA-256；PaperQA2 要有独立生产合同。 | 实际不可用时返回 503/清楚说明；不伪造论文全文或 PDF 留存成功。 |
+| M5 / 按需 | `bioharness-module-statistics` | `report_binding render/verify` 可用，临床亚组审查器仍为 `PRODUCTION_NOT_ENABLED`，两者不是同一个接口。 | 需要时由模块明确多维分组、分母、统计语义、参数、实际数据验收，再公开生产接口。 | 使用当前公开的报告绑定，不重算检验、p 值、分母。 |
+| M6 / 按需 | DAP-seq、genome-web-tf、sequence 各模块 | 目前 Web 将尚无已验证受控运行接口的能力标为参考/不可运行，文档存在不代表 callable。 | 模块各自提供公共 CLI/MCP 入口、产物与错误合同，经真实调用确认。 | 不创建虚假模块运行按钮。 |
+| E1 / 科学评价 | Memory 研发与独立 `BioHarness-Eval` | 技术性召回成功不是跨任务科学收益；当前 Memory B0 数据不等于已完成独立 ON/OFF 盲测。 | 基于来源/条件/冲突/任务使用的 Gold 和真实跨任务对照，分别评价检索质量、真实使用与最终科学结果；Eval Gold 不进入生产 Web。 | 区分候选、选中、实际消费、使用反馈和独立科学证据。 |
+
+**不阻断原则：** M1–M4 归 Modules 公共合同，D1 归上游工具/部署环境，M5–M6 按真实科研需求启用，E1 归独立评价。这些缺口不要求扩展 Core 五个 `science_*` 接口，不是 R4 自动暂停理由。Web 自身的真实 Provider 联调、生产发布、依赖许可证/安全发布验收属于**发布工作**，不能列成 Modules 未完成事项；必须另行批准。
+
+## 6. R4 分支交接（只整理，不实施）
+
+- **现状：** 独立本地分支 `feat/native-subagent-20261128@eee8599`、独立 Git worktree，源于 R3.4 `f8dcae5`；有后端 `subagents.py`、`test_subagents.py`、`test_native_subagent.py` 和既有功能提交 `b8c6f69`、修复 `f23a410`。其详细 R4.1 方案只在此独立分支的 `docs/plans/2026-11-28-r4-native-subagent-integration.md`，尚未并入 R3。子 Agent 开关默认关闭，当前 R3 产品无 Subagent。
+- **开始 R4 时：** 核实实际 R3 新 HEAD、分支 merge-base、旧 R4 运行时/账本与最新 R3 修复的冲突；复用原有后端和 LibreChat 组件，保留两条历史、测试及真实用户体验要求。绝不通过强制 reset、删 worktree 或重建科学核心来“简化”集成。
+- **本次清理范围：** 只校正 Web 源码文档状态和 Module 接口交接，保留 R4、远端跟踪、生产发布、忽略的私有 Core 状态及现有依赖缓存。无跨仓源码修改、无 R4 功能执行或新建第二份路线。

@@ -2,7 +2,7 @@
 
 BioHarness 的第一方科研工作台。组织研究项目、推进科学问题、查看方法、执行记录、证据与结果。Web 后端直接调用模型 API，不依赖外部 Agent 产品。
 
-**当前状态：R2 源码与集成验收完成，R3 为下一开发阶段（2026-11-28）。** 唯一前端为 `ui/`，基于 LibreChat 完整应用底座和 dsh-context 科研视图组织。旧自研前端已退役。现有私有部署仍使用此前发布版本，新版本切换须另行批准。
+**当前状态（2026-11-28）：R3 Web 侧实现、隔离验收及审查修复已完成；外部模块接口缺口另行交接。** 唯一前端为 `ui/`（LibreChat + dsh-context），旧自研前端已退役。私有生产仍是已验收的 R2 版本；R3 切换需要另外授权。R4 Native Subagent 的现有后端实现位于独立分支 `feat/native-subagent-20261128`，**尚未集成到 R3 或上线**。
 
 ## 系统职责
 
@@ -21,7 +21,8 @@ Core 决定科学进程，Modules 提供专业能力，Web 的技术账本只记
 - Python/FastAPI 后端直接调用配置的模型 API、Core 公开 CLI 和配置的 MCP 工具；服务端模型设置、实际模型归属、SSE 重连及未知结果恢复。
 - React Flow/Dagre 科研计划、rc-tree 导航，Request 与 Scope 证据历史分离。
 - 有界、身份核验的 AG Grid Community 表格、自托管 PDF.js、Monaco、图片及静态 HTML 预览；区分历史、未验证、截断和不可用内容。
-- R3 接入 Memory Curator、Skills/Resources 和专业模块；R4 完成结果比较、远程计算恢复及 Desktop 准备。未完成能力不作已实现声明。
+- R3 已接入 Memory 检索与来源展开、Skills/Resources/Documents、Literature/Statistics/Protein Methods 等公开能力。Memory Curator 审核发布、DEEP 公开检索与 Scientific Review 原生模型 API 仍归 Modules，详见 [R3 外部模块缺口](docs/plans/2026-11-28-r3-product-integration.md#5-外部模块能力缺口清单与验收条件)。
+- R4 将接续已有的 Subagent 后端分支，完成前端执行轨迹、科研结果/版本比较、远程执行恢复和 Desktop；开发分支上的实现不代表已验收产品。
 
 ## 仓库入口
 
