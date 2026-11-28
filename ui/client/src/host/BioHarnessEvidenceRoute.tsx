@@ -602,7 +602,7 @@ const BioHarnessEvidenceRoute = memo(function BioHarnessEvidenceRoute() {
                     'No references in the available records; complete history has not been confirmed.'}
                 </div>
               ) : (
-                <div className="border-border-light bg-surface-primary overflow-hidden rounded-xl border">
+                <div className="border-border-light bg-surface-primary overflow-x-auto rounded-xl border">
                   <Table data-testid="bh-evidence-table-list">
                     <TableHeader>
                       <TableRow>

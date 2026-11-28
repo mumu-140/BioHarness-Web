@@ -22,7 +22,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { Button, Spinner, useMediaQuery } from '@librechat/client';
-import type { NowData, Snapshot, WorkspaceConversation } from './bioharness';
+import type { ContextData, NowData, Snapshot, WorkspaceConversation } from './bioharness';
 import { bhKeys, fetchConversations, fetchView } from './bioharness';
 import { useBioHarnessVersionStream } from './events';
 import { isCurrentPlanAttempt, matchesSnapshot, resolveBoundConversation, useScientificRoutePages } from './scientificViews';
@@ -49,6 +49,19 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
   const [viewMode, setViewMode] = useState<'graph' | 'list'>(isSmallScreen ? 'list' : 'graph');
   const [userToggledMode, setUserToggledMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!fullscreen) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [fullscreen]);
 
   useEffect(() => {
     if (!userToggledMode) {
@@ -106,6 +119,27 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
   const nowData = effectiveSnapshot?.data ?? null;
   const scopeId = typeof nowData?.scope_context?.scope_id === 'string'
     ? nowData.scope_context.scope_id : null;
+
+  const contextQuery = useQuery<Snapshot<ContextData>>({
+    queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'context', {
+      scope_id: scopeId ?? undefined,
+      request_id: selectedRequestId ?? undefined,
+    }),
+    queryFn: () =>
+      fetchView<ContextData>(workspace!, 'context', {
+        scope_id: scopeId!,
+        request_id: selectedRequestId ?? undefined,
+      }),
+    enabled: Boolean(service && workspace && scopeId),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+  });
+  const contextShared =
+    matchesSnapshot(contextQuery.data, service, workspace) && contextQuery.data.ok
+      ? contextQuery.data.data?.shared
+      : undefined;
+  const goalVersionChanges = contextShared?.goal_version_changes ?? [];
+  const relatedRequests = contextShared?.related_requests ?? [];
   const routesQuery = useScientificRoutePages(service, workspace, scopeId, Boolean(activeStepId));
 
   const steps = nowData?.plan?.steps ?? [];
@@ -162,6 +196,59 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
             The conversation link is not verified for this workspace/request. Select the correct
             conversation before discussing this step; the scientific plan remains available.
           </p>}
+          {nowData && !scopeId && (
+            <div
+              data-testid="bh-workflow-unscoped-note"
+              className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs"
+            >
+              Unscoped request — no public Governance submission history.
+            </div>
+          )}
+
+          {Boolean(nowQuery.data?.shortened) && (
+            <div
+              data-testid="bh-workflow-shortened-note"
+              className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs"
+            >
+              Core shortened its snapshot response; inspect full files via verified evidence anchors.
+            </div>
+          )}
+
+          {(goalVersionChanges.length > 0 || relatedRequests.length > 0) && (
+            <div
+              data-testid="bh-workflow-governance-context"
+              className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs"
+            >
+              <span className="text-text-primary font-medium">Governance context (advisory, non-blocking): </span>
+              {goalVersionChanges.length > 0 && (
+                <span>
+                  {goalVersionChanges.length} ancestor goal-version difference(s) ({goalVersionChanges.map((g) => g.request_id).join(', ')}).{' '}
+                </span>
+              )}
+              {relatedRequests.length > 0 && (
+                <span>
+                  {relatedRequests.length} related request(s) ({relatedRequests.map((r) => r.request_id).join(', ')}).{' '}
+                </span>
+              )}
+              <span>Shown for scientific awareness only — does not pause or gate authorized work.</span>
+            </div>
+          )}
+
+          {nowData?.open_concerns && nowData.open_concerns.length > 0 && (
+            <div
+              data-testid="bh-workflow-advisory-concerns"
+              className="border-border-light bg-surface-primary/60 text-text-secondary rounded-xl border px-3 py-2 text-xs"
+            >
+              <span className="text-text-primary font-medium">Advisory review notes (non-blocking): </span>
+              {nowData.open_concerns.map((c, idx) => (
+                <span key={`${c.about}-${idx}`}>
+                  {idx > 0 ? '; ' : ''}
+                  <code className="font-mono">{c.about}</code>: {c.concern}
+                </span>
+              ))}
+            </div>
+          )}
+
           {isStale && effectiveSnapshot && (
             <div
               role="alert"
@@ -205,6 +292,11 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
               data-testid="bh-workflow-error"
               className="border-status-error-border bg-status-error-subtle text-text-primary rounded-xl border p-4 text-sm"
             >
+              {nowQuery.data?.error?.code && (
+                <div className="mb-1 font-mono text-xs font-semibold" data-testid="bh-workflow-refusal-code">
+                  {nowQuery.data.error.code}
+                </div>
+              )}
               {(nowQuery.error as Error)?.message ||
                 nowQuery.data?.error?.message ||
                 'Unable to load Core plan snapshot.'}
@@ -272,7 +364,7 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                 {progressById.get(activeStep.id)?.review && (
                   <div className="bg-surface-secondary/60 rounded-lg p-3 text-xs">
                     <div className="text-text-tertiary font-semibold uppercase tracking-wide">
-                      Recorded review
+                      Recorded review (advisory — non-blocking)
                     </div>
                     <p className="text-text-primary mt-1 whitespace-pre-wrap">
                       {progressById.get(activeStep.id)!.review}
@@ -390,19 +482,21 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                           )}
                           {sub.evidence.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
-                              {sub.evidence.map((ev) => (
+                              {sub.evidence.map((ev) => {
+                                const evId = ev.evidence_id || (ev as { id?: string }).id || '';
+                                return (
                                 <button
-                                  key={`${ev.evidence_id}-${ev.sha256}`}
+                                  key={`${evId}-${ev.sha256}`}
                                   type="button"
-                                  data-testid={`bh-step-evidence-${ev.evidence_id}`}
+                                  data-testid={`bh-step-evidence-${evId}`}
                                   onClick={() =>
                                     openEvidenceView({
                                       requestId: selectedRequestId,
                                       conversationId: resolvedConversationId,
                                       anchor: {
-                                        request_id: ev.request_id,
-                                        submission_index: ev.submission_index,
-                                        evidence_id: ev.evidence_id,
+                                        request_id: ev.request_id || sub.request_id,
+                                        submission_index: ev.submission_index ?? sub.submission_index,
+                                        evidence_id: evId,
                                         sha256: ev.sha256,
                                       },
                                     })
@@ -410,9 +504,10 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
                                   className="border-border-medium bg-surface-primary hover:bg-surface-hover inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px]"
                                 >
                                   <FileText className="h-3 w-3" aria-hidden="true" />
-                                  <span>{ev.evidence_id}</span>
+                                  <span>{evId}</span>
                                 </button>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </li>
@@ -437,8 +532,8 @@ const BioHarnessWorkflowRoute = memo(function BioHarnessWorkflowRoute() {
             /* Full-width Plan Overview (Graph or dependency-labelled List) */
             <section className="space-y-3" aria-label="Research plan">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <h1 className="text-text-primary text-base font-semibold">
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-text-primary break-words text-base font-semibold">
                     {nowData.plan?.objective || nowData.question || `Request ${nowData.request_id}`}
                   </h1>
                   <p className="text-text-tertiary text-xs">

@@ -291,14 +291,60 @@ export function useBioHarnessVersionStream(
     const url = `/api/workspaces/${encodeURIComponent(workspace)}/stream${qs ? `?${qs}` : ''}`;
     const source = new EventSource(url);
 
-    const onChanged = () => {
+    const seenVersionByKey = new Map<string, string>();
+    const onVersion = (ev: MessageEvent) => {
       if (closed) {
         return;
       }
+      try {
+        const payload = JSON.parse(String(ev.data || '{}')) as {
+          workspace?: string;
+          view?: string;
+          selector?: Record<string, string | number | boolean | undefined>;
+          content_sha256?: string;
+        };
+        if (payload.workspace && payload.workspace !== workspace) {
+          return;
+        }
+        const key = JSON.stringify([payload.view ?? '', payload.selector ?? {}]);
+        if (typeof payload.content_sha256 === 'string') {
+          const prev = seenVersionByKey.get(key);
+          seenVersionByKey.set(key, payload.content_sha256);
+          if (prev === payload.content_sha256) {
+            return;
+          }
+          if (payload.view) {
+            const cached = queryClient.getQueryData<{ content_sha256?: string }>(
+              bhKeys.view(service, workspace, payload.view, payload.selector),
+            );
+            if (cached?.content_sha256 === payload.content_sha256) {
+              return;
+            }
+          }
+        }
+      } catch {
+        // Fall through to workspace-scoped view invalidation on unparseable payload.
+      }
       void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
     };
-    source.addEventListener('changed', onChanged);
-    source.addEventListener('view', onChanged);
+    const onStale = (ev: MessageEvent) => {
+      if (closed) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(String(ev.data || '{}')) as { workspace?: string };
+        if (payload.workspace && payload.workspace !== workspace) {
+          return;
+        }
+      } catch {
+        // ignore parse errors
+      }
+      void queryClient.invalidateQueries({ queryKey: bhKeys.viewRoot(service, workspace) });
+    };
+    source.addEventListener('version', onVersion);
+    source.addEventListener('source.stale', onStale);
+    source.addEventListener('changed', onVersion);
+    source.addEventListener('view', onVersion);
 
     return () => {
       closed = true;

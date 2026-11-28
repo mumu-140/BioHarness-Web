@@ -34,6 +34,7 @@ import type {
 import {
   bhKeys,
   extractOpenRequests,
+  extractTreeProjects,
   extractTreeScopes,
   fetchConversations,
   fetchView,
@@ -147,6 +148,7 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     selectScope,
     openConversation,
     openNewResearch,
+    openWorkflowView,
     openModelSettings,
   } = useBioHarnessWorkspace();
 
@@ -169,9 +171,24 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
     refetchOnWindowFocus: false,
   });
 
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    setSelectedProjectId(null);
+  }, [workspace]);
+
   const treeQuery = useQuery<Snapshot<TreeData>>({
-    queryKey: bhKeys.view(service ?? 'svc', workspace ?? '', 'tree'),
-    queryFn: () => fetchView<TreeData>(workspace!, 'tree'),
+    queryKey: bhKeys.view(
+      service ?? 'svc',
+      workspace ?? '',
+      'tree',
+      selectedProjectId ? { project_id: selectedProjectId } : {},
+    ),
+    queryFn: () =>
+      fetchView<TreeData>(
+        workspace!,
+        'tree',
+        selectedProjectId ? { project_id: selectedProjectId } : {},
+      ),
     enabled: Boolean(service && workspace),
     staleTime: 20_000,
     refetchOnWindowFocus: false,
@@ -179,11 +196,16 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
 
   const conversations = conversationsQuery.data ?? [];
   const openRequests = extractOpenRequests(openRequestsQuery.data);
+  const openListIncomplete = Boolean(openRequestsQuery.data?.data?.may_be_incomplete);
+  const openListSourceMessage = openRequestsQuery.data?.data?.source_message ?? null;
+  const treeProjects = useMemo(() => extractTreeProjects(treeQuery.data), [treeQuery.data]);
   const treeScopes = useMemo(() => extractTreeScopes(treeQuery.data), [treeQuery.data]);
   const { nodes: treeNodes, allScopeKeys } = useMemo(
     () => buildResearchTreeNodes(treeScopes),
     [treeScopes],
   );
+  const treeGoalChanges = treeQuery.data?.ok ? (treeQuery.data.data?.goal_version_changes ?? []) : [];
+  const treeRelatedLinks = treeQuery.data?.ok ? (treeQuery.data.data?.related_requests ?? []) : [];
 
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   useEffect(() => {
@@ -207,6 +229,11 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
   };
 
   const handleSelectRequest = (reqId: string, scopeId?: string | null) => {
+    if (!runtimeEnabled) {
+      openWorkflowView({ requestId: reqId, conversationId: null });
+      closeDrawerIfMobile();
+      return;
+    }
     const existing = conversations.find((c) => c.request_id === reqId);
     if (existing) {
       openConversation(existing.id, { requestId: reqId, scopeId });
@@ -324,6 +351,40 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
             <div className="text-text-destructive px-2 py-1 text-xs" role="alert">
               Research tree unavailable.
             </div>
+          ) : treeNodes.length === 0 && treeProjects.length > 0 ? (
+            <div
+              className="border-border-light bg-surface-primary/40 space-y-1 rounded-lg border p-1.5 text-xs"
+              data-testid="bh-project-list"
+            >
+              <div className="text-text-tertiary px-1 text-[10px]">
+                Select a Governance project ({treeProjects.length})
+              </div>
+              <ul className="space-y-1">
+                {treeProjects.map((proj) => (
+                  <li key={proj.scope_id}>
+                    <button
+                      type="button"
+                      data-testid={`bh-project-item-${proj.scope_id}`}
+                      onClick={() => {
+                        setSelectedProjectId(proj.scope_id);
+                        selectScope(proj.scope_id);
+                      }}
+                      className="text-text-primary hover:bg-surface-hover flex w-full items-center justify-between gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors"
+                      title={proj.objective || proj.scope_id}
+                    >
+                      <span className="truncate font-medium">
+                        {proj.title || proj.name || proj.scope_id}
+                      </span>
+                      {typeof proj.request_count === 'number' && (
+                        <span className="text-text-tertiary shrink-0 text-[10px]">
+                          ({proj.request_count})
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : treeNodes.length === 0 ? (
             <div className="text-text-tertiary px-2 py-1 text-xs">No governance scopes recorded yet.</div>
           ) : (
@@ -331,6 +392,21 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
               className="bh-rc-tree border-border-light bg-surface-primary/40 rounded-lg border px-1.5 py-1 text-xs"
               data-testid="bh-research-tree"
             >
+              {selectedProjectId && (
+                <div className="border-border-light mb-1 flex items-center justify-between gap-1 border-b pb-1 text-[11px]">
+                  <span className="text-text-secondary truncate font-mono" title={selectedProjectId}>
+                    {selectedProjectId}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="bh-projects-back-btn"
+                    onClick={() => setSelectedProjectId(null)}
+                    className="text-text-tertiary hover:text-text-primary shrink-0 rounded px-1 py-0.5 text-[10px] underline"
+                  >
+                    All projects
+                  </button>
+                </div>
+              )}
               <Tree<ResearchTreeEntry>
                 treeData={treeNodes}
                 draggable={false}
@@ -358,6 +434,21 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                 }}
                 showIcon={false}
               />
+              {(treeGoalChanges.length > 0 || treeRelatedLinks.length > 0) && (
+                <div
+                  data-testid="bh-tree-context-note"
+                  className="text-text-tertiary border-border-light mt-1 border-t pt-1 text-[10px] leading-snug"
+                >
+                  {treeGoalChanges.length > 0 && (
+                    <span>{treeGoalChanges.length} ancestor goal-version diff(s)</span>
+                  )}
+                  {treeGoalChanges.length > 0 && treeRelatedLinks.length > 0 && <span> · </span>}
+                  {treeRelatedLinks.length > 0 && (
+                    <span>{treeRelatedLinks.length} related link(s)</span>
+                  )}
+                  <span> — advisory context, not a gate.</span>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -482,9 +573,19 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                           <FolderGit2 className="h-3 w-3 shrink-0" aria-hidden="true" />
                           <span className="truncate">{req.request_id}</span>
                         </span>
-                        {!boundConvo && (
-                          <span className="text-text-tertiary shrink-0 text-[10px]">unbound</span>
-                        )}
+                        <span className="flex shrink-0 items-center gap-1">
+                          {!req.scope_id && (
+                            <span
+                              data-testid={`bh-open-req-unscoped-${req.request_id}`}
+                              className="bg-surface-hover text-text-tertiary rounded px-1 text-[10px]"
+                            >
+                              unscoped
+                            </span>
+                          )}
+                          {!boundConvo && (
+                            <span className="text-text-tertiary text-[10px]">unbound</span>
+                          )}
+                        </span>
                       </div>
                       {(req.question || req.original_task_text) && (
                         <span className="text-text-tertiary line-clamp-2 text-[11px]">
@@ -496,6 +597,15 @@ const BioHarnessSidebarSection = memo(function BioHarnessSidebarSection() {
                 );
               })}
             </ul>
+          )}
+          {openListIncomplete && (
+            <div
+              data-testid="bh-open-list-incomplete"
+              className="text-text-tertiary mt-1 px-1 text-[10px] leading-snug"
+            >
+              Open request list may be incomplete.
+              {openListSourceMessage ? ` Core: ${openListSourceMessage}` : ''}
+            </div>
           )}
         </section>
       </div>

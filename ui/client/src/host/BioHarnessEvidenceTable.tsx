@@ -7,11 +7,11 @@
  */
 import React, { memo, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
+import { AllCommunityModule, ModuleRegistry, colorSchemeDark, themeQuartz } from 'ag-grid-community';
 import type { ColDef } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
 import { AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, Spinner } from '@librechat/client';
+import { Button, Spinner, isDark, useTheme } from '@librechat/client';
 import type { EvidenceAnchor, EvidenceTableResponse } from './bioharness';
 import { bhKeys, fetchEvidenceTable } from './bioharness';
 
@@ -28,6 +28,12 @@ const BioHarnessEvidenceTable = memo(function BioHarnessEvidenceTable({
   workspace,
   anchor,
 }: BioHarnessEvidenceTableProps) {
+  const { theme } = useTheme();
+  const dark = isDark(theme);
+  const gridTheme = useMemo(
+    () => (dark ? themeQuartz.withPart(colorSchemeDark) : themeQuartz),
+    [dark],
+  );
   const [offset, setOffset] = useState(0);
   const [limit, setLimit] = useState(100);
 
@@ -108,7 +114,7 @@ const BioHarnessEvidenceTable = memo(function BioHarnessEvidenceTable({
   const endRow = table.offset + table.returned_rows;
 
   return (
-    <div className="space-y-2.5" data-testid="bh-ag-grid-container">
+    <div className="space-y-2.5" data-testid="bh-ag-grid-container" data-theme-mode={dark ? 'dark' : 'light'}>
       {/* Honest data bounds & sort/filter scope bar */}
       <div
         data-testid="bh-table-disclosure"
@@ -176,7 +182,7 @@ const BioHarnessEvidenceTable = memo(function BioHarnessEvidenceTable({
 
       <div className="h-[540px] w-full overflow-hidden rounded-xl border border-border-light">
         <AgGridReact
-          theme={themeQuartz}
+          theme={gridTheme}
           rowData={table.rows}
           columnDefs={columnDefs}
           defaultColDef={{ sortable: true, filter: true, resizable: true }}

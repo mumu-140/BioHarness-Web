@@ -4,6 +4,7 @@
  * (not upstream LibreChat code).
  */
 import React, { memo } from 'react';
+import { isDark, useTheme } from '@librechat/client';
 import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
@@ -55,15 +56,19 @@ const BioHarnessEvidenceCodeViewer = memo(function BioHarnessEvidenceCodeViewer(
   format,
   content,
 }: BioHarnessEvidenceCodeViewerProps) {
+  const { theme } = useTheme();
+  const dark = isDark(theme);
   const language = detectLanguage(filename, format);
   return (
     <div
       data-testid="bh-code-viewer"
+      data-theme-mode={dark ? 'dark' : 'light'}
       className="border-border-light overflow-hidden rounded-xl border"
     >
       <Editor
         height="520px"
         language={language}
+        theme={dark ? 'vs-dark' : 'vs'}
         value={content}
         loading={
           <pre className="bg-surface-secondary max-h-[520px] overflow-auto p-3 font-mono text-xs whitespace-pre-wrap">

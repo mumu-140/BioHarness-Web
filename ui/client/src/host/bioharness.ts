@@ -154,6 +154,9 @@ export interface NowData {
 export interface OpenRequestsData {
   requests?: OpenRequest[];
   open_requests?: OpenRequest[];
+  may_be_incomplete?: boolean;
+  source_message?: string | null;
+  core_state_present?: boolean;
   [key: string]: unknown;
 }
 
@@ -196,11 +199,25 @@ export interface TreeScopeNode {
   [key: string]: unknown;
 }
 
+export interface RelatedRequestLink {
+  source_request_id: string;
+  target_request_id: string;
+  [key: string]: unknown;
+}
+
+export interface GoalVersionChangeRef {
+  request_id: string;
+  scope_id?: string | null;
+  [key: string]: unknown;
+}
+
 export interface TreeData {
   project_id?: string;
   nodes?: TreeScopeNode[];
   scopes?: TreeScopeNode[];
-  projects?: Array<{ project_id?: string; scopes?: TreeScopeNode[]; scope_id?: string; [key: string]: unknown }>;
+  projects?: Array<TreeScopeNode & { project_id?: string; scopes?: TreeScopeNode[] }>;
+  related_requests?: RelatedRequestLink[];
+  goal_version_changes?: GoalVersionChangeRef[];
   shared_evidence?: Array<{ sha256: string; references: EvidenceRef[] }>;
   request_binding?: GovernanceRecordRef & { path?: string[] | null };
   note?: string;
@@ -249,6 +266,11 @@ export interface ContextData {
     children?: TreeScopeNode[];
     requests?: GovernanceRecordRef[];
     recent_submissions?: ContextSubmission[];
+    related_requests?: GovernanceRecordRef[];
+    related_count?: number;
+    unavailable_related_ids?: string[];
+    goal_version_changes?: GoalVersionChangeRef[];
+    goal_version_change_count?: number;
   };
   selected_request?: GovernanceRecordRef & { objective?: string; mainline_version?: number };
   note?: string;
@@ -699,12 +721,29 @@ export function extractOpenRequests(snapshot: Snapshot<OpenRequestsData> | undef
   return Array.isArray(list) ? list : [];
 }
 
+export function extractTreeProjects(snapshot: Snapshot<TreeData> | undefined): TreeScopeNode[] {
+  if (!snapshot?.ok || !snapshot.data || !Array.isArray(snapshot.data.projects)) {
+    return [];
+  }
+  return snapshot.data.projects
+    .map((proj) => {
+      const id =
+        typeof proj?.scope_id === 'string'
+          ? proj.scope_id
+          : typeof proj?.project_id === 'string'
+            ? proj.project_id
+            : null;
+      return id ? ({ ...proj, scope_id: id } as TreeScopeNode) : null;
+    })
+    .filter((item): item is TreeScopeNode => item !== null);
+}
+
 export function extractTreeScopes(snapshot: Snapshot<TreeData> | undefined): TreeScopeNode[] {
   if (!snapshot?.ok || !snapshot.data) {
     return [];
   }
   const direct = snapshot.data.nodes ?? snapshot.data.scopes;
-  if (Array.isArray(direct)) {
+  if (Array.isArray(direct) && direct.length > 0) {
     return direct.filter((item) => typeof item?.scope_id === 'string');
   }
   const collected: TreeScopeNode[] = [];

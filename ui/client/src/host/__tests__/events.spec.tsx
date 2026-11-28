@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useBioHarnessConversationEvents, type ConversationEventLog } from '../events';
+import { useBioHarnessConversationEvents, useBioHarnessVersionStream, type ConversationEventLog } from '../events';
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -150,5 +150,87 @@ describe('useBioHarnessConversationEvents session identity isolation', () => {
     );
     expect(srcB.closed).toBe(true);
     expect(renderHistory[0]).toEqual({ key: 'ws2::conv-B', eventCount: 0, draft: '' });
+  });
+});
+
+
+describe('useBioHarnessVersionStream (SSE version & source.stale)', () => {
+  const origES = globalThis.EventSource;
+  beforeEach(() => {
+    MockEventSource.instances = [];
+    (globalThis as unknown as { EventSource: unknown }).EventSource = MockEventSource;
+  });
+  afterEach(() => {
+    (globalThis as unknown as { EventSource: unknown }).EventSource = origES;
+  });
+  it('deduplicates identical version hashes and invalidates on changed content_sha256 or source.stale', () => {
+    const qc = new QueryClient();
+    const invalidateSpy = jest.spyOn(qc, 'invalidateQueries').mockResolvedValue(undefined);
+
+    function Harness() {
+      useBioHarnessVersionStream('svc-1', 'ws-1', 'req-1');
+      return null;
+    }
+
+    const { unmount } = render(
+      <QueryClientProvider client={qc}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1];
+    expect(es.url).toContain('/api/workspaces/ws-1/stream?request_id=req-1');
+
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-v1',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+    // Identical content_sha256 is deduplicated (no redundant refetch)
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-v1',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+    // Different content_sha256 invalidates workspace views
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-1',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-v2',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+
+    // Cross-workspace event is ignored
+    act(() => {
+      es.emit('version', {
+        workspace: 'ws-other',
+        view: 'now',
+        selector: { request_id: 'req-1' },
+        content_sha256: 'sha-other',
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+
+    // source.stale triggers invalidation so last-confirmed stale banner can surface
+    act(() => {
+      es.emit('source.stale', { workspace: 'ws-1', view: 'now', code: 'TOOL_FAILED' });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
+
+    unmount();
+    invalidateSpy.mockRestore();
   });
 });

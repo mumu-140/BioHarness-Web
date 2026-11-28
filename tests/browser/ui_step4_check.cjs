@@ -80,6 +80,7 @@ function check(name, pass, detail = '') {
     await page.getByTestId('bh-tab-workflow').click();
     await page.getByTestId('bh-plan-graph-canvas').waitFor({ timeout: 20000 });
     await page.getByTestId('bh-plan-node-S4').waitFor({ timeout: 15000 });
+    await page.locator('.react-flow__edge').first().waitFor({ timeout: 10000 });
     const nodeCount = await page.locator('[data-testid^="bh-plan-node-"]').count();
     const edgeCount = await page.locator('.react-flow__edge').count();
     check('React Flow + Dagre renders all 4 steps and 4 multi-predecessor depends_on edges', nodeCount === 4 && edgeCount === 4, `nodes=${nodeCount} edges=${edgeCount}`);

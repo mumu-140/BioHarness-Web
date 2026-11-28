@@ -5,7 +5,7 @@
  * Strictly maps Core `plan.steps` and `depends_on` edges (supporting arbitrary multi-predecessor
  * DAGs) without substituting Agent ancestry or inferring scientific eligibility client-side.
  */
-import React, { memo, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useRef } from 'react';
 import {
   Background,
   Controls,
@@ -20,6 +20,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import type { PlanStep, StepProgress } from './bioharness';
+import { isDark, useTheme } from '@librechat/client';
 import { cn } from '~/utils';
 
 const NODE_WIDTH = 244;
@@ -179,20 +180,27 @@ const BioHarnessPlanGraph = memo(function BioHarnessPlanGraph({
   onSelectStep,
   fullscreen,
 }: BioHarnessPlanGraphProps) {
+  const { theme } = useTheme();
+  const dark = isDark(theme);
+  const onSelectRef = useRef(onSelectStep);
+  onSelectRef.current = onSelectStep;
+  const stableSelectStep = useCallback((id: string) => onSelectRef.current(id), []);
   const { nodes, edges } = useMemo(
-    () => layoutPlanGraph(steps, progressSteps, currentStepId, selectedStepId, onSelectStep),
-    [steps, progressSteps, currentStepId, selectedStepId, onSelectStep],
+    () => layoutPlanGraph(steps, progressSteps, currentStepId, selectedStepId, stableSelectStep),
+    [steps, progressSteps, currentStepId, selectedStepId, stableSelectStep],
   );
 
   return (
     <div
       data-testid="bh-plan-graph-canvas"
+      data-theme-mode={dark ? 'dark' : 'light'}
       className={cn(
         'border-border-light bg-surface-primary/40 w-full overflow-hidden rounded-xl border',
         fullscreen ? 'h-[calc(100vh-140px)]' : 'h-[520px] min-h-[380px]',
       )}
     >
       <ReactFlow
+        className={dark ? 'dark' : undefined}
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}

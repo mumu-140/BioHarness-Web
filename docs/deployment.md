@@ -73,7 +73,7 @@ The service needs Python 3.12+, the built frontend and the public `bioharness-ho
 | `BIOHARNESS_WEB_WORKSPACES` | Required. JSON object mapping a workspace id to a server directory, or to `{"path": ..., "evidence_roots": [...]}` when evidence files live outside the workspace. |
 | `BIOHARNESS_WEB_ACCESS_TOKEN` | Required, at least 16 characters. Every data route needs it. |
 | `BIOHARNESS_WEB_HOST`, `BIOHARNESS_WEB_PORT` | Default `127.0.0.1:8080`. Keep loopback and reach it through an SSH tunnel or an authenticated HTTPS reverse proxy. |
-| `BIOHARNESS_WEB_STATIC_DIR` | Directory of the built frontend (`frontend/dist`). |
+| `BIOHARNESS_WEB_STATIC_DIR` | Directory of the built frontend (`ui/client/dist`; retired `frontend/dist` removed from source in Step 5). |
 | `BIOHARNESS_WEB_CORE_CLI`, `BIOHARNESS_WEB_GOVERNANCE_CLI` | Commands to run; default to the names on PATH. |
 | `BIOHARNESS_WEB_POLL_INTERVAL_SECONDS` | Default 5, minimum 1. |
 | `BIOHARNESS_WEB_SERVICE_ID`, `BIOHARNESS_WEB_EVIDENCE_PREVIEW_MAX_BYTES` | Optional. |

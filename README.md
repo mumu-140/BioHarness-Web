@@ -59,6 +59,9 @@ W3 提供已记录调用的分页查询、时间线、通用调用/Module 检查
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[dev]'
 .venv/bin/python -m pytest          # 契约测试需要已安装 bioharness-host 与 bioharness-governance，否则跳过
-cd frontend && npm ci && npx vitest run && npm run build && cd ..
-tests/browser/run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 真实浏览器检查，需要 docker
+cd ui && npm ci --ignore-scripts && npm run build && (cd client && npx tsc --noEmit -p tsconfig.json && npx jest --watchAll=false) && cd ..
+tests/browser/ui_run.sh <带 Node 与 Playwright Chromium 的容器镜像>         # 只读与安全边界检查
+tests/browser/ui_step3_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 原生对话/SSE/HITL/模型配置
+tests/browser/ui_step4_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 科研树/流程/执行记录/证据视图
+tests/browser/ui_step5_run.sh <带 Node 与 Playwright Chromium 的容器镜像>   # 行为等价/主题/键盘/窄屏/重启恢复
 ```

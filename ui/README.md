@@ -2,8 +2,9 @@
 
 This directory is the LibreChat frontend adopted as the application foundation
 (roadmap §17.4–17.5), built without LibreChat's API server, database, Agent/Assistants/MCP
-services or telemetry. It replaces nothing yet: `frontend/` stays the deployed UI until
-roadmap step 5.
+services or telemetry. As of roadmap §17.4 Step 5 (2026-11-28), this directory replaces the
+retired custom `frontend/` in repository source (retained in Git history). Live production
+deployment switching remains separately approved.
 
 ## Origin
 
@@ -56,5 +57,6 @@ Needs Node 24.22.3 and npm 11.13.0 (`.nvmrc`, `packageManager`).
     ../tests/browser/ui_run.sh <image with Node and Playwright Chromium>
     ../tests/browser/ui_step3_run.sh <image with Node and Playwright Chromium>
     ../tests/browser/ui_step4_run.sh <image with Node and Playwright Chromium>
+    ../tests/browser/ui_step5_run.sh <image with Node and Playwright Chromium>
 
 Serve `client/dist` with the unchanged backend through `BIOHARNESS_WEB_STATIC_DIR`.
